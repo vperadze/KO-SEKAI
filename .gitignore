@@ -4,3 +4,13 @@ tracking-test/recordings/
 __pycache__/
 *.pyc
 tracking-test/server.log
+
+# Unreal project build output
+unreal/Binaries/
+unreal/Intermediate/
+unreal/Saved/
+unreal/DerivedDataCache/
+unreal/Packaged/
+unreal/Build/
+unreal/.vscode/
+*.code-workspace

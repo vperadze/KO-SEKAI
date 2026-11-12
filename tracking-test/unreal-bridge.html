@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KO-SEKAI tracker bridge</title>
+<style>
+:root { --ground: #140a26; --panel: #21103d; --line: #47307a; --text: #efe6ff; --muted: #a895cf; --ok: #5dff9b; --bad: #ff6b5e; --warn: #ffe14d; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--ground); color: var(--text); font: 14px/1.45 system-ui, sans-serif; padding: 16px; max-width: 560px; }
+h1 { font-size: 18px; margin: 0 0 4px; }
+p { color: var(--muted); margin: 0 0 12px; }
+.cam { background: #000; border: 2px solid var(--line); border-radius: 6px; overflow: hidden; aspect-ratio: 4 / 3; }
+.cam canvas { width: 100%; height: 100%; display: block; transform: scaleX(-1); }
+video { display: none; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+button { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 8px 14px; font: inherit; cursor: pointer; }
+button:hover { border-color: var(--muted); }
+dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; }
+dt { color: var(--muted); }
+dd { margin: 0; font-family: ui-monospace, Menlo, Consolas, monospace; }
+.ok { color: var(--ok); } .bad { color: var(--bad); } .warn { color: var(--warn); }
+</style>
+</head>
+<body>
+<h1>KO-SEKAI tracker bridge</h1>
+<p>Runs the webcam tracker and sends it to the Unreal game on this computer. Keep this window visible (not minimised) while you play; browsers stop the camera loop in hidden tabs.</p>
+<div class="cam"><canvas id="c" width="640" height="480"></canvas></div>
+<video id="v" playsinline muted></video>
+<div class="row">
+  <button id="start">Start camera</button>
+  <button id="cal">Recalibrate</button>
+</div>
+<dl>
+  <dt>Camera</dt><dd id="sCam">off</dd>
+  <dt>Body</dt><dd id="sBody">-</dd>
+  <dt>Unreal game</dt><dd id="sGame">-</dd>
+  <dt>Last move</dt><dd id="sMove">-</dd>
+</dl>
+<script type="module">
+import { Detector, PoseCamera, drawPose, STANCES, r3 } from "./tracker.js";
+
+// The Unreal game listens here (KSTracking.cpp). Change both if the port is taken.
+const GAME_URL = "http://127.0.0.1:8770/pose";
+const params = new URLSearchParams(location.search);
+const MODEL = params.get("model") || "full";
+const SENS = Number(params.get("sens")) || 1;
+
+const $ = (id) => document.getElementById(id);
+const canvas = $("c"), g = canvas.getContext("2d"), video = $("v");
+const det = new Detector();
+const cam = new PoseCamera(video, onPose);
+let sending = false, lastOk = 0, lastFail = 0, queued = [];
+
+function set(id, text, cls) { const el = $(id); el.textContent = text; el.className = cls || ""; }
+
+function onPose(res, t, err) {
+  g.drawImage(video, 0, 0, canvas.width, canvas.height);
+  if (err) return;
+  const out = det.process(res, t, cam.width, cam.height, SENS);
+  drawPose(g, res, canvas.width, canvas.height, det.arms);
+  for (const e of out.events) {
+    if (e.arm) queued.push({ arm: e.arm, type: e.type });
+    set("sMove", e.name);
+  }
+  const cal = det.calProgress;
+  set("sBody", !det.seen ? "not in view" : cal !== null ? `hold still, calibrating ${Math.round(cal * 100)}%` : "tracking", !det.seen ? "bad" : cal !== null ? "warn" : "ok");
+  set("sCam", `${cam.fps} fps, model ${Math.round(cam.modelMs)} ms`, "ok");
+  send(res);
+}
+
+// One request at a time: if the game is slow or closed, frames are skipped but punches stay queued.
+function send(res) {
+  if (sending) return;
+  const W = res && res.worldLandmarks && res.worldLandmarks[0];
+  const lm = [];
+  if (W) for (const p of W) lm.push(r3(p.x), r3(p.y), r3(p.z));
+  const events = queued; queued = [];
+  const body = JSON.stringify({
+    seen: det.seen, ready: !!det.base && !det.cal, cal: det.calProgress ?? -1,
+    held: STANCES.filter((k) => det.held[k]), events, lm
+  });
+  sending = true;
+  // text/plain with no-cors: a "simple" request, so the browser sends it without a CORS preflight.
+  fetch(GAME_URL, { method: "POST", mode: "no-cors", body })
+    .then(() => { lastOk = performance.now(); })
+    .catch(() => { lastFail = performance.now(); queued = events.concat(queued).slice(-8); })
+    .finally(() => { sending = false; });
+}
+
+setInterval(() => {
+  const now = performance.now();
+  if (!cam.running) set("sGame", "-");
+  else if (now - lastOk < 1000) set("sGame", "connected", "ok");
+  else set("sGame", "not found - start the game (it listens on port 8770)", "bad");
+}, 500);
+
+$("start").onclick = async () => {
+  if (cam.running) { cam.stop(); set("sCam", "off"); $("start").textContent = "Start camera"; return; }
+  set("sCam", "loading the pose model...", "warn");
+  try {
+    await cam.setModel(MODEL);
+    await cam.start();
+    canvas.width = cam.width; canvas.height = cam.height;
+    $("start").textContent = "Stop camera";
+  } catch (e) { set("sCam", "could not start: " + e.message, "bad"); }
+};
+$("cal").onclick = () => det.calibrate();
+</script>
+</body>
+</html>
