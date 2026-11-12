@@ -73,8 +73,20 @@ public:
 	/** Plays one of the fighter's clips by name ("Combat_Stance", "Left_Jab_from_Guard", ...). */
 	void PlayClip(const FString& Clip, bool bLoop, float Rate = 1.f, float StartSeconds = 0.f);
 	void SetClipRate(float Rate);
-	/** Shows the first of these faces that the fighter has ("hurt", "ko", "dizzy", ...); an empty list is the normal face. */
+	/** The fighter's mood: the first of these faces that the fighter has ("hurt", "ko", "dizzy", ...); an empty list is
+	 *  no mood. The face on screen is worked out every frame from the mood, speech, attacking and blinking (UpdateFace). */
 	void SetFace(const TArray<FString>& Candidates);
+	/** True while the fighter is throwing a punch: the face snarls. */
+	void SetAttacking(bool bNow) { bAttacking = bNow; }
+	/** Says one of the fighter's lines whose key starts with Prefix ("intro", "hit", "hurt", "win", "lose"), and moves
+	 *  the mouth with it. Returns the line's length in seconds, 0 if the fighter has no such line. */
+	float Say(const TCHAR* Prefix, float Volume = 1.f);
+	void StopTalking();
+	bool IsTalking() const { return Spoken != nullptr; }
+	/** The words being said now, for the subtitle; empty when silent. */
+	FString SpokenText() const;
+	/** For the self-test: how many different faces were shown, and how many times the mouth opened, since the last call. */
+	void TakeFaceStats(int32& OutFaces, int32& OutMouthOpens);
 	/** Sideways lean (cm, +Y is the fighter's right) and vertical squash (1 = standing), eased over a few frames. */
 	void SetBodyShift(float SideCm, float Squash);
 	/** Makes the fighter's arms copy the player's real arms (33 MediaPipe world landmarks, metres); the rest of the
@@ -119,6 +131,21 @@ private:
 	UPROPERTY() TObjectPtr<UMaterialInterface> NormalFace;
 	bool bCharacter = false;
 	FString FaceShown;
+	FString Folder;                        // the fighter's content folder, which is also the name its lines are filed under
+	FString Mood;                          // the mood face asked for by the game ("" = none)
+	bool bMoodFixed = false;               // knocked out: nothing else moves the face
+	bool bAttacking = false;
+	float BlinkAt = 2.f, BlinkLeft = 0.f, FaceClock = 0.f;
+	const struct FKSVoiceLine* Spoken = nullptr;
+	const struct FKSVoiceLine* LastSpoken = nullptr;
+	float SpokenT = 0.f;
+	bool bMouthOpen = false;
+	UPROPERTY() TObjectPtr<class UAudioComponent> VoicePlayer;
+	TSet<FString> TestFaces;
+	int32 TestMouthOpens = 0;
+	UMaterialInterface* FaceMaterial(const TCHAR* Name) const;
+	void UpdateFace(float DeltaSeconds);
+	void ShowFace(const FString& Name, UMaterialInterface* Material);
 	float ShiftTarget = 0.f, ShiftNow = 0.f, SquashTarget = 1.f, SquashNow = 1.f;
 	UPROPERTY() TObjectPtr<UPointLightComponent> HitLight;
 	UPROPERTY() TObjectPtr<UPoseableMeshComponent> Puppet;         // shown instead of Skel while the arms are tracked

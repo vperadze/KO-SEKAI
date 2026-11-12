@@ -62,6 +62,7 @@ public:
 	FString CueMain, CueHint;
 	bool bCueGood = false;
 	FString Announcement;
+	FString SpokenLine, SpokenBy;         // the line being spoken now, and by whom
 	float AnnounceUntil = 0.f;
 	TArray<FKSPopup> Popups;
 	float RedFlash = 0.f, WhiteFade = 0.f, BlackFade = 0.f;
@@ -121,6 +122,11 @@ private:
 	bool Stance(EKSDefense D) const;
 
 	/* ---- helpers ---- */
+	float Speak(class AKSDummy* Who, const TCHAR* Prefix, bool bMust = false);
+	struct FLaterVoice { TWeakObjectPtr<class AKSDummy> Who; const TCHAR* Prefix = TEXT(""); float When = 0.f; };
+	FLaterVoice LaterVoice;
+	float VoiceQuietUntil = 0.f;
+	bool bIntroSaid = false;
 	void Announce(const FString& Text, float Seconds) { Announcement = Text; AnnounceUntil = Clock + Seconds; }
 	void Cue(const FString& Main, const FString& Hint, bool bGood = false) { CueMain = Main; CueHint = Hint; bCueGood = bGood; }
 	void Popup(const FString& Text, const FLinearColor& Color, float X, float Y, bool bBig = false);

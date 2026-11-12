@@ -1,10 +1,10 @@
-// Sound effects synthesised in code (square/sine tones and filtered noise), mirroring the ones in
-// tracking-test/fight.html, so the game needs no audio files.
+// Sound effects. Each one plays a recorded sound from /Game/KS/Audio when there is one (S_<Name>_<n>, a random
+// variant each time), and otherwise falls back to a tone synthesised in code, as in tracking-test/fight.html.
 #pragma once
 
 #include "CoreMinimal.h"
 
-enum class EKSSfx : uint8 { Hit, Counter, Blocked, Hurt, Whoosh, Tell, Dodge, Bell1, Bell2, Bell3, KO, PullIn, Coin, Step };
+enum class EKSSfx : uint8 { Hit, Counter, Blocked, Hurt, Whoosh, Tell, Dodge, Bell1, Bell2, Bell3, KO, PullIn, Coin, Step, Footstep, Fall, Win, Lose };
 
 namespace KSAudio
 {

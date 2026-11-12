@@ -20,7 +20,8 @@ MOUTH={
  'grin':  ["##############","#.#.#.#.#.#.##",".############.",".............."],
 }
 FACES={'neutral':('round','round','flat'),'happy':('caret','caret','smile'),'hit':('gt','lt','open'),
-       'dizzy':('spiral','spiral','wavy'),'ko':('x','x','tongue'),'love':('heart','heart','grin')}
+       'dizzy':('spiral','spiral','wavy'),'ko':('x','x','tongue'),'love':('heart','heart','grin'),
+       'talk':('round','round','open'),'blink':('line','line','flat')}
 def led_face(name, w=920, h=520, cols=30, rows=15, color=(255,40,30)):
     le,re,mo=FACES[name]; grid=np.zeros((rows,cols),bool)
     def put(g,r0,c0):

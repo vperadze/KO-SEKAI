@@ -444,6 +444,8 @@ void AKSGameMode::StartCard(int32 Index)
 	bFightStarted = false;
 	BlackFade = 0.f;
 	Sfx(EKSSfx::Coin);
+	if (PlayerDummy) PlayerDummy->StopTalking();
+	bIntroSaid = false; VoiceQuietUntil = 0.f; LaterVoice = FLaterVoice();
 	SetPhase(EKSPhase::Card);
 }
 
@@ -455,9 +457,11 @@ void AKSGameMode::TickCard(float Dt)
 		bFightStarted = true;
 		Announce(FString::Printf(TEXT("FIGHT %d OF %d"), FighterIndex + 1, NumFights()), 1.3f);
 	}
+	if (!bIntroSaid && PhaseTime >= 0.5f) { bIntroSaid = true; Speak(OppDummy, TEXT("intro"), true); }
 	UpdateFighterPoses(Dt);
 	UpdateFightCamera(Dt);
-	if (PhaseTime >= 4.1f) StartFight();
+	// The bell waits for him to finish his sentence (within reason).
+	if (PhaseTime >= 4.1f && (!OppDummy || !OppDummy->IsTalking() || PhaseTime >= 7.5f)) StartFight();
 }
 
 void AKSGameMode::StartFight()
@@ -1010,10 +1014,12 @@ void AKSGameMode::DriveCharacters()
 			else OppDummy->PlayClip(TEXT("Combat_Stance"), true);
 		}
 
+		OppDummy->SetAttacking(Phase == EKSPhase::Fight && (OppState == EKSOppState::Strike || (OppState == EKSOppState::Windup && Clock - OppT > Attack.Duration * 0.45f)));
 		if (OppState == EKSOppState::KO) OppDummy->SetFace({ TEXT("ko"), TEXT("hurt") });
 		else if (bLost) OppDummy->SetFace({ TEXT("smug"), TEXT("happy"), TEXT("love") });
 		else if (OppState == EKSOppState::Open) OppDummy->SetFace({ TEXT("dizzy"), TEXT("hit"), TEXT("hurt") });
-		else if (OppHP < OppMaxHP * 0.5f) OppDummy->SetFace({ TEXT("hurt"), TEXT("hit") });
+		else if (Clock < OppHurtUntil + 0.5f) OppDummy->SetFace({ TEXT("hit"), TEXT("hurt") });
+		else if (OppHP < OppMaxHP * 0.25f) OppDummy->SetFace({ TEXT("hurt"), TEXT("hit") });
 		else OppDummy->SetFace({});
 	}
 
@@ -1078,11 +1084,33 @@ void AKSGameMode::DriveCharacters()
 		const float Side = D == EKSDefense::EvadeLeft ? -42.f : D == EKSDefense::EvadeRight ? 42.f : 0.f;
 		PlayerDummy->SetBodyShift(Side, D == EKSDefense::Duck ? 0.68f : 1.f);
 
+		PlayerDummy->SetAttacking(PunchArm >= 0 && Phase == EKSPhase::Fight);
 		if (bLost && !bLastResultDecision) PlayerDummy->SetFace({ TEXT("ko"), TEXT("hurt") });
 		else if (bWon) PlayerDummy->SetFace({ TEXT("smug"), TEXT("happy"), TEXT("love") });
-		else if (PlayerHP < 50.f) PlayerDummy->SetFace({ TEXT("hurt"), TEXT("hit") });
+		else if (Clock < PlayerHurtUntil + 0.5f) PlayerDummy->SetFace({ TEXT("hit"), TEXT("hurt") });
+		else if (PlayerHP < 25.f) PlayerDummy->SetFace({ TEXT("hurt"), TEXT("hit") });
 		else PlayerDummy->SetFace({});
 	}
+
+	// A line that was waiting for its moment (the winner speaks after the loser).
+	if (LaterVoice.Who.IsValid() && Clock >= LaterVoice.When) { Speak(LaterVoice.Who.Get(), LaterVoice.Prefix, true); LaterVoice = FLaterVoice(); }
+	// The subtitle: whoever is speaking.
+	AKSDummy* Talker = OppDummy && OppDummy->IsTalking() ? OppDummy.Get() : PlayerDummy && PlayerDummy->IsTalking() ? PlayerDummy.Get() : nullptr;
+	SpokenLine = Talker ? Talker->SpokenText() : FString();
+	if (Talker) SpokenBy = Talker == OppDummy ? FString(Fighter().Name) : FString(PlayerFighter().Name);
+}
+
+/** One voice at a time. A taunt is dropped if somebody is still speaking or has only just stopped; bMust (the
+ *  introduction, the last word after a knockout) cuts in. Returns the length of the line in seconds. */
+float AKSGameMode::Speak(AKSDummy* Who, const TCHAR* Prefix, bool bMust)
+{
+	if (!Who || !Who->HasCharacter()) return 0.f;
+	AKSDummy* Other = Who == OppDummy ? PlayerDummy.Get() : OppDummy.Get();
+	if (!bMust && (Clock < VoiceQuietUntil || Who->IsTalking() || (Other && Other->IsTalking()))) return 0.f;
+	if (Other) Other->StopTalking();
+	const float Seconds = Who->Say(Prefix, Who == OppDummy ? 1.f : 0.85f);
+	if (Seconds > 0.f) VoiceQuietUntil = Clock + Seconds + 2.2f;
+	return Seconds;
 }
 
 /* ================= fight rules ================= */
@@ -1182,6 +1210,8 @@ void AKSGameMode::PlayerHurt(float Damage, bool bLight)
 	// The camera takes the punch too: knocked back, tipped to one side.
 	CamPunch(FVector(bLight ? -70.f : -170.f, FMath::RandBool() ? 60.f : -60.f, bLight ? 10.f : 30.f), (FMath::RandBool() ? 1.f : -1.f) * (bLight ? 22.f : 60.f), bLight ? 2.f : 5.f);
 	Sfx(EKSSfx::Hurt);
+	// He gloats about it, or the player's own fighter swears.
+	if (PlayerHP > 0.f) { if (FMath::FRand() < 0.6f) Speak(OppDummy, TEXT("hit")); else if (FMath::FRand() < 0.5f) Speak(PlayerDummy, TEXT("hurt")); }
 	CrowdReact(false, bLight ? 0.4f : 0.8f);
 	if (PlayerDummy) { PlayerDummy->Flash(KSColors::Red, 0.12f); PlayerDummy->TakeHit(Attack.Type, Attack.Side, bLight ? 0.5f : 1.f); PlayerDummy->HitStop(0.08f); }
 	if (OppDummy) OppDummy->HitStop(0.08f);
@@ -1232,6 +1262,7 @@ void AKSGameMode::LandHit(const FPendingHit& Hit)
 	CrowdReact(true, Hit.bCounter ? 1.f : FMath::Min(1.f, 0.35f + 0.2f * Combo));
 	if (Hit.bCounter) { Sfx(EKSSfx::Counter); Popup(TEXT("COUNTER!"), KSColors::Yellow, 0.56f, 0.3f, true); }
 	else { Sfx(EKSSfx::Hit); if (Combo > 1) Popup(FString::Printf(TEXT("%d HITS"), Combo), KSColors::Cyan, 0.66f, 0.38f); }
+	if (OppHP > 0.f) { if (FMath::FRand() < (Hit.bCounter ? 0.7f : 0.4f)) Speak(OppDummy, TEXT("hurt")); else if (FMath::FRand() < 0.4f) Speak(PlayerDummy, TEXT("hit")); }
 	if (OppHP <= 0.f) EndFight(true, false);
 }
 
@@ -1242,6 +1273,16 @@ void AKSGameMode::EndFight(bool bWin, bool bDecision)
 	UE_LOG(LogTemp, Display, TEXT("KSTEST bout=%d opponent=%s result=%s opp_hand_travel=%.0f player_hand_travel=%.0f landed=%d taken=%d spectators=%d"), FighterIndex, Fighter().Name,
 		bDecision ? TEXT("time") : bWin ? TEXT("win") : TEXT("loss"), TestOppHand.IsValid ? TestOppHand.GetSize().Size() : 0.0, TestPlayerHand.IsValid ? TestPlayerHand.GetSize().Size() : 0.0, Stats.Landed, Stats.Taken, Spectators.Num());
 	TestOppHand = FBox(ForceInit); TestPlayerHand = FBox(ForceInit);
+	// Faces for tools/check.sh: a fighter who showed one face all bout, or never opened the mouth, is the bug.
+	int32 Faces = 0, Mouth = 0;
+	if (OppDummy) OppDummy->TakeFaceStats(Faces, Mouth);
+	UE_LOG(LogTemp, Display, TEXT("KSTEST faces bout=%d opponent=%s shown=%d mouth_opens=%d"), FighterIndex, Fighter().Name, Faces, Mouth);
+	if (PlayerDummy) PlayerDummy->TakeFaceStats(Faces, Mouth);
+	// The loser has the first word, the winner the last.
+	AKSDummy* Winner = bWin ? PlayerDummy.Get() : OppDummy.Get();
+	AKSDummy* Loser = bWin ? OppDummy.Get() : PlayerDummy.Get();
+	const float LoserSeconds = Speak(Loser, TEXT("lose"), true);
+	LaterVoice.Who = Winner; LaterVoice.Prefix = TEXT("win"); LaterVoice.When = Clock + LoserSeconds + 0.35f;
 	CueMain.Reset(); CueHint.Reset(); Pending.Reset();
 	CrowdReact(bWin, 1.f);
 	if (bDecision) { Sfx(EKSSfx::Bell2); Announce(TEXT("TIME!"), 1.8f); }
@@ -1295,8 +1336,8 @@ void AKSGameMode::TickFightEnd(float Dt)
 	UpdateFightCamera(Dt);
 	if (PhaseTime >= 2.7f)
 	{
-		if (bLastResultWin) { Sfx(EKSSfx::Bell3); SetPhase(EKSPhase::Result); }
-		else { ContinueLeft = 9.99f; SetPhase(EKSPhase::Continue); }
+		if (bLastResultWin) { Sfx(EKSSfx::Bell3); Sfx(EKSSfx::Win, 0.8f); SetPhase(EKSPhase::Result); }
+		else { ContinueLeft = 9.99f; Sfx(EKSSfx::Lose, 0.8f); SetPhase(EKSPhase::Continue); }
 	}
 }
 

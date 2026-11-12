@@ -10,6 +10,12 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "UObject/ConstructorHelpers.h"
 #include "KSImpactData.h"
+#include "KSAudio.h"
+#include "KSVoiceData.h"
+#include "Sound/SoundBase.h"
+#include "Components/AudioComponent.h"
+#include "Kismet/GameplayStatics.h"
+#include "TimerManager.h"
 
 using namespace KSJoint;
 
@@ -229,15 +235,19 @@ AKSDummy::AKSDummy()
 	Current = Target = KSPoses::Guard();
 }
 
-bool AKSDummy::UseCharacter(const FString& Folder)
+bool AKSDummy::UseCharacter(const FString& InFolder)
 {
 	static const TCHAR* ClipNames[] = { TEXT("Combat_Stance"), TEXT("Left_Jab_from_Guard"), TEXT("Right_Jab_from_Guard"),
 		TEXT("Left_Hook_from_Guard"), TEXT("Right_Upper_Hook_from_Guard"), TEXT("Left_Uppercut_from_Guard"), TEXT("Right_Uppercut_from_Guard"),
 		TEXT("Block1"), TEXT("Stand_Dodge"), TEXT("Stand_Dodge_1"), TEXT("Face_Punch_Reaction"), TEXT("Face_Punch_Reaction_1"),
 		TEXT("Hit_Reaction_to_Waist"), TEXT("Knock_Down"), TEXT("victory"), TEXT("Chest_Pound_Taunt"), TEXT("Punch_Combo") };
-	static const TCHAR* FaceNames[] = { TEXT("hurt"), TEXT("ko"), TEXT("dizzy"), TEXT("hit"), TEXT("smug"), TEXT("happy"), TEXT("love"), TEXT("neutral") };
+	static const TCHAR* FaceNames[] = { TEXT("hurt"), TEXT("ko"), TEXT("dizzy"), TEXT("hit"), TEXT("smug"), TEXT("happy"), TEXT("love"), TEXT("neutral"),
+		TEXT("calm"), TEXT("talk"), TEXT("angry"), TEXT("blink") };
 
-	const FString Base = FString::Printf(TEXT("/Game/KoSekai/Characters/%s"), *Folder);
+	const FString Base = FString::Printf(TEXT("/Game/KoSekai/Characters/%s"), *InFolder);
+	Folder = InFolder;
+	StopTalking();
+	Mood.Reset(); bMoodFixed = false; bAttacking = false; LastSpoken = nullptr; BlinkLeft = 0.f; BlinkAt = FaceClock + FMath::FRandRange(1.f, 3.f);
 	const FString Meshes = Base + TEXT("/animation_glb/SkeletalMeshes/animation_glb");
 	USkeletalMesh* Mesh = LoadObject<USkeletalMesh>(nullptr, *(Meshes + TEXT(".animation_glb")));
 	bCharacter = Mesh != nullptr;
@@ -273,6 +283,15 @@ bool AKSDummy::UseCharacter(const FString& Folder)
 		const FString Path = FString::Printf(TEXT("%s/Faces/%s.%s"), *Base, *Asset, *Asset);
 		if (UMaterialInterface* Face = LoadObject<UMaterialInterface>(nullptr, *Path, nullptr, LOAD_NoWarn | LOAD_Quiet)) Faces.Add(Name, Face);
 	}
+	// One line per fighter for tools/check.sh: a fighter without faces or lines stands there with one expression, mute.
+	int32 Sounds = 0;
+	for (const FKSVoiceLine& Line : KSVoiceLines)
+	{
+		if (Folder != Line.Fighter) continue;
+		const FString Asset = FString::Printf(TEXT("V_%s_%s"), Line.Fighter, Line.Key);
+		if (LoadObject<USoundBase>(nullptr, *FString::Printf(TEXT("/Game/KS/Voice/%s.%s"), *Asset, *Asset), nullptr, LOAD_NoWarn | LOAD_Quiet)) Sounds++;
+	}
+	UE_LOG(LogTemp, Display, TEXT("KSTEST fighter=%s faces=%d voice_lines=%d"), *Folder, Faces.Num(), Sounds);
 	ImpactGlove.Reset();
 	for (const FKSImpact& Row : KSImpacts) if (Folder == Row.Fighter) ImpactGlove.Add(Row.Clip, Row.Glove);
 	ShiftNow = ShiftTarget = 0.f; SquashNow = SquashTarget = 1.f;
@@ -291,6 +310,7 @@ void AKSDummy::PlayClip(const FString& Clip, bool bLoop, float Rate, float Start
 	// is out at the end of a jab travels straight into the uppercut instead of snapping back to the guard first.
 	BlendFrom = ShownPose;
 	CurrentClip = Clip;
+	if (Clip == TEXT("Knock_Down")) { FTimerHandle Handle; GetWorldTimerManager().SetTimer(Handle, [this]() { KSAudio::Play(this, EKSSfx::Fall, 0.9f); }, 0.55f, false); }
 	BlendPrev = PrevShownPose;
 	BlendDt = ShownDt;
 	BlendTime = Clip.Contains(TEXT("Reaction")) ? 0.06f : (Clip == TEXT("Combat_Stance") ? 0.18f : 0.11f);
@@ -308,16 +328,103 @@ void AKSDummy::SetClipRate(float Rate)
 void AKSDummy::SetFace(const TArray<FString>& Candidates)
 {
 	if (!bCharacter) return;
-	FString Pick;
-	UMaterialInterface* Material = NormalFace;
+	Mood.Reset();
 	for (const FString& Name : Candidates)
 	{
-		if (const TObjectPtr<UMaterialInterface>* Face = Faces.Find(Name)) { Pick = Name; Material = *Face; break; }
+		if (Faces.Contains(Name)) { Mood = Name; break; }
 	}
-	if (Pick == FaceShown) return;
-	FaceShown = Pick;
+	bMoodFixed = Candidates.Num() > 0 && Candidates[0] == TEXT("ko");
+}
+
+UMaterialInterface* AKSDummy::FaceMaterial(const TCHAR* Name) const
+{
+	const TObjectPtr<UMaterialInterface>* Face = Faces.Find(Name);
+	return Face ? Face->Get() : nullptr;
+}
+
+void AKSDummy::ShowFace(const FString& Name, UMaterialInterface* Material)
+{
+	if (!Material) Material = NormalFace;
+	TestFaces.Add(Name);
+	if (Name == FaceShown) return;
+	FaceShown = Name;
 	Skel->SetMaterial(0, Material);
 	Puppet->SetMaterial(0, Material);
+}
+
+/** Picks the face for this frame. In order: knocked out; speaking (the mouth opens and closes with the loudness of the
+ *  line); the mood the game asked for; throwing a punch; a blink; and otherwise the resting face. A fighter whose
+ *  painted face is already a shout (the Count, Channel Zero, TURBOTRON) rests on a calmer one and keeps the shout
+ *  for punching and for the open mouth. */
+void AKSDummy::UpdateFace(float DeltaSeconds)
+{
+	if (!bCharacter) return;
+	FaceClock += DeltaSeconds;
+	// The resting face: "calm" where one was painted, else the nearest thing the fighter has.
+	const TCHAR* RestName = Faces.Contains(TEXT("calm")) ? TEXT("calm") : Faces.Contains(TEXT("neutral")) ? TEXT("neutral")
+		: (!Faces.Contains(TEXT("talk")) && Faces.Contains(TEXT("smug"))) ? TEXT("smug") : TEXT("");
+
+	bool bOpen = false;
+	if (Spoken)
+	{
+		SpokenT += DeltaSeconds;
+		const int32 Index = FMath::FloorToInt(SpokenT * KSVoiceMouthHz);
+		const int32 Count = FCStringAnsi::Strlen(Spoken->Mouth);
+		if (Index >= Count) { Spoken = nullptr; VoicePlayer = nullptr; }
+		else bOpen = Spoken->Mouth[Index] >= '3';
+	}
+	if (bOpen && !bMouthOpen) TestMouthOpens++;
+	bMouthOpen = bOpen;
+
+	if (BlinkLeft > 0.f) BlinkLeft -= DeltaSeconds;
+	else if (FaceClock >= BlinkAt) { BlinkLeft = 0.13f; BlinkAt = FaceClock + FMath::FRandRange(1.8f, 5.f); }
+
+	if (bMoodFixed) ShowFace(Mood, FaceMaterial(*Mood));
+	else if (Spoken && bOpen) ShowFace(TEXT("talk"), FaceMaterial(TEXT("talk")));
+	else if (Spoken) ShowFace(Mood.IsEmpty() ? RestName : *Mood, FaceMaterial(Mood.IsEmpty() ? RestName : *Mood));
+	else if (!Mood.IsEmpty()) ShowFace(Mood, FaceMaterial(*Mood));
+	else if (bAttacking) ShowFace(TEXT("angry"), FaceMaterial(TEXT("angry")));
+	else if (BlinkLeft > 0.f && Faces.Contains(TEXT("blink"))) ShowFace(TEXT("blink"), FaceMaterial(TEXT("blink")));
+	else ShowFace(RestName, FaceMaterial(RestName));
+}
+
+float AKSDummy::Say(const TCHAR* Prefix, float Volume)
+{
+	if (!bCharacter) return 0.f;
+	TArray<const FKSVoiceLine*> Choice;
+	for (const FKSVoiceLine& Line : KSVoiceLines)
+	{
+		if (Folder == Line.Fighter && FCString::Strncmp(Line.Key, Prefix, FCString::Strlen(Prefix)) == 0) Choice.Add(&Line);
+	}
+	if (Choice.Num() > 1) Choice.Remove(LastSpoken);   // not the same taunt twice in a row
+	if (Choice.Num() == 0) return 0.f;
+	StopTalking();
+	Spoken = LastSpoken = Choice[FMath::RandRange(0, Choice.Num() - 1)];
+	SpokenT = 0.f;
+	const FString Asset = FString::Printf(TEXT("V_%s_%s"), Spoken->Fighter, Spoken->Key);
+	USoundBase* Sound = LoadObject<USoundBase>(nullptr, *FString::Printf(TEXT("/Game/KS/Voice/%s.%s"), *Asset, *Asset), nullptr, LOAD_NoWarn | LOAD_Quiet);
+	// With no sound device (the self-test runs with -nosound) there is no player, and the mouth still moves by the clock.
+	VoicePlayer = Sound ? UGameplayStatics::SpawnSound2D(this, Sound, Volume) : nullptr;
+	UE_LOG(LogTemp, Display, TEXT("KSTEST voice fighter=%s line=%s sound=%d"), Spoken->Fighter, Spoken->Key, Sound ? 1 : 0);
+	return Spoken->Seconds;
+}
+
+void AKSDummy::StopTalking()
+{
+	if (VoicePlayer) VoicePlayer->Stop();
+	VoicePlayer = nullptr;
+	Spoken = nullptr;
+}
+
+FString AKSDummy::SpokenText() const
+{
+	return Spoken ? FString(Spoken->Text) : FString();
+}
+
+void AKSDummy::TakeFaceStats(int32& OutFaces, int32& OutMouthOpens)
+{
+	OutFaces = TestFaces.Num(); OutMouthOpens = TestMouthOpens;
+	TestFaces.Reset(); TestMouthOpens = 0;
 }
 
 FVector AKSDummy::DrawnHandFromHead() const
@@ -423,6 +530,7 @@ void AKSDummy::Footwork(float DeltaSeconds)
 		F.From = F.Planted;
 		F.To = Home[ShuffleFoot] + GetActorForwardVector() * FMath::FRandRange(-6.f, 6.f) + GetActorRightVector() * FMath::FRandRange(-4.f, 4.f);
 		F.StepT = 0.f;
+		KSAudio::Play(this, EKSSfx::Footstep, 0.12f);
 		ShuffleFoot = 1 - ShuffleFoot;
 		NextShuffle = FootClock + FMath::FRandRange(0.4f, 0.95f);
 	}
@@ -435,6 +543,7 @@ void AKSDummy::Footwork(float DeltaSeconds)
 		{
 			// The body has left this foot behind: step to where it should be, and a little past, in the direction of travel.
 			F.From = F.Planted; F.To = Home[i] + (Home[i] - F.Planted).GetSafeNormal2D() * 5.f; F.StepT = 0.f;
+			KSAudio::Play(this, EKSSfx::Footstep, 0.3f);
 		}
 		else if (Away > 45.f) { F.Planted = Home[i]; F.StepT = -1.f; }      // far too far (a new bout, a teleport): just put it there
 		float Lift = 0.f;
@@ -590,6 +699,7 @@ void AKSDummy::Tick(float DeltaSeconds)
 		FlashLeft -= DeltaSeconds;
 		if (FlashLeft <= 0.f) ApplyColors(false);
 	}
+	UpdateFace(DeltaSeconds);
 	if (bCharacter)
 	{
 		if (StopLeft > 0.f)

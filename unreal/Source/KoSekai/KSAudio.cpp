@@ -66,10 +66,45 @@ namespace
 	}
 }
 
+namespace
+{
+	/** The recorded variants of one sound, loaded the first time it is asked for and kept for the rest of the run. */
+	const TArray<USoundBase*>& Recorded(EKSSfx Sfx)
+	{
+		static const TCHAR* Names[] = { TEXT("Hit"), TEXT("Counter"), TEXT("Blocked"), TEXT("Hurt"), TEXT("Whoosh"), TEXT("Tell"), TEXT("Dodge"), TEXT("Bell1"), TEXT("Bell2"), TEXT("Bell3"),
+			TEXT("KO"), TEXT("PullIn"), TEXT("Coin"), TEXT("Step"), TEXT("Footstep"), TEXT("Fall"), TEXT("Win"), TEXT("Lose") };
+		static TMap<EKSSfx, TArray<USoundBase*>> Loaded;
+		if (TArray<USoundBase*>* Found = Loaded.Find(Sfx)) return *Found;
+		TArray<USoundBase*>& List = Loaded.Add(Sfx);
+		if ((int32)Sfx < UE_ARRAY_COUNT(Names))
+		{
+			for (int32 i = 1; i <= 6; i++)
+			{
+				const FString Path = FString::Printf(TEXT("/Game/KS/Audio/S_%s_%d.S_%s_%d"), Names[(int32)Sfx], i, Names[(int32)Sfx], i);
+				USoundBase* Sound = LoadObject<USoundBase>(nullptr, *Path, nullptr, LOAD_NoWarn | LOAD_Quiet);
+				if (!Sound) break;
+				Sound->AddToRoot();   // held in a static, so keep it from being collected
+				List.Add(Sound);
+			}
+		}
+		// One line per sound for tools/check.sh: 0 variants means the synthesised fallback is in use.
+		if ((int32)Sfx < UE_ARRAY_COUNT(Names)) UE_LOG(LogTemp, Display, TEXT("KSTEST sound=%s recorded_variants=%d"), Names[(int32)Sfx], List.Num());
+		return List;
+	}
+}
+
 void KSAudio::Play(UObject* WorldContext, EKSSfx Sfx, float Volume)
 {
 	UWorld* World = WorldContext ? WorldContext->GetWorld() : nullptr;
 	if (!World || World->GetNetMode() == NM_DedicatedServer) return;
+
+	const TArray<USoundBase*>& Variants = Recorded(Sfx);
+	if (Variants.Num())
+	{
+		// A different take and a slightly different pitch each time, so repeated punches do not sound stamped out.
+		UGameplayStatics::PlaySound2D(World, Variants[FMath::RandRange(0, Variants.Num() - 1)], Volume, FMath::FRandRange(0.94f, 1.06f));
+		return;
+	}
 
 	TArray<float> Mix;
 	for (const FVoice& V : Voices(Sfx)) Render(Mix, V);

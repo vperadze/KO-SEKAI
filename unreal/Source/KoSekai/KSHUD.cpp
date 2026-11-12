@@ -236,6 +236,14 @@ void AKSHUD::DrawHUD()
 	default: DrawFight(*G); break;
 	}
 
+	// The subtitle of whoever is speaking.
+	if (!G->SpokenLine.IsEmpty() && G->Phase != EKSPhase::Street && G->Phase != EKSPhase::PullIn && G->Phase != EKSPhase::Ending && G->Phase != EKSPhase::Calibrate)
+	{
+		const float Y = G->Phase == EKSPhase::Card && G->PhaseTime < 2.6f ? 0.955f : 0.86f;
+		Fill(0.12f, Y - 0.032f, 0.76f, 0.064f, FLinearColor(0.f, 0.f, 0.f, 0.62f));
+		Label(G->SpokenBy + TEXT(":  \"") + G->SpokenLine + TEXT("\""), 0.5f, Y, 1.05f, FLinearColor::White);
+	}
+
 	if (G->RedFlash > 0.f) Fill(0.f, 0.f, 1.f, 1.f, FLinearColor(1.f, 0.f, 0.f, 0.35f * G->RedFlash));
 	if (G->WhiteFade > 0.f) Fill(0.f, 0.f, 1.f, 1.f, FLinearColor(1.f, 1.f, 1.f, G->WhiteFade));
 }

@@ -65,6 +65,29 @@ while read -r line; do
 done <<< "$(grep "KSTEST bout=" "$LOG" 2> /dev/null)"
 LAST=$(grep "KSTEST bout=" "$LOG" 2> /dev/null | tail -1)
 [ -n "$LAST" ] && [ "$(field "$LAST" landed)" -gt 0 ] && pass "punches land" || fail "no punch landed"
+for snd in Hit Blocked Whoosh Hurt Footstep; do
+	n=$(grep "KSTEST sound=$snd " "$LOG" 2> /dev/null | head -1 | tr -d "\r" | sed -n 's/.*recorded_variants=\([0-9]*\).*/\1/p')
+	# A sound the self-playing bout never happened to play (the bot rarely gets hit) is not a failure.
+	if [ -z "$n" ]; then echo "  --    sound $snd: not played in this run"
+	elif [ "$n" -ge 1 ]; then pass "sound $snd: $n recorded take(s) loaded"
+	else fail "sound $snd: no recorded take loaded, the synthesised fallback is in use"; fi
+done
+# Faces and voices. The bug this guards: fighters stood through a whole bout with one expression (the Count with his
+# mouth open) and never spoke.
+while read -r line; do
+	[ -z "$line" ] && continue
+	who=$(field "$line" fighter)
+	[ "$(field "$line" faces)" -ge 4 ] && pass "$who: $(field "$line" faces) face expressions loaded" || fail "$who: only $(field "$line" faces) face expressions loaded"
+	[ "$(field "$line" voice_lines)" -ge 8 ] && pass "$who: $(field "$line" voice_lines) voice lines loaded" || fail "$who: only $(field "$line" voice_lines) voice lines loaded"
+done <<< "$(grep "KSTEST fighter=" "$LOG" 2> /dev/null | sed 's/.*KSTEST/KSTEST/' | sort -u)"
+while read -r line; do
+	[ -z "$line" ] && continue
+	bout=$(field "$line" bout)
+	[ "$(field "$line" shown)" -ge 3 ] && pass "bout $bout: the opponent's face changed ($(field "$line" shown) expressions shown)" || fail "bout $bout: the opponent showed only $(field "$line" shown) expression(s)"
+	[ "$(field "$line" mouth_opens)" -ge 1 ] && pass "bout $bout: the opponent's mouth moved while speaking ($(field "$line" mouth_opens) times)" || fail "bout $bout: the opponent's mouth never moved"
+done <<< "$(grep "KSTEST faces bout=" "$LOG" 2> /dev/null)"
+n=$(grep -c "KSTEST voice .*line=intro sound=1" "$LOG" 2> /dev/null); n=${n:-0}
+[ "$n" -ge 2 ] && pass "each opponent introduced himself aloud" || fail "only $n spoken introduction(s) in two bouts"
 if grep -qE "Fatal error|Assertion failed|Ensure condition failed|Unhandled Exception" "$LOG" 2> /dev/null; then
 	fail "the engine reported a crash or failed check"; grep -E "Fatal error|Assertion failed|Ensure condition failed" "$LOG" | head -3
 else pass "no crash and no failed engine check"; fi

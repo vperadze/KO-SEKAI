@@ -41,6 +41,7 @@ Packaged build under 1 GB, plus a 30–60 s gameplay video. Windows packaging ne
 | `unreal/Source/KoSekai/` | `KSGameMode` (rules, phases, crowd), `KSDummy` (a fighter), `KSWorld` (street and arena), `KSHUD`, `KSAudio`, `KSTracking` + `KSCameraTracker` + `KSDetector` (webcam). |
 | `unreal/Content/KoSekai/Characters/` | Seven fighters, 17 shared clips each, face materials. |
 | `unreal/Content/KS/` | Materials, arena pictures and spectator sprites (`Arena/`), the pose model (`Tracker/`). |
+| `unreal/Content/KS/Voice/` | Spoken lines `V_<Fighter>_<line>`; text and mouth timing are in the generated `KSVoiceData.h`. |
 | `art/` | Source art and the tools that make it (`art/tools`, `art/arena`, `art/tracker-model`). Mostly untracked. |
 | `tools/check.sh` | The self-check. |
 | `tests/tracking/` | Recorded move sessions with expectations. |
@@ -80,6 +81,9 @@ The KoSekai editor has no MCP. Import textures and create materials with a headl
 ```
 UnrealEditor-Cmd KoSekai.uproject -run=pythonscript -script=<file.py>
 ```
+
+New faces or lines: `art/tools/bake_faces.py` (faces) and `~/ielts-listening/.venv/bin/python art/tools/voices.py`
+(lines; rebuild the game after it, it rewrites `KSVoiceData.h`), then `art/tools/import_voice_faces.py` headless.
 
 Fighters are built in the staging project `~/UnrealProjects/MegaJam2026` (the only editor with MCP, port 8123)
 and copied over with `rsync -a --delete` of `Content/KoSekai/Characters`.

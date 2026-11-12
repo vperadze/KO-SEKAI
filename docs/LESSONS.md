@@ -44,6 +44,13 @@ One entry per bug that cost time: what happened, the cause, the rule. Add to it 
 - **Faceted shading.** Meshy's FBX has flat normals. Rule: import the GLB.
 - **Rubber-hose arms.** 100 passes of skin-weight smoothing was far too many. Rule: 5 passes.
 - **Gloves lost.** `image-to-3d --pose-mode t-pose` drops them. Rule: `--pose-mode auto`.
+- **Faces never changed, and the Count's mouth hung open all fight.** Most fighters had only a `hurt` and a `ko`
+  face, shown below half health or on a knockout, and their painted default face was whatever expression Meshy
+  gave the model (a shout, for the Count). Rule: every painted fighter has `calm`, `talk`, `angry`, `blink` and
+  `smug`; the face is chosen every frame in `AKSDummy::UpdateFace`; the check counts the expressions shown per bout.
+- **The mouth must follow the dry voice, not the finished sound.** An echo or hall effect keeps the level up after
+  the word has ended, so a mouth driven by the final file flaps in the silence. `voices.py` keeps the voice before
+  its effect (`.npy` beside the `.wav`) and reads the mouth from that.
 
 ## Process
 
@@ -56,3 +63,15 @@ One entry per bug that cost time: what happened, the cause, the rule. Add to it 
 - **"The game lacks sound and shake" was wrong.** Both existed; every test had run with `-nosound`. Rule: read the
   code before saying a feature is missing.
 - **Meshy cannot make custom transition clips.** It animates from a fixed library only.
+- **A Meshy image edit cost 12 credits, not the 9 that older tasks in `meshy image-to-image list` show.** The
+  estimate given to the player (225) was 75 short. Rule: quote from a dry run or one paid test, not from history.
+- **A guard that only prints is not a guard.** `pgrep -x UnrealEditor; <run>` ran while a game was open, and
+  `pgrep -f "Build.sh KoSekai"` matched the shell that ran it. Rule: `if pgrep -x UnrealEditor >/dev/null; then
+  exit; fi` before any run, and write `-f` patterns as `"[B]uild.sh"`.
+- **Two Claude sessions worked in this folder at once.** Uncommitted changes appeared in files already read.
+  Rule: check `git status` against the start of the session before editing, message the other session
+  (ListAgents / SendMessage), and commit only your own hunks.
+
+- **The first voices were "too robotic" and the lines "too much text".** Ring modulation, bit crushing and 15%
+  pitch shifts on a speech model sound like a machine, and a 15-word taunt does not fit between punches. Rule:
+  natural voices, pitch within 6%, lines of six words or fewer; the player wants hard swearing, not mild.
