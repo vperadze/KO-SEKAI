@@ -1,0 +1,5 @@
+# Guided-test recordings (joint numbers captured from the webcam test page)
+tracking-test/recordings/
+
+__pycache__/
+*.pyc
