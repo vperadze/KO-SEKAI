@@ -119,6 +119,9 @@ void AKSGameMode::BeginPlay()
 	const TCHAR* Cmd = FCommandLine::Get();
 	bAuto = FParse::Param(Cmd, TEXT("KSAuto"));
 	bAutoNoGuard = FParse::Param(Cmd, TEXT("KSNoGuard"));
+	bFakeArms = FParse::Param(Cmd, TEXT("KSFakeArms"));
+	bCalDemo = FParse::Param(Cmd, TEXT("KSCalDemo"));
+	bMirrorArms = bFakeArms || FParse::Param(Cmd, TEXT("KSMirrorArms"));
 	bHitShots = FParse::Param(Cmd, TEXT("KSHitShots"));
 	FParse::Value(Cmd, TEXT("KSShots="), ShotEvery);
 	FString Start;
@@ -128,7 +131,7 @@ void AKSGameMode::BeginPlay()
 		FParse::Value(Cmd, TEXT("KSFighter="), ForcedOpponent);   // roster index of the first opponent
 		FParse::Value(Cmd, TEXT("KSPlayer="), ForcedPlayer);      // roster index of the player's fighter
 		EnterArena();
-		StartCard(0);
+		BeginLadder();
 	}
 	else
 	{
@@ -152,6 +155,7 @@ void AKSGameMode::ClearWorld()
 	WorldActors.Reset();
 	Street = FKSStreet();
 	Arena = FKSArena();
+	Spectators.Reset();
 	PlayerDummy = nullptr; OppDummy = nullptr;
 }
 
@@ -217,7 +221,7 @@ void AKSGameMode::Tick(float Dt)
 	{
 		for (const FKSPunchEvent& E : TrackingSubsystem->TakePunches()) FramePunches.Add({ E.Arm, E.Type });
 	}
-	if (Phase == EKSPhase::Fight || Phase == EKSPhase::Card)
+	if (Phase == EKSPhase::Fight || Phase == EKSPhase::Card || Phase == EKSPhase::Calibrate)
 	{
 		if (Pressed(EKeys::A)) FramePunches.Add({ EKSArm::Left, EKSPunch::Straight });
 		if (Pressed(EKeys::Q)) FramePunches.Add({ EKSArm::Left, EKSPunch::Hook });
@@ -243,6 +247,7 @@ void AKSGameMode::Tick(float Dt)
 	case EKSPhase::Result: TickResult(GameDt); break;
 	case EKSPhase::Continue: TickContinue(GameDt); break;
 	case EKSPhase::Ending: TickEnding(GameDt); break;
+	case EKSPhase::Calibrate: TickCalibrate(GameDt); break;
 	}
 
 	if (Phase != EKSPhase::PullIn) WhiteFade = FMath::Max(0.f, WhiteFade - Dt * 0.8f);
@@ -365,7 +370,7 @@ void AKSGameMode::TickPullIn(float Dt)
 		WhiteFade = 1.f;
 		Subtitle.Reset();
 		EnterArena();
-		StartCard(0);
+		BeginLadder();
 	}
 }
 
@@ -412,6 +417,11 @@ void AKSGameMode::StartCard(int32 Index)
 	CurrentDef.Health = Tier.Health; CurrentDef.WindupScale = Tier.WindupScale; CurrentDef.DamageScale = Tier.DamageScale;
 	CurrentDef.FeintChance = Tier.FeintChance; CurrentDef.IdleScale = Tier.IdleScale; CurrentDef.MaxHitsOpen = Tier.MaxHitsOpen;
 	const FKSFighterDef& F = Fighter();
+	// A fresh actor for every bout. Putting a second fighter's mesh on the old actor left the drawn body frozen in
+	// one pose (the animation ran, the picture did not follow), so the opponent is spawned new, as in the first fight.
+	if (OppDummy) { WorldActors.Remove(OppDummy); OppDummy->Destroy(); }
+	OppDummy = GetWorld()->SpawnActor<AKSDummy>(FVector(OppDistance, 0, 0), FRotator(0, 180, 0));
+	WorldActors.Add(OppDummy);
 	OppDummy->Setup(F.Body, F.Gloves, false, 0.25f);
 	const bool bReal = F.Asset && OppDummy->UseCharacter(F.Asset);
 	OppDummy->SetActorScale3D(FVector(bReal ? 1.f : F.Height));   // the real models are already the right size
@@ -419,6 +429,7 @@ void AKSGameMode::StartCard(int32 Index)
 	OppDummy->Snap(KSPoses::Guard());
 	PlayerDummy->Snap(KSPoses::Guard());
 	if (Arena.NameSign) Arena.NameSign->GetTextRender()->SetText(FText::FromString(F.Name));
+	SeatCrowd();
 
 	PlayerHP = PlayerTrail = 100.f;
 	OppHP = OppMaxHP = OppTrail = F.Health;
@@ -554,9 +565,256 @@ void AKSGameMode::UpdateFighterPoses(float Dt)
 	}
 	OppDummy->SetTarget(O, Speed);
 	DriveCharacters();
+	TickCrowd();
+	if (Phase == EKSPhase::Fight && OppDummy && PlayerDummy) { TestOppHand += OppDummy->DrawnHandFromHead(); TestPlayerHand += PlayerDummy->DrawnHandFromHead(); }
 }
 
 /** Picks the clip and the face for each real fighter from the state of the fight. A clip only restarts when its key changes. */
+/* ================= calibration ================= */
+
+void AKSGameMode::BeginLadder()
+{
+	// Webcam players are first shown where to stand and taken through each move once. It also teaches the detector
+	// how hard this player punches. Keyboard players, the self-playing test and a second run skip it.
+	const bool bCamera = TrackingSubsystem && TrackingSubsystem->HasBuiltInTracker();
+	if (bCalDemo || (bCamera && !bAuto && !bCalibrationDone && !FParse::Param(FCommandLine::Get(), TEXT("KSNoCal"))))
+	{
+		CalPeaks.Reset();
+		SetPhase(EKSPhase::Calibrate);
+		SetCalStep(0);
+		return;
+	}
+	StartCard(0);
+}
+
+void AKSGameMode::SetCalStep(int32 Step)
+{
+	static const TCHAR* Names[CalSteps] = { TEXT("framing"), TEXT("guard"), TEXT("left jabs"), TEXT("right jabs"), TEXT("block"), TEXT("lean left"), TEXT("lean right"), TEXT("duck"), TEXT("ready") };
+	CalStep = FMath::Clamp(Step, 0, CalSteps - 1);
+	CalStepTime = 0.f; CalHold = 0.f; CalCount = 0; CalProgress = 0.f; CalDoneAt = -1.f; bCalRepCounted = false; CalCountNow = CalCountNeed = 0;
+	if (TrackingSubsystem)
+	{
+		TrackingSubsystem->Mark(FString::Printf(TEXT("calibration step %d %s"), CalStep, Names[CalStep]));
+		if (CalStep == 1) TrackingSubsystem->Recalibrate();
+		if (CalStep == 4 && CalPeaks.Num() >= 4)
+		{
+			// The jabs just thrown show how fast this player's punches are. The detector's speed threshold is set to a
+			// little over half of that, within limits, so a light puncher is heard and a hard one gets no phantom hits.
+			CalPeaks.Sort();
+			const float Median = CalPeaks[CalPeaks.Num() / 2];
+			const float Sensitivity = FMath::Clamp(3.5f / (0.55f * Median), 0.8f, 1.5f);
+			TrackingSubsystem->SetSensitivity(Sensitivity);
+			TrackingSubsystem->Mark(FString::Printf(TEXT("sensitivity %.2f from %d strokes, median peak %.1f"), Sensitivity, CalPeaks.Num(), Median));
+			UE_LOG(LogTemp, Display, TEXT("KSTEST calibration sensitivity=%.2f strokes=%d median_peak=%.1f"), Sensitivity, CalPeaks.Num(), Median);
+		}
+	}
+	if (CalStep > 0) Sfx(EKSSfx::Coin, 0.6f);
+}
+
+void AKSGameMode::FinishCalibration(bool bCompleted)
+{
+	bCalibrationDone = true;
+	if (TrackingSubsystem) TrackingSubsystem->Mark(bCompleted ? TEXT("calibration finished") : TEXT("calibration skipped"));
+	UE_LOG(LogTemp, Display, TEXT("KSTEST calibration done completed=%d"), bCompleted ? 1 : 0);
+	CalClipKey.Reset(); CalChecks.Reset(); CalTitle.Reset(); CalHint.Reset();
+	StartCard(0);
+}
+
+void AKSGameMode::TickCalibrate(float Dt)
+{
+	CalStepTime += Dt;
+	// The camera faces the player's own fighter, who copies the moves as they are recognised.
+	const FVector Pos(300.f, 40.f, 140.f), Aim(0.f, 95.f, 96.f);   // aimed to one side, so the fighter stands right of the mirror
+	Pawn->SetView(Pos, (Aim - Pos).Rotation(), 55.f);
+	if (OppDummy) OppDummy->SetActorHiddenInGame(true);
+
+	UKSTrackingSubsystem* T = TrackingSubsystem;
+	if (Pressed(EKeys::K)) { FinishCalibration(false); return; }
+	const bool bSkip = Pressed(EKeys::SpaceBar) || Pressed(EKeys::Enter) || (bCalDemo && CalStepTime > 3.0f);
+
+	/* ---- where the player stands ---- */
+	CalChecks.Reset();
+	FString Framing;
+	bool bFramed = false;
+	const TArray<FVector2f>* L = T ? &T->GetImageLandmarks() : nullptr;
+	if (!T || !T->IsConnected()) Framing = PhaseTime > 6.f ? TEXT("NO CAMERA FOUND  -  PRESS K TO PLAY WITH THE KEYBOARD") : TEXT("LOOKING FOR THE CAMERA...");
+	else if (!T->IsBodySeen() || L->Num() < 33) Framing = TEXT("STEP INTO VIEW");
+	else
+	{
+		const float ShoulderY = ((*L)[11].Y + (*L)[12].Y) * 0.5f, MidX = ((*L)[11].X + (*L)[12].X) * 0.5f;
+		const float Width = FMath::Abs((*L)[11].X - (*L)[12].X), ElbowY = FMath::Max((*L)[13].Y, (*L)[14].Y);
+		const bool bHigh = ShoulderY < 0.52f, bElbows = ElbowY < 0.95f, bCentred = FMath::Abs(MidX - 0.5f) < 0.2f, bNear = Width > 0.07f;
+		CalChecks.Add({ TEXT("shoulders in the upper half of the picture"), bHigh });
+		CalChecks.Add({ TEXT("both elbows inside the picture"), bElbows });
+		CalChecks.Add({ TEXT("standing in the middle"), bCentred });
+		CalChecks.Add({ TEXT("close enough to be seen clearly"), bNear });
+		bFramed = bHigh && bElbows && bCentred && bNear;
+		if (!bHigh || !bElbows) Framing = TEXT("STEP BACK  (or tilt the screen back)");
+		else if (!bNear) Framing = TEXT("COME CLOSER");
+		// A small x in the picture is the player's own right-hand side.
+		else if (!bCentred) Framing = MidX < 0.5f ? TEXT("MOVE TO YOUR LEFT") : TEXT("MOVE TO YOUR RIGHT");
+	}
+
+	/* ---- the player's fighter copies what is recognised ---- */
+	int32 Lefts = 0, Rights = 0;
+	for (const TPair<EKSArm, EKSPunch>& Punch : FramePunches)
+	{
+		(Punch.Key == EKSArm::Left ? Lefts : Rights)++;
+		const FPunchClip& Clip = PunchClips[(int32)Punch.Value][(int32)Punch.Key];
+		if (PlayerDummy) PlayerDummy->PlayClip(Clip.Name, false, 1.25f, FMath::Max(0.f, Clip.Impact - 0.11f));
+		CalPunchUntil = Clock + PlayerPunchSeconds; CalClipKey = TEXT("punch");
+		Sfx(EKSSfx::Whoosh, 0.7f);
+	}
+	const bool bBlock = T && T->IsHeld(EKSDefense::Block);
+	if (Clock >= CalPunchUntil && PlayerDummy)
+	{
+		const FString Key = bBlock ? TEXT("block") : TEXT("idle");
+		if (Key != CalClipKey)
+		{
+			CalClipKey = Key;
+			if (bBlock) PlayerDummy->PlayClip(TEXT("Block1"), true, 1.f, 0.6f); else PlayerDummy->PlayClip(TEXT("Combat_Stance"), true);
+		}
+	}
+	TArray<float> Peaks = T ? T->TakeStrokePeaks() : TArray<float>();
+	if (CalStep == 2 || CalStep == 3) for (float Peak : Peaks) if (Peak > 2.5f) CalPeaks.Add(Peak);
+
+	/* ---- the steps ---- */
+	// Every move is done three times, and every step starts with a moment to read it before anything counts.
+	const float ReadSeconds = 2.2f, GoodSeconds = 0.9f;
+	const bool bReading = CalStep >= 2 && CalStep <= 7 && CalStepTime < ReadSeconds;
+	bool bDone = false;
+	auto Hold = [&](bool bHeld, float Seconds) { CalHold = bHeld ? CalHold + Dt : FMath::Max(0.f, CalHold - Dt * 2.f); CalProgress = FMath::Clamp(CalHold / Seconds, 0.f, 1.f); return CalHold >= Seconds; };
+	// One repetition of a held move: hold it for Seconds, then let go before the next one counts.
+	auto Rep = [&](bool bHeld, float Seconds)
+	{
+		if (bReading) return false;
+		if (!bHeld) { CalHold = 0.f; bCalRepCounted = false; }
+		else if (!bCalRepCounted) { CalHold += Dt; if (CalHold >= Seconds) { bCalRepCounted = true; CalCount++; Sfx(EKSSfx::Blocked, 0.5f); } }
+		CalProgress = FMath::Min(1.f, (CalCount + (bCalRepCounted ? 0.f : FMath::Clamp(CalHold / Seconds, 0.f, 1.f))) / 3.f);
+		return CalCount >= 3;
+	};
+	CalCountNeed = 0;
+	FString Tip;
+	switch (CalStep)
+	{
+	case 0:
+		CalTitle = TEXT("STAND WHERE THE CAMERA SEES YOUR ARMS");
+		Tip = TEXT("good, hold it for a moment...");
+		bDone = Hold(bFramed, 2.0f);
+		break;
+	case 1:
+		CalTitle = TEXT("FISTS UP  -  HOLD STILL");
+		Tip = TEXT("this is your guard: the game measures everything from here");
+		CalProgress = T ? FMath::Max(0.f, T->GetCalibrationProgress()) : 0.f;
+		bDone = T && T->IsTracking() && CalStepTime > 2.5f;
+		if (bDone) CalProgress = 1.f;
+		break;
+	case 2: case 3:
+		CalTitle = CalStep == 2 ? TEXT("LEFT JAB  x 3") : TEXT("RIGHT JAB  x 3");
+		Tip = TEXT("punch straight at the camera, bring the fist back, then the next one");
+		CalCountNeed = 3;
+		if (!bReading) CalCount += CalStep == 2 ? Lefts : Rights;
+		CalProgress = FMath::Min(1.f, CalCount / 3.f);
+		bDone = CalCount >= 3;
+		break;
+	case 4:
+		CalTitle = TEXT("BLOCK  x 3");
+		Tip = TEXT("both fists up to your face, hold a moment, then lower them");
+		CalCountNeed = 3;
+		bDone = Rep(bBlock, 0.6f);
+		break;
+	case 5:
+		CalTitle = TEXT("DODGE LEFT  x 3");
+		Tip = TEXT("lean your head and shoulders to your left, then come back to the middle");
+		CalCountNeed = 3;
+		bDone = Rep(T && T->IsHeld(EKSDefense::EvadeLeft), 0.2f);
+		break;
+	case 6:
+		CalTitle = TEXT("DODGE RIGHT  x 3");
+		Tip = TEXT("lean your head and shoulders to your right, then come back to the middle");
+		CalCountNeed = 3;
+		bDone = Rep(T && T->IsHeld(EKSDefense::EvadeRight), 0.2f);
+		break;
+	case 7:
+		CalTitle = TEXT("DUCK  x 3");
+		Tip = TEXT("bend your knees so your head drops, then stand up again");
+		CalCountNeed = 3;
+		bDone = Rep(T && T->IsHeld(EKSDefense::Duck), 0.2f);
+		break;
+	default:
+		CalTitle = TEXT("READY!");
+		Tip = TEXT("first fighter coming up");
+		CalProgress = FMath::Min(1.f, CalStepTime / 2.0f);
+		if (CalStepTime > 2.0f) { FinishCalibration(true); return; }
+		break;
+	}
+	CalCountNow = FMath::Min(CalCount, CalCountNeed);
+	// Bad framing is always the first thing to fix; then a moment to read, the tip, and the way out if it will not register.
+	if (!Framing.IsEmpty()) CalHint = Framing;
+	else if (bReading) CalHint = TEXT("get ready...   ") + Tip;
+	else if (CalStep >= 2 && CalStep <= 7 && CalStepTime > ReadSeconds + 12.f) CalHint = TEXT("not registering?  press SPACE to skip this move");
+	else CalHint = Tip;
+
+	// A finished step says GOOD for a moment before the next one appears.
+	if (bDone && CalDoneAt < 0.f && CalStep < CalSteps - 1) { CalDoneAt = CalStepTime; Sfx(EKSSfx::Bell1, 0.5f); }
+	if (CalDoneAt >= 0.f) { CalTitle = TEXT("GOOD!"); CalHint.Reset(); CalProgress = 1.f; }
+	if (CalStep < CalSteps - 1 && (bSkip || (CalDoneAt >= 0.f && CalStepTime - CalDoneAt > GoodSeconds))) SetCalStep(CalStep + 1);
+}
+
+/* ================= the crowd ================= */
+
+void AKSGameMode::SeatCrowd()
+{
+	if (Spectators.Num()) return;                      // they keep their places for the whole ladder
+	for (AKSDummy* Dummy : Arena.Crowd) if (Dummy) Dummy->SetActorHiddenInGame(true);   // the faceless stand-ins go home
+	static const TCHAR* Names[] = { TEXT("kid"), TEXT("robot"), TEXT("mom"), TEXT("luchador"), TEXT("punk"), TEXT("alien"), TEXT("nerd"), TEXT("rocker") };
+	FKSBuilder B = MakeBuilder();
+	for (int32 i = 0; i < UE_ARRAY_COUNT(Names); i++)
+	{
+		// Two staggered rows behind the far ropes, where the camera looks.
+		const bool bBack = i >= 4;
+		const int32 k = i % 4;
+		const FVector Home(bBack ? 590.f : 470.f, bBack ? -495.f + 330.f * k : -360.f + 240.f * k, bBack ? 150.f : 112.f);
+		const FString Tex = FString::Printf(TEXT("/Game/KS/Arena/T_KS_Spec_%s.T_KS_Spec_%s"), Names[i], Names[i]);
+		UMaterialInstanceDynamic* MID = B.Image(*Tex, false, Home, FVector(0, 1, 0), FVector(0, 0, -1), 112.f, 224.f, FVector4(0.25f, 1.f, 0.f, 0.f), 0.9f, TEXT("/Game/KS/Arena/M_KS_Sprite.M_KS_Sprite"));
+		if (!MID) continue;
+		FSpectator S; S.MID = MID; S.Actor = Cast<AActor>(MID->GetOuter()); S.Home = Home; S.Phase = FMath::FRandRange(0.f, 6.f);
+		Spectators.Add(S);
+	}
+}
+
+void AKSGameMode::CrowdReact(bool bCheer, float Strength)
+{
+	const float Now = GetWorld()->GetTimeSeconds();
+	for (FSpectator& S : Spectators)
+	{
+		if (FMath::FRand() > Strength) continue;              // a light hit moves only part of the crowd
+		S.CueAt = Now + FMath::FRandRange(0.03f, 0.3f);       // nobody reacts in the same instant
+		S.CuePose = bCheer ? 1 : 2;
+	}
+}
+
+void AKSGameMode::TickCrowd()
+{
+	if (!GetWorld()) return;
+	const float Now = GetWorld()->GetTimeSeconds();
+	for (FSpectator& S : Spectators)
+	{
+		AActor* Actor = S.Actor.Get();
+		if (!Actor || !S.MID) continue;
+		if (S.CueAt > 0.f && Now >= S.CueAt) { S.Pose = S.CuePose; S.CueAt = 0.f; S.BusyUntil = Now + FMath::FRandRange(0.9f, 1.6f); }
+		else if (S.BusyUntil > 0.f && Now >= S.BusyUntil) { S.Pose = 0; S.BusyUntil = 0.f; }
+		// Old-arcade animation: whole poses swapped a few times a second, never in-between frames.
+		int32 Frame = S.Pose;
+		float Lift = 0.f, Side = 0.f;
+		if (S.Pose == 0) { Frame = FMath::FloorToInt(Now * 1.6f + S.Phase) % 2 ? 3 : 0; Lift = FMath::FloorToInt(Now * 3.2f + S.Phase) % 2 ? 3.f : 0.f; }
+		else if (S.Pose == 1) Lift = FMath::FloorToInt(Now * 9.f + S.Phase) % 2 ? 22.f : 4.f;      // jumping up and down
+		else Side = FMath::FloorToInt(Now * 14.f + S.Phase) % 2 ? 3.f : -3.f;                       // shaking
+		if (Frame != S.Shown) { S.Shown = Frame; S.MID->SetVectorParameterValue(TEXT("Offset"), FLinearColor(0.25f * Frame, 0.f, 0.f, 0.f)); }
+		Actor->SetActorLocation(S.Home + FVector(0.f, Side, Lift));
+	}
+}
+
 void AKSGameMode::DriveCharacters()
 {
 	const bool bLost = (Phase == EKSPhase::FightEnd || Phase == EKSPhase::Continue) && !bLastResultWin;
@@ -631,12 +889,28 @@ void AKSGameMode::DriveCharacters()
 		{
 			if (Clock - PunchStart[i] < PlayerPunchSeconds && (PunchArm < 0 || PunchStart[i] > PunchStart[PunchArm])) PunchArm = i;
 		}
+		// With the webcam, the fighter's arms copy the player's own arms, so punch and block clips are not needed:
+		// the body keeps its stance and the arms do whatever the player does, as it happens.
+		const bool bKnockedOut = bLost && !bLastResultDecision;
+		// Off by default: one webcam cannot measure depth well, so copied arms bend oddly and never reach the opponent.
+		// Instead the webcam recognises the move and the fighter plays the authored, aimed punch, which does connect.
+		const bool bMirror = bMirrorArms && TrackingSubsystem && TrackingSubsystem->HasLandmarks() && !bKnockedOut && !bWon;
+		PlayerDummy->SetTrackedArms(bMirror ? &TrackingSubsystem->GetWorldLandmarks() : nullptr);
+		if (bFakeArms && !bKnockedOut && !bWon)
+		{
+			// Test pose in camera space (x = image right = the person's left, y = down, z = away from the camera):
+			// left arm straight out to the person's left, right arm bent with the forearm pointing at the camera.
+			TArray<FVector> Fake; Fake.SetNumZeroed(33);
+			Fake[11] = FVector(0.18, -0.45, 0);  Fake[13] = FVector(0.46, -0.45, 0);     Fake[15] = FVector(0.72, -0.45, 0);
+			Fake[12] = FVector(-0.18, -0.45, 0); Fake[14] = FVector(-0.24, -0.20, -0.05); Fake[16] = FVector(-0.22, -0.22, -0.32);
+			PlayerDummy->SetTrackedArms(&Fake);
+		}
 		FString Key;
-		if (bLost && !bLastResultDecision) Key = TEXT("ko");
+		if (bKnockedOut) Key = TEXT("ko");
 		else if (bWon) Key = TEXT("win");
-		else if (Clock < PlayerHurtUntil) Key = TEXT("hurt");
-		else if (PunchArm >= 0) Key = FString::Printf(TEXT("punch %d %.3f"), PunchArm, PunchStart[PunchArm]);
-		else if (D == EKSDefense::Block) Key = TEXT("block");
+		else if (Clock < PlayerHurtUntil && !bMirror) Key = TEXT("hurt");
+		else if (PunchArm >= 0 && !bMirror) Key = FString::Printf(TEXT("punch %d %.3f"), PunchArm, PunchStart[PunchArm]);
+		else if (D == EKSDefense::Block && !bMirror) Key = TEXT("block");
 		else Key = TEXT("idle");
 
 		if (Key != PlayerClipKey)
@@ -769,6 +1043,7 @@ void AKSGameMode::PlayerHurt(float Damage, bool bLight)
 	Shake = bLight ? 4.f : 10.f; RedFlash = bLight ? 0.4f : 1.f; Combo = 0;
 	PlayerHurtUntil = Clock + 0.3f;
 	Sfx(EKSSfx::Hurt);
+	CrowdReact(false, bLight ? 0.4f : 0.8f);
 	if (PlayerDummy) { PlayerDummy->Flash(KSColors::Red, 0.12f); PlayerDummy->TakeHit(Attack.Type, Attack.Side, bLight ? 0.5f : 1.f); PlayerDummy->HitStop(0.08f); }
 	if (OppDummy) OppDummy->HitStop(0.08f);
 	if (bHitShots) QueueHitShots(TEXT("taken"));
@@ -813,6 +1088,7 @@ void AKSGameMode::LandHit(const FPendingHit& Hit)
 	if (PlayerDummy) PlayerDummy->HitStop(0.07f);
 	if (bHitShots) QueueHitShots(TEXT("landed"));
 	Shake = FMath::Max(Shake, Hit.bCounter ? 7.f : 4.f);
+	CrowdReact(true, Hit.bCounter ? 1.f : FMath::Min(1.f, 0.35f + 0.2f * Combo));
 	if (Hit.bCounter) { Sfx(EKSSfx::Counter); Popup(TEXT("COUNTER!"), KSColors::Yellow, 0.56f, 0.3f, true); }
 	else { Sfx(EKSSfx::Hit); if (Combo > 1) Popup(FString::Printf(TEXT("%d HITS"), Combo), KSColors::Cyan, 0.66f, 0.38f); }
 	if (OppHP <= 0.f) EndFight(true, false);
@@ -821,7 +1097,12 @@ void AKSGameMode::LandHit(const FPendingHit& Hit)
 void AKSGameMode::EndFight(bool bWin, bool bDecision)
 {
 	bLastResultWin = bWin; bLastResultDecision = bDecision;
+	// One line per bout for tools/check.sh. "travel" is how far the drawn hand moved: near zero means a frozen body.
+	UE_LOG(LogTemp, Display, TEXT("KSTEST bout=%d opponent=%s result=%s opp_hand_travel=%.0f player_hand_travel=%.0f landed=%d taken=%d spectators=%d"), FighterIndex, Fighter().Name,
+		bDecision ? TEXT("time") : bWin ? TEXT("win") : TEXT("loss"), TestOppHand.IsValid ? TestOppHand.GetSize().Size() : 0.0, TestPlayerHand.IsValid ? TestPlayerHand.GetSize().Size() : 0.0, Stats.Landed, Stats.Taken, Spectators.Num());
+	TestOppHand = FBox(ForceInit); TestPlayerHand = FBox(ForceInit);
 	CueMain.Reset(); CueHint.Reset(); Pending.Reset();
+	CrowdReact(bWin, 1.f);
 	if (bDecision) { Sfx(EKSSfx::Bell2); Announce(TEXT("TIME!"), 1.8f); }
 	else if (bWin) { OppState = EKSOppState::KO; OppT = Clock; Sfx(EKSSfx::KO); Announce(TEXT("K.O.!"), 2.3f); }
 	else { Announce(TEXT("DOWN!"), 2.2f); }

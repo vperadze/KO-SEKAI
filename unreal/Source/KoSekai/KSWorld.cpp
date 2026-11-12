@@ -37,6 +37,30 @@ UMaterialInstanceDynamic* FKSBuilder::Shape(UStaticMesh* Mesh, const FVector& Ce
 	return MID;
 }
 
+UMaterialInstanceDynamic* FKSBuilder::Image(const TCHAR* Texture, bool bLit, const FVector& Center, const FVector& Across, const FVector& Down, float Width, float Height, const FVector4& UV, float Glow, const TCHAR* Material)
+{
+	static UStaticMesh* Plane = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Plane.Plane"));
+	UMaterialInterface* Base = Material ? LoadObject<UMaterialInterface>(nullptr, Material) : LoadObject<UMaterialInterface>(nullptr, bLit ? TEXT("/Game/KS/Arena/M_KS_ImageLit.M_KS_ImageLit") : TEXT("/Game/KS/Arena/M_KS_Image.M_KS_Image"));
+	UTexture* Tex = LoadObject<UTexture>(nullptr, Texture);
+	if (!Plane || !Base || !Tex) return nullptr;
+	AStaticMeshActor* Actor = World->SpawnActor<AStaticMeshActor>(Center, FRotationMatrix::MakeFromXY(Across, Down).Rotator());
+	if (!Actor) return nullptr;
+	UStaticMeshComponent* Comp = Actor->GetStaticMeshComponent();
+	Comp->SetMobility(EComponentMobility::Movable);
+	Comp->SetStaticMesh(Plane);
+	Comp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Comp->SetCastShadow(false);
+	Actor->SetActorScale3D(FVector(Width / 100.f, Height / 100.f, 1.f));
+	UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(Base, Actor);
+	MID->SetTextureParameterValue(TEXT("Tex"), Tex);
+	MID->SetVectorParameterValue(TEXT("UV"), FLinearColor(UV.X, UV.Y, 0, 0));
+	MID->SetVectorParameterValue(TEXT("Offset"), FLinearColor(UV.Z, UV.W, 0, 0));
+	MID->SetScalarParameterValue(TEXT("Glow"), Glow);
+	Comp->SetMaterial(0, MID);
+	Out->Add(Actor);
+	return MID;
+}
+
 APointLight* FKSBuilder::Light(const FVector& Pos, const FLinearColor& Color, float Candelas, float Radius, bool bShadows)
 {
 	APointLight* Actor = World->SpawnActor<APointLight>(Pos, FRotator::ZeroRotator);
@@ -189,6 +213,20 @@ void KSWorld::BuildArena(FKSBuilder& B, FKSArena& Arena)
 		for (float Z : { 55.f, 95.f, 130.f })
 		{
 			B.Box(MidSide + FVector(0, 0, Z), i % 2 ? FVector(2 * R, 3, 3) : FVector(3, 2 * R, 3), i % 2 ? Cyan : Magenta, 4.f);
+		}
+	}
+	// The ring canvas, and the stands full of people around the far side (both painted with Dreamina).
+	B.Image(TEXT("/Game/KS/Arena/T_KS_Mat.T_KS_Mat"), true, FVector(0, 0, 2.f), FVector(0, 1, 0), FVector(-1, 0, 0), 700.f, 700.f);
+	{
+		const int32 Panels = 16;
+		const float Radius = 1500.f, From = -115.f, To = 115.f, Step = (To - From) / Panels;
+		const float PanelWidth = 2.f * Radius * FMath::Tan(FMath::DegreesToRadians(Step * 0.5f)), WallHeight = 1300.f;
+		for (int32 i = 0; i < Panels; i++)
+		{
+			const float A = FMath::DegreesToRadians(From + (i + 0.5f) * Step);
+			const FVector Out(FMath::Cos(A), FMath::Sin(A), 0.f), Across(-FMath::Sin(A), FMath::Cos(A), 0.f);
+			B.Image(TEXT("/Game/KS/Arena/T_KS_Stands.T_KS_Stands"), false, Out * Radius + FVector(0, 0, WallHeight * 0.5f - 40.f), Across, FVector(0, 0, -1), PanelWidth + 2.f, WallHeight,
+				FVector4(1.f / Panels, 1.f, (float)i / Panels, 0.f), 0.55f);
 		}
 	}
 	// Tall bars on the horizon, the edge of the screen.

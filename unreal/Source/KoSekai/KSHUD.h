@@ -21,6 +21,7 @@ private:
 	void HealthBar(float X, float W, float Fraction, float Trail, const FLinearColor& Color, bool bRightToLeft);
 	void DrawStreet(const AKSGameMode& G);
 	void DrawFight(const AKSGameMode& G);
+	void DrawCalibrate(const AKSGameMode& G);
 	void DrawTracker(const AKSGameMode& G, bool bWithSkeleton);
 	void Subtitles(const AKSGameMode& G);
 

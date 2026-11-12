@@ -2,6 +2,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/PointLightComponent.h"
+#include "Components/PoseableMeshComponent.h"
 #include "Engine/SkeletalMesh.h"
 #include "Animation/AnimSequence.h"
 #include "Animation/AnimSingleNodeInstance.h"
@@ -197,6 +198,17 @@ AKSDummy::AKSDummy()
 	Skel->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	Skel->SetVisibility(false);
 
+	// A second copy of the model whose bones can be set directly. Each frame it copies the clip's pose from Skel and
+	// then has its arms turned to match the player's real arms.
+	Puppet = CreateDefaultSubobject<UPoseableMeshComponent>(TEXT("Puppet"));
+	Puppet->SetupAttachment(Pivot);
+	Puppet->SetRelativeRotation(FRotator(0.f, -90.f, 0.f));
+	Puppet->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Puppet->SetVisibility(false);
+	// The imported rig is in metres with a 0.01 bone scale, and a poseable mesh takes its bounds from the unscaled asset:
+	// about 1 cm across, so it is culled as off screen. Scale the bounds up to real size and more.
+	Puppet->SetBoundsScale(400.f);
+
 	// A burst of light at the point of contact when a hit lands.
 	HitLight = CreateDefaultSubobject<UPointLightComponent>(TEXT("HitLight"));
 	HitLight->SetupAttachment(Root);
@@ -236,10 +248,13 @@ bool AKSDummy::UseCharacter(const FString& Folder)
 	if (!bCharacter) return false;
 
 	Skel->SetSkeletalMesh(Mesh);
+	Puppet->SetSkinnedAssetAndUpdate(Mesh);
+	bPuppet = false;
 	Skel->SetAnimationMode(EAnimationMode::AnimationSingleNode);
 	Skel->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
 	NormalFace = Mesh->GetMaterials().Num() ? Mesh->GetMaterials()[0].MaterialInterface : nullptr;
 	Skel->SetMaterial(0, NormalFace);
+	Puppet->SetMaterial(0, NormalFace);
 	FaceShown.Reset();
 
 	Clips.Reset();
@@ -272,6 +287,13 @@ void AKSDummy::PlayClip(const FString& Clip, bool bLoop, float Rate, float Start
 	if (!bCharacter) return;
 	const TObjectPtr<UAnimSequence>* Found = Clips.Find(Clip);
 	if (!Found || !*Found) return;
+	// A clip never starts with a jump: remember the pose on screen and ease from it into the new clip, so a hand that
+	// is out at the end of a jab travels straight into the uppercut instead of snapping back to the guard first.
+	BlendFrom = ShownPose;
+	BlendPrev = PrevShownPose;
+	BlendDt = ShownDt;
+	BlendTime = Clip.Contains(TEXT("Reaction")) ? 0.06f : (Clip == TEXT("Combat_Stance") ? 0.18f : 0.11f);
+	BlendLeft = BlendTime;
 	Skel->PlayAnimation(*Found, bLoop);
 	Skel->SetPlayRate(Rate);
 	if (StartSeconds > 0.f) Skel->SetPosition(FMath::Min(StartSeconds, (*Found)->GetPlayLength() - 0.01f), false);
@@ -294,11 +316,47 @@ void AKSDummy::SetFace(const TArray<FString>& Candidates)
 	if (Pick == FaceShown) return;
 	FaceShown = Pick;
 	Skel->SetMaterial(0, Material);
+	Puppet->SetMaterial(0, Material);
+}
+
+FVector AKSDummy::DrawnHandFromHead() const
+{
+	if (!bCharacter) return FVector::ZeroVector;
+	return Puppet->GetBoneLocationByName(TEXT("LeftHand"), EBoneSpaces::WorldSpace) - Puppet->GetBoneLocationByName(TEXT("headfront"), EBoneSpaces::WorldSpace);
 }
 
 void AKSDummy::SetBodyShift(float SideCm, float Squash)
 {
 	ShiftTarget = SideCm; SquashTarget = Squash;
+}
+
+void AKSDummy::SetTrackedArms(const TArray<FVector>* Landmarks)
+{
+	bPuppet = bCharacter && Landmarks && Landmarks->Num() >= 25;
+	if (bPuppet) Tracked = *Landmarks;
+}
+
+/** Turns the upper arm and the forearm of the puppet so they point the way the player's own arm points. */
+void AKSDummy::PoseArm(bool bLeft)
+{
+	const FName UpperBone = bLeft ? TEXT("LeftArm") : TEXT("RightArm"), ForeBone = bLeft ? TEXT("LeftForeArm") : TEXT("RightForeArm"), HandBone = bLeft ? TEXT("LeftHand") : TEXT("RightHand");
+	const int32 Sh = bLeft ? 11 : 12, El = bLeft ? 13 : 14, Wr = bLeft ? 15 : 16;
+	// MediaPipe: x = image right (the person's left), y = down, z = away from the camera. The fighter faces the opponent
+	// the way the player faces the webcam, so "towards the camera" is the fighter's forward (the same mapping as ApplyTracked).
+	auto ToWorld = [this](const FVector& M) { return GetActorTransform().TransformVectorNoScale(FVector(-M.Z, -M.X, -M.Y)).GetSafeNormal(); };
+	const FVector WantUpper = ToWorld(Tracked[El] - Tracked[Sh]), WantFore = ToWorld(Tracked[Wr] - Tracked[El]);
+	if (WantUpper.IsNearlyZero() || WantFore.IsNearlyZero()) return;
+
+	const FTransform U = Puppet->GetBoneTransformByName(UpperBone, EBoneSpaces::WorldSpace);
+	const FVector Elbow = Puppet->GetBoneLocationByName(ForeBone, EBoneSpaces::WorldSpace);
+	const FQuat TurnUpper = FQuat::FindBetweenNormals((Elbow - U.GetLocation()).GetSafeNormal(), WantUpper);
+	Puppet->SetBoneRotationByName(UpperBone, (TurnUpper * U.GetRotation()).Rotator(), EBoneSpaces::WorldSpace);
+	Puppet->RefreshBoneTransforms();
+
+	const FTransform F = Puppet->GetBoneTransformByName(ForeBone, EBoneSpaces::WorldSpace);
+	const FVector Wrist = Puppet->GetBoneLocationByName(HandBone, EBoneSpaces::WorldSpace);
+	const FQuat TurnFore = FQuat::FindBetweenNormals((Wrist - F.GetLocation()).GetSafeNormal(), WantFore);
+	Puppet->SetBoneRotationByName(ForeBone, (TurnFore * F.GetRotation()).Rotator(), EBoneSpaces::WorldSpace);
 }
 
 void AKSDummy::AimPunch(const FString& Clip, const FVector& Point, float Weight)
@@ -494,6 +552,51 @@ void AKSDummy::Tick(float DeltaSeconds)
 		}
 		Skel->SetRelativeLocation(FVector(Reach.X - KnockNow, ShiftNow + Reach.Y, 0.f));
 		Skel->SetRelativeScale3D(FVector(1.f, 1.f, SquashNow * ReachSquash));
+
+		// Tracked arms: show the puppet, give it the clip's pose, then point its arms where the player's arms point.
+		Puppet->SetRelativeLocation(Skel->GetRelativeLocation());
+		Puppet->SetRelativeScale3D(Skel->GetRelativeScale3D());
+		// The clip plays on the hidden Skel; what is drawn is the Puppet, which gets the clip's pose eased in from
+		// whatever was on screen when the clip changed, and then, with the webcam, the player's own arm directions.
+		Skel->SetVisibility(false);
+		Puppet->SetVisibility(true);
+		Puppet->CopyPoseFromSkeletalComponent(Skel);
+		TArray<FTransform>& Local = Puppet->BoneSpaceTransforms;
+		if (BlendLeft > 0.f && BlendFrom.Num() == Local.Num())
+		{
+			const float A = FMath::SmoothStep(0.f, 1.f, 1.f - BlendLeft / BlendTime);
+			// Keep the momentum: the old pose is not frozen, it carries on at the speed each bone had when the clip changed,
+			// slowing down over a few hundredths of a second. A moving hand flows into the next move instead of stopping dead.
+			const float Tau = 0.05f, Age = BlendTime - BlendLeft;
+			const bool bCarry = BlendPrev.Num() == Local.Num() && BlendDt > 0.002f;
+			const float Carry = bCarry ? FMath::Min(3.f, Tau * (1.f - FMath::Exp(-Age / Tau)) / BlendDt) : 0.f;
+			for (int32 i = 0; i < Local.Num(); i++)
+			{
+				FTransform From = BlendFrom[i];
+				if (bCarry)
+				{
+					FQuat Step = BlendFrom[i].GetRotation() * BlendPrev[i].GetRotation().Inverse();
+					if (Step.W < 0.f) Step = FQuat(-Step.X, -Step.Y, -Step.Z, -Step.W);
+					FVector Axis; double Angle; Step.ToAxisAndAngle(Axis, Angle);
+					if (Angle > 1e-4 && Angle < 1.0) From.SetRotation((FQuat(Axis, Angle * Carry) * BlendFrom[i].GetRotation()).GetNormalized());
+					From.SetTranslation(BlendFrom[i].GetTranslation() + (BlendFrom[i].GetTranslation() - BlendPrev[i].GetTranslation()) * Carry);
+				}
+				const FTransform To = Local[i];
+				Local[i].Blend(From, To, A);
+			}
+			BlendLeft -= DeltaSeconds;
+		}
+		PrevShownPose = ShownPose;
+		ShownDt = DeltaSeconds;
+		ShownPose = Local;
+		Puppet->RefreshBoneTransforms();
+		if (bPuppet)
+		{
+			PoseArm(true);
+			Puppet->RefreshBoneTransforms();
+			PoseArm(false);
+			Puppet->RefreshBoneTransforms();
+		}
 
 		if (LightLeft > 0.f)
 		{

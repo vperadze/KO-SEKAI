@@ -7,12 +7,20 @@
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
+#include "KSCameraTracker.h"
+#include "NNE.h"
+#include "NNERuntimeCPU.h"
+#include "NNEModelData.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
+#include "Misc/CommandLine.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogKSTracking, Log, All);
 
 void UKSTrackingSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
+	StartBuiltInTracker();
 	FHttpServerModule& Http = FHttpServerModule::Get();
 	Router = Http.GetHttpRouter(Port);
 	if (!Router.IsValid())
@@ -26,8 +34,94 @@ void UKSTrackingSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	UE_LOG(LogKSTracking, Log, TEXT("Listening for the webcam tracker on http://127.0.0.1:%d/pose"), Port);
 }
 
+void UKSTrackingSubsystem::StartBuiltInTracker()
+{
+	if (FParse::Param(FCommandLine::Get(), TEXT("KSNoCamera")))
+	{
+		CameraStatus = TEXT("built-in camera switched off (-KSNoCamera)");
+		return;
+	}
+	// The pose model is MediaPipe's pose landmark model converted to ONNX; it ships as a plain file beside the content.
+	// The full model places the joints more precisely than the lite one and still runs in about 5 ms; lite is the fallback.
+	FString ModelPath = FPaths::ProjectContentDir() / TEXT("KS/Tracker/pose_full.onnx");
+	if (!FPaths::FileExists(ModelPath)) ModelPath = FPaths::ProjectContentDir() / TEXT("KS/Tracker/pose_lite.onnx");
+	TArray<uint8> Bytes;
+	if (!FFileHelper::LoadFileToArray(Bytes, *ModelPath))
+	{
+		CameraStatus = TEXT("pose model file missing");
+		UE_LOG(LogKSTracking, Warning, TEXT("Built-in tracker: could not read %s"), *ModelPath);
+		return;
+	}
+	TWeakInterfacePtr<INNERuntimeCPU> Runtime = UE::NNE::GetRuntime<INNERuntimeCPU>(TEXT("NNERuntimeORTCpu"));
+	if (!Runtime.IsValid())
+	{
+		CameraStatus = TEXT("ONNX Runtime plugin not available");
+		UE_LOG(LogKSTracking, Warning, TEXT("Built-in tracker: the NNERuntimeORTCpu runtime is not available."));
+		return;
+	}
+	PoseModelData = NewObject<UNNEModelData>(this);
+	PoseModelData->Init(TEXT("onnx"), Bytes);
+	PoseModel = Runtime->CreateModelCPU(PoseModelData);
+	TSharedPtr<UE::NNE::IModelInstanceCPU> Instance = PoseModel.IsValid() ? PoseModel->CreateModelInstanceCPU() : nullptr;
+	if (!Instance.IsValid())
+	{
+		CameraStatus = TEXT("pose model could not be loaded");
+		UE_LOG(LogKSTracking, Warning, TEXT("Built-in tracker: the pose model could not be created."));
+		return;
+	}
+	int32 CameraIndex = -1;
+	FParse::Value(FCommandLine::Get(), TEXT("KSCamera="), CameraIndex);
+	CameraTracker = MakeUnique<FKSCameraTracker>(Instance, CameraIndex);
+	TickHandle = FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateUObject(this, &UKSTrackingSubsystem::PullBuiltInTracker));
+	UE_LOG(LogKSTracking, Log, TEXT("Built-in webcam tracker started."));
+}
+
+/** Runs on the game thread every frame: copies what the camera thread has worked out. */
+bool UKSTrackingSubsystem::PullBuiltInTracker(float DeltaSeconds)
+{
+	if (!CameraTracker.IsValid()) return false;
+	FKSTrackerState State;
+	CameraTracker->Take(State);
+	const double Now = FPlatformTime::Seconds();
+	bBuiltInLive = State.bCameraOpen && Now - State.LastFrameSeconds < 0.5;
+	CameraStatus = bBuiltInLive ? FString::Printf(TEXT("built-in camera, %.0f fps"), State.FramesPerSecond) : State.Status;
+	if (!bBuiltInLive) return true;
+
+	LastPacketTime = Now;
+	bSeen = State.bSeen;
+	bCalibrated = State.bCalibrated;
+	bHandsOutOfView = State.bHandsOutOfView;
+	CalProgress = State.CalProgress;
+	for (int32 i = 0; i < 5; i++) Held[i] = State.Held[i];
+	for (const FKSDetectedPunch& P : State.Punches)
+	{
+		if (Pending.Num() < 16) Pending.Add({ P.Arm, P.Type });
+	}
+	World = MoveTemp(State.World);
+	Image = MoveTemp(State.Image);
+	for (float Peak : State.StrokePeaks) if (StrokePeaks.Num() < 64) StrokePeaks.Add(Peak);
+	return true;
+}
+
+void UKSTrackingSubsystem::SetSensitivity(float Value)
+{
+	if (CameraTracker.IsValid()) CameraTracker->SetSensitivity(Value);
+}
+
+void UKSTrackingSubsystem::Mark(const FString& Text)
+{
+	if (CameraTracker.IsValid()) CameraTracker->Mark(Text);
+}
+void UKSTrackingSubsystem::Recalibrate()
+{
+	if (CameraTracker.IsValid()) CameraTracker->Recalibrate();
+}
+
 void UKSTrackingSubsystem::Deinitialize()
 {
+	if (TickHandle.IsValid()) FTSTicker::GetCoreTicker().RemoveTicker(TickHandle);
+	CameraTracker.Reset();   // stops the camera thread and releases the camera
+	PoseModel.Reset();
 	if (Router.IsValid() && Route.IsValid())
 	{
 		Router->UnbindRoute(Route);
@@ -77,6 +171,11 @@ bool UKSTrackingSubsystem::HandlePose(const FHttpServerRequest& Request, const F
 		return true;
 	}
 
+	if (bBuiltInLive)
+	{
+		Reply(TEXT("ok"));   // the built-in tracker has the camera; ignore the browser page
+		return true;
+	}
 	LastPacketTime = FPlatformTime::Seconds();
 	bSeen = Json->GetBoolField(TEXT("seen"));
 	bCalibrated = Json->GetBoolField(TEXT("ready"));

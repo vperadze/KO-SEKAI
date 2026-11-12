@@ -29,12 +29,23 @@ A Linux install of the engine cannot produce Windows builds.
 
 ## Play with the webcam
 
-1. Start the tracker server: `python3 ../tracking-test/server.py`
-2. Open http://127.0.0.1:8765/unreal-bridge.html, press **Start camera**, and keep that window visible.
-3. Start the game. The bottom-right corner shows `WEBCAM TRACKING` once it has you.
+The tracker runs inside the game. Start the game with a webcam connected and stand so your head, shoulders and hands
+are in view; the bottom-right corner goes from `WEBCAM: STEP INTO VIEW` to `HOLD STILL` (stand in guard for a second
+while it calibrates) to `WEBCAM TRACKING`. The keyboard keeps working alongside it.
 
-The bridge page runs `tracker.js` and posts each frame to the game on port 8770: punches, held stances and the
-body landmarks. The player's dummy copies your upper body; the keyboard keeps working alongside it.
+How it works: `KSCameraTracker` reads the camera with the engine's OpenCV plugin, runs MediaPipe's pose model
+(`Content/KS/Tracker/pose_lite.onnx`, run by the engine's ONNX Runtime plugin) on a background thread, and
+`KSDetector` (a C++ port of `tracking-test/tracker.js`) turns the joints into punches and stances.
+
+Flags: `-KSCamera=1` picks a camera (default: the first of cameras 0 to 3 that gives a picture), `-KSNoCamera` turns the
+built-in tracker off.
+
+The browser tracker still works as a fallback when the game has no camera of its own (for example because another
+program holds it): run `python3 ../tracking-test/server.py`, open http://127.0.0.1:8765/unreal-bridge.html and press
+**Start camera**. Do not use both at once: only one program can hold the camera.
+
+The first time the editor opens this project after the OpenCV plugin was enabled, it downloads the Python packages
+that plugin asks for (about 500 MB, into `Intermediate/PipInstall`). That happens once and does not affect packaged builds.
 
 ## Where things are
 
@@ -42,7 +53,9 @@ body landmarks. The player's dummy copies your upper body; the keyboard keeps wo
 | --- | --- |
 | `Source/KoSekai/KSGameMode.*` | Game flow, the roster, and the fight rules (a port of `tracking-test/fight.html`) |
 | `Source/KoSekai/KSDummy.*` | A fighter: loads the real model, plays its clips and swaps its face (`UseCharacter`, `PlayClip`, `SetFace`); also the fallback dummy |
-| `Source/KoSekai/KSTracking.*` | Receives the webcam tracker over local HTTP |
+| `Source/KoSekai/KSTracking.*` | The game's view of the tracker: punches, stances, joints (built-in tracker or browser page) |
+| `Source/KoSekai/KSCameraTracker.*` | The built-in tracker: camera, pose model, background thread |
+| `Source/KoSekai/KSDetector.*` | Turns poses into punches, blocks, dodges and ducks |
 | `Source/KoSekai/KSWorld.*` | Builds the street and the arena |
 | `Source/KoSekai/KSHUD.*` | Health bars, cues, subtitles |
 | `Source/KoSekai/KSAudio.*` | Synthesised sound effects |

@@ -27,6 +27,8 @@ struct FKSBuilder
 	{
 		return Shape(Cube, Center, Size, Color, Glow, Rot, bShadow);
 	}
+	/** A flat picture: Across and Down are the world directions of the picture's width and height. UV = (scale U, scale V, offset U, offset V). */
+	UMaterialInstanceDynamic* Image(const TCHAR* Texture, bool bLit, const FVector& Center, const FVector& Across, const FVector& Down, float Width, float Height, const FVector4& UV = FVector4(1, 1, 0, 0), float Glow = 1.f, const TCHAR* Material = nullptr);
 	APointLight* Light(const FVector& Pos, const FLinearColor& Color, float Candelas, float Radius, bool bShadows = false);
 	ATextRenderActor* Text(const FVector& Pos, const FRotator& Rot, const FString& String, const FLinearColor& Color, float Size);
 	void Ambient(const FLinearColor& Color, float Intensity, const FLinearColor& FogColor, float FogDensity);

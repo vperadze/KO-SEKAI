@@ -12,6 +12,8 @@
 		{ "Name": "Fab", "Enabled": true },
 		{ "Name": "Bridge", "Enabled": true },
 		{ "Name": "ModelContextProtocol", "Enabled": true, "TargetAllowList": [ "Editor" ] },
-		{ "Name": "AllToolsets", "Enabled": true, "TargetAllowList": [ "Editor" ] }
+		{ "Name": "AllToolsets", "Enabled": true, "TargetAllowList": [ "Editor" ] },
+		{ "Name": "OpenCV", "Enabled": true },
+		{ "Name": "NNERuntimeORT", "Enabled": true }
 	]
 }

@@ -14,3 +14,6 @@ unreal/Packaged/
 unreal/Build/
 unreal/.vscode/
 *.code-workspace
+
+# Recorded move sessions: joint positions of a person, kept local
+tests/tracking/*.csv

@@ -13,7 +13,7 @@ class AKSDummy;
 class AKSPawn;
 class UKSTrackingSubsystem;
 
-enum class EKSPhase : uint8 { Street, PullIn, Card, Fight, FightEnd, Result, Continue, Ending };
+enum class EKSPhase : uint8 { Street, PullIn, Card, Fight, FightEnd, Result, Continue, Ending, Calibrate };
 enum class EKSOppState : uint8 { Idle, Windup, Strike, Open, KO };
 
 struct FKSPopup
@@ -45,6 +45,13 @@ public:
 	/* ---- read by the HUD ---- */
 	EKSPhase Phase = EKSPhase::Street;
 	float PhaseTime = 0.f;        // seconds in the current phase
+	// Calibration, the screen before the first bout (webcam players only): where to stand, then each move once.
+	static constexpr int32 CalSteps = 9;
+	int32 CalStep = 0;            // 0 framing, 1 guard, 2 left jabs, 3 right jabs, 4 block, 5 lean left, 6 lean right, 7 duck, 8 ready
+	float CalStepTime = 0.f, CalProgress = 0.f;
+	FString CalTitle, CalHint;
+	int32 CalCountNow = 0, CalCountNeed = 0;   // repetitions done and wanted in this step (0 wanted = not a counted step)
+	TArray<TPair<FString, bool>> CalChecks;   // the framing checklist: what is right and what is not
 	float Clock = 0.f;            // game clock, stops while paused
 	bool bPaused = false;
 	int32 FighterIndex = 0;
@@ -80,6 +87,10 @@ private:
 	void TickStreet(float Dt);
 	void TickPullIn(float Dt);
 	void TickCard(float Dt);
+	void BeginLadder();                  // calibration first when the webcam is in use, then the first bout
+	void TickCalibrate(float Dt);
+	void SetCalStep(int32 Step);
+	void FinishCalibration(bool bCompleted);
 	void TickFight(float Dt);
 	void TickFightEnd(float Dt);
 	void TickResult(float Dt);
@@ -88,6 +99,9 @@ private:
 	void UpdateFightCamera(float Dt);
 	void UpdateFighterPoses(float Dt);
 	void DriveCharacters();
+	void SeatCrowd();                                  // the fighters who are not in this bout watch from ringside
+	void CrowdReact(bool bCheer, float Strength);      // cheer for the player's hit, wince when the player is hit
+	void TickCrowd();
 	void PickFighters();
 
 	/* ---- fight rules (see fight.html) ---- */
@@ -138,6 +152,16 @@ private:
 
 	FKSStreet Street;
 	FKSArena Arena;
+	// A ringside spectator: a flat old-arcade sprite with four poses side by side (idle, cheer, wince, idle mirrored).
+	struct FSpectator { TWeakObjectPtr<AActor> Actor; TObjectPtr<UMaterialInstanceDynamic> MID; FVector Home; float Phase = 0.f, CueAt = 0.f, BusyUntil = 0.f; int32 CuePose = 0, Pose = 0, Shown = -1; };
+	TArray<FSpectator> Spectators;
+	bool bCalibrationDone = false, bCalDemo = false;   // -KSCalDemo: enter calibration without a camera and step through it, for the self-check
+	float CalHold = 0.f, CalPunchUntil = 0.f, CalDoneAt = -1.f;
+	bool bCalRepCounted = false;
+	int32 CalCount = 0;
+	FString CalClipKey;
+	TArray<float> CalPeaks;
+	FBox TestOppHand = FBox(ForceInit), TestPlayerHand = FBox(ForceInit);   // self-test: how far each fighter's drawn hand travelled this bout
 	bool bStreetDead = false;
 
 	// street walking
@@ -167,6 +191,8 @@ private:
 	int32 HitShotIndex = 0;
 	TArray<TPair<float, FString>> BurstShots;   // (clock time, file name) of the follow-up frames after a hit
 	void QueueHitShots(const TCHAR* Kind);
+	bool bMirrorArms = false;    // -KSMirrorArms: the fighter's arms copy the webcam arms directly (experimental, off by default)
+	bool bFakeArms = false;      // -KSFakeArms: pretend the webcam sees a fixed arm pose, to check the arm copying
 	bool bAutoNoGuard = false;   // -KSNoGuard: the test bot never defends, so the opponent's punches land
 	float ShotEvery = 0.f, NextShot = 0.f, AutoNextPunch = 0.f;
 	int32 ShotIndex = 0;

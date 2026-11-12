@@ -57,8 +57,15 @@ void AKSHUD::DrawTracker(const AKSGameMode& G, bool bWithSkeleton)
 	if (!T->IsConnected()) Status = TEXT("WEBCAM OFF - KEYBOARD");
 	else if (!T->IsBodySeen()) { Status = TEXT("WEBCAM: STEP INTO VIEW"); Color = Yellow; }
 	else if (!T->IsTracking()) { Status = FString::Printf(TEXT("WEBCAM: HOLD STILL %d%%"), FMath::RoundToInt(FMath::Max(0.f, T->GetCalibrationProgress()) * 100.f)); Color = Yellow; }
+	else if (T->AreHandsOutOfView()) { Status = TEXT("WEBCAM: STEP BACK, HANDS OUT OF VIEW"); Color = Yellow; }
 	else { Status = TEXT("WEBCAM TRACKING"); Color = Green; }
 	Label(Status, 0.985f, 0.975f, 0.8f, Color, 1);
+	// Too close to the camera is the commonest reason punches are missed, so say it where it cannot be overlooked.
+	if (T->AreHandsOutOfView())
+	{
+		Label(TEXT("STEP BACK"), 0.5f, 0.30f, 2.2f, Yellow, 0);
+		Label(TEXT("the camera must see your elbows and fists"), 0.5f, 0.36f, 0.9f, Yellow, 0);
+	}
 
 	if (!bWithSkeleton || !T->HasLandmarks()) return;
 	// A small mirror of what the tracker sees, so you can tell it has you.
@@ -162,6 +169,59 @@ void AKSHUD::DrawFight(const AKSGameMode& G)
 	DrawTracker(G, true);
 }
 
+void AKSHUD::DrawCalibrate(const AKSGameMode& G)
+{
+	const UKSTrackingSubsystem* T = G.Tracking();
+	Fill(0.f, 0.f, 1.f, 1.f, FLinearColor(0.02f, 0.f, 0.05f, 0.55f));
+	Fill(0.f, 0.f, 1.f, 0.125f, FLinearColor(0.f, 0.f, 0.f, 0.6f));
+	Label(FString::Printf(TEXT("CALIBRATION   STEP %d OF %d"), G.CalStep + 1, AKSGameMode::CalSteps), 0.5f, 0.06f, 1.4f, Cyan);
+
+	/* ---- the mirror: what the camera sees of you, flipped like a mirror ---- */
+	const float BX = 0.04f, BY = 0.15f, BW = 0.40f, BH = 0.66f;
+	Fill(BX, BY, BW, BH, FLinearColor(0.05f, 0.02f, 0.10f, 0.9f));
+	// Where the shoulders must be above, and the elbows inside.
+	Fill(BX, BY + BH * 0.52f, BW, 0.003f, FLinearColor(Lilac.R, Lilac.G, Lilac.B, 0.5f));
+	Label(TEXT("shoulders above this line"), BX + 0.008f, BY + BH * 0.52f - 0.018f, 0.8f, Lilac, -1);
+	Fill(BX, BY + BH * 0.95f, BW, 0.003f, FLinearColor(Lilac.R, Lilac.G, Lilac.B, 0.5f));
+	Label(TEXT("elbows above this line"), BX + 0.008f, BY + BH * 0.95f - 0.018f, 0.8f, Lilac, -1);
+	if (T && T->IsBodySeen() && T->GetImageLandmarks().Num() >= 33)
+	{
+		const TArray<FVector2f>& L = T->GetImageLandmarks();
+		auto Pt = [&](int32 i) { return FVector2D((BX + FMath::Clamp(1.f - L[i].X, 0.f, 1.f) * BW) * SW, (BY + FMath::Clamp(L[i].Y, 0.f, 1.f) * BH) * SH); };
+		auto Seg = [&](int32 A, int32 B, const FLinearColor& C)
+		{
+			// A limb that leaves the picture is drawn in red, pinned to the edge it left through.
+			const bool bOut = L[A].Y > 1.f || L[B].Y > 1.f || L[A].X < 0.f || L[A].X > 1.f || L[B].X < 0.f || L[B].X > 1.f;
+			const FVector2D P = Pt(A), Q = Pt(B);
+			DrawLine(P.X, P.Y, Q.X, Q.Y, bOut ? Red : C, 5.f * Unit);
+		};
+		Seg(11, 12, Lilac); Seg(11, 23, Muted); Seg(12, 24, Muted);
+		Seg(11, 13, Cyan); Seg(13, 15, Cyan); Seg(12, 14, Magenta); Seg(14, 16, Magenta);
+		const FVector2D Head = Pt(0);
+		DrawRect(Yellow, Head.X - 9.f * Unit, Head.Y - 9.f * Unit, 18.f * Unit, 18.f * Unit);
+		for (int32 Wrist : { 15, 16 }) { const FVector2D W = Pt(Wrist); DrawRect(Wrist == 15 ? Cyan : Magenta, W.X - 7.f * Unit, W.Y - 7.f * Unit, 14.f * Unit, 14.f * Unit); }
+	}
+	else Label(TEXT("no body in view"), BX + BW * 0.5f, BY + BH * 0.4f, 1.0f, Muted);
+	Label(TEXT("YOU, AS THE CAMERA SEES YOU"), BX + BW * 0.5f, BY + BH + 0.025f, 0.7f, Muted);
+
+	/* ---- what to do ---- */
+	const float RX = 0.72f;
+	Fill(0.47f, 0.15f, 0.50f, 0.20f, FLinearColor(0.f, 0.f, 0.f, 0.6f));
+	Label(G.CalTitle, RX, 0.20f, 1.9f, Yellow);
+	Label(G.CalHint, RX, 0.265f, 1.25f, G.CalHint.Contains(TEXT("STEP")) || G.CalHint.Contains(TEXT("MOVE")) || G.CalHint.Contains(TEXT("COME")) ? Red : Lilac);
+	Fill(RX - 0.2f, 0.31f, 0.40f, 0.022f, FLinearColor(0.15f, 0.08f, 0.25f, 0.9f));
+	Fill(RX - 0.2f, 0.31f, 0.40f * FMath::Clamp(G.CalProgress, 0.f, 1.f), 0.022f, Green);
+	if (G.CalCountNeed > 0) Label(FString::Printf(TEXT("%d / %d"), G.CalCountNow, G.CalCountNeed), RX, 0.43f, 3.2f, G.CalCountNow >= G.CalCountNeed ? Green : Cyan);
+	if (G.CalChecks.Num()) Fill(0.47f, 0.66f, 0.50f, 0.045f * G.CalChecks.Num() + 0.02f, FLinearColor(0.f, 0.f, 0.f, 0.6f));
+	float Y = 0.69f;
+	for (const TPair<FString, bool>& Check : G.CalChecks)
+	{
+		Label((Check.Value ? TEXT("OK    ") : TEXT("NO    ")) + Check.Key, 0.49f, Y, 1.0f, Check.Value ? Green : Red, -1);
+		Y += 0.045f;
+	}
+	Label(TEXT("SPACE  skip this step          K  play with the keyboard instead"), 0.5f, 0.94f, 0.95f, Lilac);
+}
+
 void AKSHUD::DrawHUD()
 {
 	Super::DrawHUD();
@@ -172,6 +232,7 @@ void AKSHUD::DrawHUD()
 	switch (G->Phase)
 	{
 	case EKSPhase::Street: case EKSPhase::PullIn: case EKSPhase::Ending: DrawStreet(*G); break;
+	case EKSPhase::Calibrate: DrawCalibrate(*G); break;
 	default: DrawFight(*G); break;
 	}
 

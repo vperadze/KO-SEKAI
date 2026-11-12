@@ -15,6 +15,7 @@ class UStaticMesh;
 class USkeletalMeshComponent;
 class UAnimSequence;
 class UPointLightComponent;
+class UPoseableMeshComponent;
 
 namespace KSJoint
 {
@@ -76,6 +77,10 @@ public:
 	void SetFace(const TArray<FString>& Candidates);
 	/** Sideways lean (cm, +Y is the fighter's right) and vertical squash (1 = standing), eased over a few frames. */
 	void SetBodyShift(float SideCm, float Squash);
+	/** Makes the fighter's arms copy the player's real arms (33 MediaPipe world landmarks, metres); the rest of the
+	 *  body keeps playing its clip. Pass nullptr to go back to the clip's own arms. */
+	void SetTrackedArms(const TArray<FVector>* Landmarks);
+	bool HasTrackedArms() const { return bPuppet; }
 
 	/* ---- contact ---- */
 	/** While a punch clip plays: steps and crouches the fighter so that the glove is at Point (world space) on the impact frame. */
@@ -85,6 +90,8 @@ public:
 	FVector GloveWorld(EKSArm Arm) const;
 	/** Front of the face in world space. bHome ignores the fighter's own dodge and duck, so a dodged punch really misses. */
 	FVector FaceWorld(bool bHome) const;
+	/** Where the left hand is DRAWN, measured from the head. For the self-test: a body frozen in one pose gives a constant. */
+	FVector DrawnHandFromHead() const;
 	/** A shove backwards (cm) that springs back, used when a punch is blocked. */
 	void Knock(float Cm) { KnockNow += Cm; }
 	/** A punch landed on this fighter: the body is thrown by it and wobbles back like a spring. A straight snaps the
@@ -114,6 +121,14 @@ private:
 	FString FaceShown;
 	float ShiftTarget = 0.f, ShiftNow = 0.f, SquashTarget = 1.f, SquashNow = 1.f;
 	UPROPERTY() TObjectPtr<UPointLightComponent> HitLight;
+	UPROPERTY() TObjectPtr<UPoseableMeshComponent> Puppet;         // shown instead of Skel while the arms are tracked
+	void PoseArm(bool bLeft);
+	TArray<FVector> Tracked;
+	bool bPuppet = false;
+	TArray<FTransform> ShownPose, BlendFrom;   // the pose on screen last frame, and the pose a new clip is eased in from
+	float BlendLeft = 0.f, BlendTime = 0.12f;
+	TArray<FTransform> PrevShownPose, BlendPrev;   // one frame earlier: gives each bone's speed when a clip changes
+	float ShownDt = 0.f, BlendDt = 0.f;
 	UPROPERTY() TObjectPtr<USceneComponent> Pivot;                  // at the feet; the hit recoil tilts and moves it
 	UPROPERTY() TObjectPtr<UStaticMeshComponent> Burst;             // the flash of impact at the point of contact
 	UPROPERTY() TObjectPtr<UMaterialInstanceDynamic> BurstMID;
