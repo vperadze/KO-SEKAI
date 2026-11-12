@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>KO-SEKAI tracking test</title>
+<link rel="icon" href="data:,">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap">
 <style>
 :root {
@@ -30,11 +31,12 @@ aside { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .box { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px; }
 .box h2 { font: 11px var(--mono); text-transform: uppercase; letter-spacing: 1.5px; color: var(--muted); margin: 0 0 8px; }
 .row { display: flex; flex-wrap: wrap; gap: 8px; }
-button { font: 600 13px system-ui, sans-serif; color: var(--text); background: #33205c; border: 1px solid var(--line); border-radius: 4px; padding: 9px 12px; cursor: pointer; }
+button, select { font: 600 13px system-ui, sans-serif; color: var(--text); background: #33205c; border: 1px solid var(--line); border-radius: 4px; padding: 9px 12px; cursor: pointer; }
+select { padding: 6px 8px; }
 button:hover:not(:disabled) { background: #432b78; }
-button:disabled { opacity: 0.4; cursor: default; }
+button:disabled, select:disabled { opacity: 0.4; cursor: default; }
 button.go { background: var(--right); border-color: var(--right); color: #1a0420; }
-button:focus-visible, input:focus-visible { outline: 2px solid var(--hit); outline-offset: 2px; }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--hit); outline-offset: 2px; }
 label { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); margin-top: 10px; }
 input[type=range] { flex: 1; min-width: 0; accent-color: var(--right); }
 .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; font: 12px var(--mono); }
@@ -51,12 +53,16 @@ td:last-child { text-align: right; font-variant-numeric: tabular-nums; color: va
 #log div:first-child { color: var(--text); }
 .ok { color: var(--ok); } .bad { color: var(--bad); }
 p.note { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
+#armReadout { white-space: pre-line; font-family: var(--mono); }
+a.fightlink { margin-left: auto; font: 11px var(--arcade); color: var(--hit); text-decoration: none; border: 1px solid var(--hit); padding: 7px 10px; border-radius: 3px; }
+a.fightlink:hover { background: var(--hit); color: #1a1300; }
 </style>
 </head>
 <body>
 <header>
   <h1>KO-SEKAI</h1>
   <span>Move tracking test · video stays on this computer</span>
+  <a class="fightlink" href="fight.html">Go to the fight &rarr;</a>
 </header>
 <main>
   <section class="cam">
@@ -76,7 +82,15 @@ p.note { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
         <button id="btnRec" type="button" disabled>Record guided test</button>
       </div>
       <label for="sens">Punch sensitivity <input type="range" id="sens" min="0.6" max="1.8" step="0.05" value="1"> <b id="sensVal">1.00</b></label>
-      <p class="note">Stand so your head, shoulders and both hands are in view, hands up in guard, then press Calibrate.</p>
+      <label for="model">Tracking model
+        <select id="model">
+          <option value="full" selected>Full (accurate)</option>
+          <option value="lite">Lite (fastest)</option>
+          <option value="heavy">Heavy (most accurate, slow)</option>
+        </select>
+      </label>
+      <p class="note">Stand so your head, shoulders and both hands are in view, hands up in guard. The page calibrates itself once you hold still for a moment; press Calibrate to redo it.</p>
+      <p class="note">Block = pull both gloves together in front of your face (cover up). Normal guard is not a block.</p>
     </div>
     <div class="box">
       <h2>Tracking</h2>
@@ -85,7 +99,7 @@ p.note { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
         <div><b id="ms">0</b><span>model ms</span></div>
         <div><b id="seen">no</b><span>body seen</span></div>
       </div>
-      <p class="note" id="armReadout" style="white-space: pre-line; font-family: var(--mono);">Arm readings appear here.</p>
+      <p class="note" id="armReadout">Arm readings appear here.</p>
     </div>
     <div class="box">
       <h2>Held stances</h2>
@@ -112,36 +126,27 @@ p.note { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
 </main>
 
 <script type="module">
-import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
-
-const WASM = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm";
-const MODEL = "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task";
-const SHOULDER_M = 0.38;            // rough shoulder width in metres, converts image speeds to m/s
-const MOVES = ["Left straight", "Right straight", "Left hook", "Right hook", "Left uppercut", "Right uppercut", "Block", "Evade left", "Evade right", "Duck"];
+import { Detector, PoseCamera, MOVES, STANCES, TUNE, drawPose, r3 } from "./tracker.js";
 
 const $ = (id) => document.getElementById(id);
 const video = $("v"), canvas = $("c"), g = canvas.getContext("2d");
 const ui = { status: $("status"), big: $("big"), prompt: $("prompt"), cam: $("btnCam"), cal: $("btnCal"), drill: $("btnDrill"),
-  sens: $("sens"), sensVal: $("sensVal"), dbg: $("armReadout"), rec: $("btnRec"), fps: $("fps"), ms: $("ms"), seen: $("seen"), counts: $("counts"), log: $("log"), drillOut: $("drillOut"),
+  sens: $("sens"), sensVal: $("sensVal"), model: $("model"), dbg: $("armReadout"), rec: $("btnRec"), fps: $("fps"), ms: $("ms"),
+  seen: $("seen"), counts: $("counts"), log: $("log"), drillOut: $("drillOut"),
   chips: { Block: $("chBlock"), "Evade left": $("chEvL"), "Evade right": $("chEvR"), Duck: $("chDuck") } };
 
-let landmarker = null, running = false, stream = null, lastVideoTime = -1;
-let base = null, wantCal = false, lastEventAt = 0, bigTimer = 0;
-let frames = 0, fpsAt = performance.now(), modelMs = 0;
+const det = new Detector();
+const cam = new PoseCamera(video, onResult);
+let running = false, lastEventAt = 0, bigTimer = 0, dbgAt = 0, uiLoopId = 0;
 const counts = Object.fromEntries(MOVES.map((m) => [m, 0]));
-const arms = [
-  { name: "Left", sh: 11, el: 13, wr: 15, sign: -1, prev: null, v: { x: 0, y: 0, z: 0 }, cool: 0 },
-  { name: "Right", sh: 12, el: 14, wr: 16, sign: 1, prev: null, v: { x: 0, y: 0, z: 0 }, cool: 0 }
-];
-const held = { Block: false, "Evade left": false, "Evade right": false, Duck: false };
-let blockSince = 0, dbgAt = 0;
 let drill = null;
+const CAL_PROMPT = "HOLD STILL IN GUARD";
 
 /* ---------- guided recording: saves joint numbers (no images) for tuning ---------- */
 const REC_STEPS = ["still", "left straight", "left straight", "right straight", "right straight", "left hook", "right hook",
   "left uppercut", "right uppercut", "block", "evade left", "evade right", "duck", "still"];
+const REC_JOINTS = [0, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24];
 let rec = null;
-const r3 = (v) => Math.round(v * 1000) / 1000;
 function recTick(now) {
   if (!rec || now < rec.until) return;
   rec.i += 1;
@@ -150,7 +155,8 @@ function recTick(now) {
   ui.prompt.textContent = rec.label === "still" ? "STAND STILL IN GUARD" : rec.label.toUpperCase() + " - ONCE";
 }
 async function recEnd() {
-  const data = { sens: Number(ui.sens.value), w: canvas.width, h: canvas.height, frames: rec.frames, events: rec.events };
+  const data = { version: 2, model: cam.modelName, sens: Number(ui.sens.value), w: canvas.width, h: canvas.height, tune: TUNE,
+    joints: REC_JOINTS, jointFields: ["x", "y", "visibility", "worldX", "worldY", "worldZ"], frames: rec.frames, events: rec.events };
   rec = null; ui.prompt.textContent = ""; ui.rec.textContent = "Record guided test"; ui.status.textContent = "Saving recording…";
   try {
     const res = await fetch("/record", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
@@ -175,8 +181,9 @@ function renderCounts() {
 renderCounts();
 ui.sens.addEventListener("input", () => { ui.sensVal.textContent = Number(ui.sens.value).toFixed(2); });
 
-function fire(name, now) {
-  if (rec) rec.events.push({ t: Math.round(now - rec.t0), name });
+function fire(name, extra) {
+  const now = performance.now();
+  if (rec) rec.events.push({ t: Math.round(now - rec.t0), name, ...extra });
   counts[name] += 1; renderCounts();
   const gap = lastEventAt ? Math.round(now - lastEventAt) + " ms after previous" : "first";
   lastEventAt = now;
@@ -228,188 +235,86 @@ ui.drill.addEventListener("click", () => {
   ui.drill.textContent = "Stop drill"; ui.drillOut.textContent = "Get into guard…"; ui.prompt.textContent = "GET READY";
 });
 
-/* ---------- pose handling ---------- */
-function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
-
-function handle(res, now) {
+/* ---------- per camera frame ---------- */
+function onResult(res, t, err) {
+  if (err) { ui.status.textContent = "Tracking error: " + err.message; return; }
   g.drawImage(video, 0, 0, canvas.width, canvas.height);
-  const L = res.landmarks && res.landmarks[0], Wd = res.worldLandmarks && res.worldLandmarks[0];
-  const ok = !!(L && Wd);
-  ui.seen.textContent = ok ? "yes" : "no";
-  if (!ok) { arms.forEach((a) => { a.buf = []; }); return; }
-
-  const ar = canvas.width / canvas.height;
-  const pt = (i) => ({ x: L[i].x * ar, y: L[i].y });          // image-height units, aspect corrected
-  const px = (i) => ({ x: L[i].x * canvas.width, y: L[i].y * canvas.height });
-  const sL = pt(11), sR = pt(12), nose = pt(0);
-  const S = dist(sL, sR);
-  if (S < 0.04) return;
-  const mid = { x: (sL.x + sR.x) / 2, y: (sL.y + sR.y) / 2 };
-
-  if (!base || wantCal) { base = { midX: mid.x, noseY: nose.y, S }; wantCal = false; ui.status.textContent = "Guard calibrated"; }
-
-  // skeleton
-  g.lineWidth = 4; g.lineCap = "round";
-  const seg = (a, b, color) => { const p = px(a), q = px(b); g.strokeStyle = color; g.beginPath(); g.moveTo(p.x, p.y); g.lineTo(q.x, q.y); g.stroke(); };
-  seg(11, 12, "#efe6ff"); seg(11, 23, "#a895cf"); seg(12, 24, "#a895cf"); seg(23, 24, "#a895cf");
-  seg(11, 13, "#29e6ff"); seg(13, 15, "#29e6ff"); seg(12, 14, "#ff3fb4"); seg(14, 16, "#ff3fb4");
-  const dot = (i, color, r) => { const p = px(i); g.fillStyle = color; g.beginPath(); g.arc(p.x, p.y, r, 0, Math.PI * 2); g.fill(); };
-  dot(15, "#29e6ff", 12); dot(16, "#ff3fb4", 12); dot(0, "#ffe14d", 8);
-
-  const k = Number(ui.sens.value);
-  const THR = 1.5 / k;                                        // m/s, same for all three punch directions
-
-  const dbg = [], candidates = [], feats = {};
-  for (const a of arms) {
-    const sh = pt(a.sh), wr = pt(a.wr), el = pt(a.el);
-    const rel = { x: (wr.x - sh.x) / S, y: (wr.y - sh.y) / S };
-    const depth = Wd[a.sh].z - Wd[a.wr].z;                    // metres, positive = fist towards the camera
-    // elbow angle in 3D: about 50 degrees in guard, 150+ when the arm is straight
-    const E = Wd[a.el], A = Wd[a.sh], B = Wd[a.wr];
-    const u = { x: A.x - E.x, y: A.y - E.y, z: A.z - E.z }, w = { x: B.x - E.x, y: B.y - E.y, z: B.z - E.z };
-    const cos = (u.x * w.x + u.y * w.y + u.z * w.z) / (Math.hypot(u.x, u.y, u.z) * Math.hypot(w.x, w.y, w.z) || 1);
-    const ang = Math.acos(Math.max(-1, Math.min(1, cos))) * 180 / Math.PI;
-    // apparent fist size: grows when the fist comes towards the camera
-    const fi = a.wr + 4, pk = a.wr + 2;
-    const handOk = (L[fi].visibility ?? 1) > 0.5 && (L[pk].visibility ?? 1) > 0.5;
-    const hs = handOk ? (dist(wr, pt(fi)) + dist(wr, pt(pk))) / 2 / S : 0;
-    const elbowUp = (el.y - sh.y) / S < 0.3;
-
-    if (!a.buf) a.buf = [];
-    const elrel = { x: (el.x - sh.x) / S, y: (el.y - sh.y) / S };
-    a.buf.push({ t: now, rel, elrel, depth, ang, hs });
-    feats[a.name] = [r3(rel.x), r3(rel.y), r3(elrel.x), r3(elrel.y), r3(depth), Math.round(ang), r3(hs), r3(L[a.wr].visibility ?? 1), r3(L[a.el].visibility ?? 1)];
-    while (a.buf.length && a.buf[0].t < now - 450) a.buf.shift();
-    let old = null;
-    for (const s of a.buf) { if (s.t <= now - 100) old = s; else break; }
-
-    let hsRatio = 1;
-    if (hs > 0) { let lo = hs; for (const s of a.buf) if (s.hs > 0 && s.hs < lo) lo = s.hs; hsRatio = hs / lo; }
-    dbg.push(`${a.name}: elbow ${Math.round(ang)}°, depth ${depth.toFixed(2)} m, fist ×${hsRatio.toFixed(2)}`);
-
-    if (old && now > a.cool) {
-      const dt = (now - old.t) / 1000;
-      const fwd = (depth - old.depth) / dt;
-      const up = -(rel.y - old.rel.y) / dt * SHOULDER_M;
-      const inward = (rel.x - old.rel.x) / dt * a.sign * SHOULDER_M;
-      const angRate = (ang - old.ang) / dt;
-      let lowest = rel.y; for (const s of a.buf) if (s.rel.y > lowest) lowest = s.rel.y;
-      const dipped = lowest > 0.35 && lowest - rel.y > 0.5;   // hand dropped below the shoulder, then rose
-      // Gate: the arm must really have moved on screen in the last 220 ms.
-      // Net displacement (not path length) so that a still arm's jitter adds up to nothing.
-      let first = a.buf[a.buf.length - 1], minAng = ang;
-      for (const s of a.buf) { if (s.t >= now - 220) { first = s; break; } }
-      for (const s of a.buf) if (s.ang < minAng) minAng = s.ang;
-      const moved = Math.hypot(rel.x - first.rel.x, rel.y - first.rel.y) + Math.hypot(elrel.x - first.elrel.x, elrel.y - first.elrel.y);
-      const active = moved > 0.45 / k;
-      // A straight punch starts from a bent arm and opens by at least 35 degrees.
-      const extending = angRate > 300 / k && ang > 115 && minAng < 105 && ang - minAng > 35;
-
-      let move = "";
-      if (!active) move = "";
-      else if (up > THR && dipped) move = "uppercut";
-      else if (extending) move = "straight";
-      else if (inward > THR && elbowUp && Math.abs(rel.y) < 0.75) move = "hook";
-      else if (fwd > THR && depth > 0.2 && minAng < 105 && hsRatio > 1.15) move = "straight";
-      if (move) {
-        // How much did this wrist really travel, and was it one sudden jump?
-        // A jump means the camera lost this hand (hidden behind the other arm) and snapped it onto the punching fist.
-        let path = 0, maxStep = 0;
-        for (let i = 1; i < a.buf.length; i++) {
-          if (a.buf[i].t < now - 260) continue;
-          const d = Math.hypot(a.buf[i].rel.x - a.buf[i - 1].rel.x, a.buf[i].rel.y - a.buf[i - 1].rel.y);
-          path += d; if (d > maxStep) maxStep = d;
-        }
-        const vis = Math.min(L[a.wr].visibility ?? 1, L[a.el].visibility ?? 1);
-        const jumped = maxStep > 0.5 && maxStep > path * 0.7;
-        if (jumped || vis < 0.5) { a.buf.length = 0; a.cool = now + 150; }
-        else candidates.push({ arm: a, move, path, vis });
-      }
-    }
+  const out = det.process(res, t, canvas.width, canvas.height, Number(ui.sens.value));
+  ui.seen.textContent = det.seen ? "yes" : "no";
+  if (det.cal) {
+    if (!ui.prompt.textContent) ui.prompt.textContent = CAL_PROMPT;
+    ui.status.textContent = `Calibrating, hold still… ${Math.round(det.calProgress * 100)}%`;
   }
-  if (candidates.length) {
-    // if both arms claim a punch in the same frame, the one that really travelled wins
-    candidates.sort((p, q) => (q.path * q.vis) - (p.path * p.vis));
-    const win = candidates[0];
-    for (const a of arms) { a.buf.length = 0; a.cool = now + (a === win.arm ? 380 : 260); }
-    fire(win.arm.name + " " + win.move, now);
+  if (out.calibratedNow) {
+    if (ui.prompt.textContent === CAL_PROMPT) ui.prompt.textContent = "";
+    ui.status.textContent = "Guard calibrated";
   }
-  if (now - dbgAt > 200) { dbgAt = now; ui.dbg.textContent = dbg.join("\n"); }
-  if (rec && rec.label) rec.frames.push({ t: Math.round(now - rec.t0), label: rec.label, S: r3(S), nose: [r3(nose.x), r3(nose.y)], mid: [r3(mid.x), r3(mid.y)], L: feats.Left, R: feats.Right });
+  for (const e of out.events) fire(e.name, e.info || { arm: e.arm, sc: e.sc });
+  if (rec) for (const j of out.judged) if (!j.move) rec.events.push({ t: Math.round(performance.now() - rec.t0), reject: j.why, arm: j.arm, sc: j.sc });
+  for (const k of STANCES) ui.chips[k].classList.toggle("on", det.held[k]);
+  drawPose(g, res, canvas.width, canvas.height, det.arms);
 
-  // held stances
-  const wL = pt(15), wR = pt(16);
-  const guardUp = dist(wL, nose) / S < 0.95 && dist(wR, nose) / S < 0.95 && wL.y < sL.y + 0.1 * S && wR.y < sR.y + 0.1 * S;
-  if (guardUp) { if (!blockSince) blockSince = now; } else blockSince = 0;
-  const lean = (mid.x - base.midX) / base.S;
-  const state = {
-    Block: guardUp && now - blockSince > 120,
-    "Evade left": lean > 0.45,                               // the player's own left
-    "Evade right": lean < -0.45,
-    Duck: (nose.y - base.noseY) / base.S > 0.5
-  };
-  for (const name of Object.keys(state)) {
-    if (state[name] && !held[name]) fire(name, now);
-    if (state[name] !== held[name]) { held[name] = state[name]; ui.chips[name].classList.toggle("on", state[name]); }
+  const wall = performance.now();
+  if (wall - dbgAt > 200 && det.seen) {
+    dbgAt = wall;
+    ui.dbg.textContent = det.arms.map((a) => {
+      const s = a.buf[a.buf.length - 1];
+      return `${a.name}: elbow ${s ? Math.round(s.ang) : 0}°, activity ${a.act.toFixed(2)}\n  last: ${a.last}`;
+    }).join("\n") + (det.stanceDbg ? "\n" + det.stanceDbg : "");
+  }
+
+  const L = res && res.landmarks && res.landmarks[0], Wd = res && res.worldLandmarks && res.worldLandmarks[0];
+  if (rec && rec.label && L && Wd) {
+    const raw = [];
+    for (const j of REC_JOINTS) raw.push(r3(L[j].x), r3(L[j].y), r3(L[j].visibility ?? 1), r3(Wd[j].x), r3(Wd[j].y), r3(Wd[j].z));
+    rec.frames.push({ t: Math.round(t - rec.t0), label: rec.label, raw });
   }
 }
 
-function loop() {
-  if (!running) return;
+function uiLoop(id) {
+  if (!running || id !== uiLoopId) return;
   const now = performance.now();
-  if (video.readyState >= 2 && video.currentTime !== lastVideoTime) {
-    lastVideoTime = video.currentTime;
-    const t0 = performance.now();
-    let res = null;
-    try { res = landmarker.detectForVideo(video, now); } catch (e) { ui.status.textContent = "Tracking error: " + e.message; }
-    modelMs = performance.now() - t0;
-    if (res) handle(res, now);
-    frames += 1;
-  }
-  if (now - fpsAt >= 1000) {
-    ui.fps.textContent = String(Math.round(frames * 1000 / (now - fpsAt))); ui.ms.textContent = String(Math.round(modelMs));
-    frames = 0; fpsAt = now;
-  }
+  ui.fps.textContent = String(cam.fps); ui.ms.textContent = String(Math.round(cam.modelMs));
   drillTick(now);
   recTick(now);
-  requestAnimationFrame(loop);
+  requestAnimationFrame(() => uiLoop(id));
 }
 
-async function makeLandmarker(delegate) {
-  const files = await FilesetResolver.forVisionTasks(WASM);
-  return PoseLandmarker.createFromOptions(files, { baseOptions: { modelAssetPath: MODEL, delegate }, runningMode: "VIDEO", numPoses: 1 });
-}
+ui.model.addEventListener("change", async () => {
+  if (!running) return;
+  ui.model.disabled = true;
+  try { ui.status.textContent = `Loading ${ui.model.value} tracking model…`; await cam.setModel(ui.model.value); ui.status.textContent = `Tracking with the ${cam.modelName} model`; }
+  catch (e) { ui.status.textContent = "Could not load model: " + (e && e.message ? e.message : e); }
+  ui.model.disabled = false;
+});
 
 async function start() {
   ui.cam.disabled = true;
   try {
-    ui.status.textContent = "Loading tracking model…";
-    if (!landmarker) {
-      try { landmarker = await makeLandmarker("GPU"); } catch (e) { landmarker = await makeLandmarker("CPU"); }
-    }
+    ui.status.textContent = `Loading ${ui.model.value} tracking model…`;
+    await cam.setModel(ui.model.value);
     ui.status.textContent = "Waiting for camera permission…";
-    stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 60 } }, audio: false });
-    video.srcObject = stream; await video.play();
-    canvas.width = video.videoWidth || 640; canvas.height = video.videoHeight || 480;
-    running = true; base = null; lastVideoTime = -1;
-    ui.status.textContent = "Tracking. Get into guard and press Calibrate.";
+    await cam.start();
+    canvas.width = cam.width; canvas.height = cam.height;
+    det.reset(); running = true;
+    ui.status.textContent = "Tracking. Get into guard and hold still to calibrate.";
     ui.cam.textContent = "Stop camera"; ui.cal.disabled = false; ui.drill.disabled = false; ui.rec.disabled = false;
-    requestAnimationFrame(loop);
+    uiLoop(++uiLoopId);
   } catch (e) {
     ui.status.textContent = "Could not start: " + (e && e.message ? e.message : e);
   }
   ui.cam.disabled = false;
 }
 function stop() {
-  running = false;
-  if (stream) stream.getTracks().forEach((t) => t.stop());
-  stream = null; video.srcObject = null; drill = null; ui.prompt.textContent = "";
+  running = false; uiLoopId += 1; cam.stop(); det.reset();
+  drill = null; ui.prompt.textContent = "";
   ui.cam.textContent = "Start camera"; ui.cal.disabled = true; ui.drill.disabled = true; ui.drill.textContent = "Start 10-move drill";
   rec = null; ui.rec.disabled = true; ui.rec.textContent = "Record guided test";
+  for (const k of STANCES) ui.chips[k].classList.remove("on");
   ui.status.textContent = "Camera stopped"; ui.seen.textContent = "no";
 }
 ui.cam.addEventListener("click", () => { if (running) stop(); else start(); });
-ui.cal.addEventListener("click", () => { wantCal = true; });
+ui.cal.addEventListener("click", () => det.calibrate());
 </script>
 </body>
 </html>

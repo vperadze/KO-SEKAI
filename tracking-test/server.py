@@ -16,6 +16,13 @@ MAX_BYTES = 20_000_000
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
+    # Windows can map .js to text/plain in the registry, which browsers refuse for module scripts.
+    extensions_map = {
+        **http.server.SimpleHTTPRequestHandler.extensions_map,
+        ".js": "text/javascript",
+        ".mjs": "text/javascript",
+    }
+
     def do_POST(self):
         if self.path != "/record":
             self.send_error(404)
