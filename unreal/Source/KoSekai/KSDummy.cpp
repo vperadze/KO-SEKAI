@@ -1,8 +1,14 @@
 #include "KSDummy.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Components/PointLightComponent.h"
+#include "Engine/SkeletalMesh.h"
+#include "Animation/AnimSequence.h"
+#include "Animation/AnimSingleNodeInstance.h"
 #include "Engine/StaticMesh.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "UObject/ConstructorHelpers.h"
+#include "KSImpactData.h"
 
 using namespace KSJoint;
 
@@ -182,7 +188,170 @@ AKSDummy::AKSDummy()
 	Fists[0] = MakePart(TEXT("FistL"), Sphere.Object);
 	Fists[1] = MakePart(TEXT("FistR"), Sphere.Object);
 
+	// The real fighter, when one is assigned. The imported models face +Y, so they are turned to face +X like the dummy.
+	Pivot = CreateDefaultSubobject<USceneComponent>(TEXT("Pivot"));
+	Pivot->SetupAttachment(Root);
+	Skel = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("Skel"));
+	Skel->SetupAttachment(Pivot);
+	Skel->SetRelativeRotation(FRotator(0.f, -90.f, 0.f));
+	Skel->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Skel->SetVisibility(false);
+
+	// A burst of light at the point of contact when a hit lands.
+	HitLight = CreateDefaultSubobject<UPointLightComponent>(TEXT("HitLight"));
+	HitLight->SetupAttachment(Root);
+	HitLight->SetIntensityUnits(ELightUnits::Candelas);
+	HitLight->SetIntensity(0.f);
+	HitLight->SetAttenuationRadius(170.f);
+	HitLight->SetCastShadows(false);
+
+	Burst = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Burst"));
+	Burst->SetupAttachment(Root);
+	Burst->SetStaticMesh(Sphere.Object);
+	Burst->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Burst->SetCastShadow(false);
+	Burst->SetUsingAbsoluteLocation(true);
+	Burst->SetUsingAbsoluteScale(true);
+	Burst->SetVisibility(false);
+
 	Current = Target = KSPoses::Guard();
+}
+
+bool AKSDummy::UseCharacter(const FString& Folder)
+{
+	static const TCHAR* ClipNames[] = { TEXT("Combat_Stance"), TEXT("Left_Jab_from_Guard"), TEXT("Right_Jab_from_Guard"),
+		TEXT("Left_Hook_from_Guard"), TEXT("Right_Upper_Hook_from_Guard"), TEXT("Left_Uppercut_from_Guard"), TEXT("Right_Uppercut_from_Guard"),
+		TEXT("Block1"), TEXT("Stand_Dodge"), TEXT("Stand_Dodge_1"), TEXT("Face_Punch_Reaction"), TEXT("Face_Punch_Reaction_1"),
+		TEXT("Hit_Reaction_to_Waist"), TEXT("Knock_Down"), TEXT("victory"), TEXT("Chest_Pound_Taunt"), TEXT("Punch_Combo") };
+	static const TCHAR* FaceNames[] = { TEXT("hurt"), TEXT("ko"), TEXT("dizzy"), TEXT("hit"), TEXT("smug"), TEXT("happy"), TEXT("love"), TEXT("neutral") };
+
+	const FString Base = FString::Printf(TEXT("/Game/KoSekai/Characters/%s"), *Folder);
+	const FString Meshes = Base + TEXT("/animation_glb/SkeletalMeshes/animation_glb");
+	USkeletalMesh* Mesh = LoadObject<USkeletalMesh>(nullptr, *(Meshes + TEXT(".animation_glb")));
+	bCharacter = Mesh != nullptr;
+	Skel->SetVisibility(bCharacter);
+	for (UStaticMeshComponent* Bone : Bones) Bone->SetVisibility(!bCharacter);
+	HeadMesh->SetVisibility(!bCharacter);
+	for (UStaticMeshComponent* Fist : Fists) Fist->SetVisibility(!bCharacter);
+	if (!bCharacter) return false;
+
+	Skel->SetSkeletalMesh(Mesh);
+	Skel->SetAnimationMode(EAnimationMode::AnimationSingleNode);
+	Skel->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+	NormalFace = Mesh->GetMaterials().Num() ? Mesh->GetMaterials()[0].MaterialInterface : nullptr;
+	Skel->SetMaterial(0, NormalFace);
+	FaceShown.Reset();
+
+	Clips.Reset();
+	for (const TCHAR* Name : ClipNames)
+	{
+		const FString Path = FString::Printf(TEXT("%s%s.animation_glb%s"), *Meshes, Name, Name);
+		if (UAnimSequence* Clip = LoadObject<UAnimSequence>(nullptr, *Path)) Clips.Add(Name, Clip);
+	}
+	// Face materials are named after the fighter, without the version suffix on the folder.
+	FString Prefix = Folder;
+	Prefix.RemoveFromEnd(TEXT("V2"));
+	Faces.Reset();
+	for (const TCHAR* Name : FaceNames)
+	{
+		const FString Asset = FString::Printf(TEXT("MI_%s_Face_%s"), *Prefix, Name);
+		const FString Path = FString::Printf(TEXT("%s/Faces/%s.%s"), *Base, *Asset, *Asset);
+		if (UMaterialInterface* Face = LoadObject<UMaterialInterface>(nullptr, *Path, nullptr, LOAD_NoWarn | LOAD_Quiet)) Faces.Add(Name, Face);
+	}
+	ImpactGlove.Reset();
+	for (const FKSImpact& Row : KSImpacts) if (Folder == Row.Fighter) ImpactGlove.Add(Row.Clip, Row.Glove);
+	ShiftNow = ShiftTarget = 0.f; SquashNow = SquashTarget = 1.f;
+	Reach = FVector::ZeroVector; ReachSquash = 1.f; KnockNow = 0.f; bAiming = false;
+	RecoilPos = RecoilVel = FVector::ZeroVector; Lean = LeanVel = FVector2D::ZeroVector;
+	PlayClip(TEXT("Combat_Stance"), true);
+	return true;
+}
+
+void AKSDummy::PlayClip(const FString& Clip, bool bLoop, float Rate, float StartSeconds)
+{
+	if (!bCharacter) return;
+	const TObjectPtr<UAnimSequence>* Found = Clips.Find(Clip);
+	if (!Found || !*Found) return;
+	Skel->PlayAnimation(*Found, bLoop);
+	Skel->SetPlayRate(Rate);
+	if (StartSeconds > 0.f) Skel->SetPosition(FMath::Min(StartSeconds, (*Found)->GetPlayLength() - 0.01f), false);
+}
+
+void AKSDummy::SetClipRate(float Rate)
+{
+	if (bCharacter) Skel->SetPlayRate(Rate);
+}
+
+void AKSDummy::SetFace(const TArray<FString>& Candidates)
+{
+	if (!bCharacter) return;
+	FString Pick;
+	UMaterialInterface* Material = NormalFace;
+	for (const FString& Name : Candidates)
+	{
+		if (const TObjectPtr<UMaterialInterface>* Face = Faces.Find(Name)) { Pick = Name; Material = *Face; break; }
+	}
+	if (Pick == FaceShown) return;
+	FaceShown = Pick;
+	Skel->SetMaterial(0, Material);
+}
+
+void AKSDummy::SetBodyShift(float SideCm, float Squash)
+{
+	ShiftTarget = SideCm; SquashTarget = Squash;
+}
+
+void AKSDummy::AimPunch(const FString& Clip, const FVector& Point, float Weight)
+{
+	bAiming = true; AimClip = Clip; AimTarget = Point; AimWeight = FMath::Clamp(Weight, 0.f, 1.f);
+}
+
+FVector AKSDummy::GloveWorld(EKSArm Arm) const
+{
+	if (!bCharacter) return GetJointWorld(Arm == EKSArm::Left ? KSJoint::WrL : KSJoint::WrR);
+	const FVector Hand = Skel->GetSocketLocation(Arm == EKSArm::Left ? TEXT("LeftHand") : TEXT("RightHand"));
+	const FVector Fore = Skel->GetSocketLocation(Arm == EKSArm::Left ? TEXT("LeftForeArm") : TEXT("RightForeArm"));
+	return Hand + (Hand - Fore).GetSafeNormal() * 10.f;   // the glove sits a little past the wrist
+}
+
+FVector AKSDummy::FaceWorld(bool bHome) const
+{
+	if (!bCharacter) return GetJointWorld(KSJoint::Head);
+	FVector Face = Skel->GetSocketLocation(TEXT("headfront"));
+	if (bHome)
+	{
+		const FVector Base = GetActorLocation();
+		Face -= GetActorRightVector() * ShiftNow;
+		Face.Z = Base.Z + (Face.Z - Base.Z) / FMath::Max(0.3f, SquashNow);
+	}
+	return Face;
+}
+
+void AKSDummy::TakeHit(EKSPunch Type, EKSArm AttackerArm, float Strength)
+{
+	if (!bCharacter) return;
+	// The attacker's left arm comes from this fighter's right, so it throws them to their left (-Y), and vice versa.
+	const float Side = AttackerArm == EKSArm::Left ? -1.f : 1.f;
+	switch (Type)
+	{
+	case EKSPunch::Straight:
+		RecoilVel.X -= 240.f * Strength; LeanVel.X += 190.f * Strength;
+		break;
+	case EKSPunch::Hook:
+		RecoilVel.X -= 90.f * Strength; RecoilVel.Y += Side * 260.f * Strength;
+		LeanVel.X += 60.f * Strength; LeanVel.Y += Side * 230.f * Strength;
+		break;
+	case EKSPunch::Uppercut:
+		RecoilVel.X -= 120.f * Strength; RecoilVel.Z += 230.f * Strength; LeanVel.X += 260.f * Strength;
+		break;
+	}
+}
+
+void AKSDummy::HitStop(float Seconds)
+{
+	if (!bCharacter) return;
+	StopLeft = Seconds;
+	Skel->GlobalAnimRateScale = 0.05f;
 }
 
 void AKSDummy::Setup(const FLinearColor& Body, const FLinearColor& Gloves, bool bGhost, float Glow)
@@ -232,6 +401,24 @@ void AKSDummy::Snap(const FKSPose& Pose)
 
 void AKSDummy::Flash(const FLinearColor& Color, float Seconds)
 {
+	if (bCharacter)
+	{
+		// The real fighters cannot glow, so a hit lights up their face instead.
+		HitLight->SetWorldLocation(FaceWorld(false) + GetActorForwardVector() * 30.f);
+		HitLight->SetLightColor(Color);
+		HitLight->SetIntensity(14.f);
+		LightLeft = Seconds + 0.06f;
+		// and a quick burst at the point of contact
+		if (!BurstMID && SolidMaterial) { BurstMID = UMaterialInstanceDynamic::Create(SolidMaterial, this); Burst->SetMaterial(0, BurstMID); }
+		if (BurstMID)
+		{
+			BurstMID->SetVectorParameterValue(TEXT("Color"), Color);
+			Burst->SetWorldLocation(FaceWorld(false) + GetActorForwardVector() * 10.f);
+			Burst->SetWorldScale3D(FVector(0.10f));
+			Burst->SetVisibility(true);
+			BurstAge = 0.f;
+		}
+	}
 	FlashColor = Color;
 	FlashLeft = Seconds;
 	ApplyColors(true);
@@ -251,6 +438,68 @@ void AKSDummy::Tick(float DeltaSeconds)
 	{
 		FlashLeft -= DeltaSeconds;
 		if (FlashLeft <= 0.f) ApplyColors(false);
+	}
+	if (bCharacter)
+	{
+		if (StopLeft > 0.f)
+		{
+			StopLeft -= DeltaSeconds;
+			if (StopLeft <= 0.f) Skel->GlobalAnimRateScale = 1.f;
+		}
+		const float Ease = 1.f - FMath::Exp(-16.f * DeltaSeconds);
+		ShiftNow = FMath::Lerp(ShiftNow, ShiftTarget, Ease);
+		SquashNow = FMath::Lerp(SquashNow, SquashTarget, Ease);
+
+		// Punch aim: nudge the whole body every frame until the glove is on the target. The clip supplies the punch;
+		// this supplies the step in, the sideways correction and the crouch that make it actually connect.
+		// We know where the glove will be on the clip's impact frame, so the step in, the sideways correction and
+		// the crouch needed to put it on the target are worked out directly and eased in.
+		FVector WantReach = FVector::ZeroVector;
+		float WantSquash = 1.f;
+		const FVector* Glove = bAiming ? ImpactGlove.Find(AimClip) : nullptr;
+		if (Glove)
+		{
+			const FVector Local = GetActorTransform().InverseTransformPositionNoScale(AimTarget);
+			WantReach.X = FMath::Clamp(Local.X - Glove->X, -45.f, 70.f) * AimWeight;
+			WantReach.Y = FMath::Clamp(Local.Y - Glove->Y, -40.f, 40.f) * AimWeight;
+			WantSquash = FMath::Lerp(1.f, FMath::Clamp(Local.Z / FMath::Max(20.f, Glove->Z), 0.76f, 1.06f), AimWeight);
+		}
+		const float Follow = 1.f - FMath::Exp(-(Glove ? 26.f : 9.f) * DeltaSeconds);
+		Reach = FMath::Lerp(Reach, WantReach, Follow);
+		ReachSquash = FMath::Lerp(ReachSquash, WantSquash, Follow);
+		KnockNow = FMath::Lerp(KnockNow, 0.f, 1.f - FMath::Exp(-7.f * DeltaSeconds));
+
+		// Hit recoil: a damped spring, so a hit throws the body and it wobbles back instead of sliding back.
+		{
+			const float Dt = FMath::Min(DeltaSeconds, 0.033f), Stiff = 230.f, Damp = 15.f;
+			RecoilVel += (-Stiff * RecoilPos - Damp * RecoilVel) * Dt;
+			RecoilPos += RecoilVel * Dt;
+			if (RecoilPos.Z < 0.f) { RecoilPos.Z = 0.f; RecoilVel.Z = FMath::Abs(RecoilVel.Z) * 0.25f; }   // feet stay on the floor
+			LeanVel += (-Stiff * Lean - Damp * LeanVel) * Dt;
+			Lean += LeanVel * Dt;
+			Lean.X = FMath::Clamp(Lean.X, -30.f, 30.f); Lean.Y = FMath::Clamp(Lean.Y, -30.f, 30.f);
+			Pivot->SetRelativeLocation(RecoilPos);
+			Pivot->SetRelativeRotation(FRotator(Lean.X, 0.f, Lean.Y));
+		}
+		if (BurstAge >= 0.f)
+		{
+			BurstAge += DeltaSeconds;
+			const float U = BurstAge / 0.14f;
+			if (U >= 1.f) { BurstAge = -1.f; Burst->SetVisibility(false); }
+			else
+			{
+				Burst->SetWorldScale3D(FVector(FMath::Lerp(0.10f, 0.55f, FMath::Sqrt(U))));
+				if (BurstMID) BurstMID->SetScalarParameterValue(TEXT("Glow"), 30.f * (1.f - U));
+			}
+		}
+		Skel->SetRelativeLocation(FVector(Reach.X - KnockNow, ShiftNow + Reach.Y, 0.f));
+		Skel->SetRelativeScale3D(FVector(1.f, 1.f, SquashNow * ReachSquash));
+
+		if (LightLeft > 0.f)
+		{
+			LightLeft -= DeltaSeconds;
+			if (LightLeft <= 0.f) HitLight->SetIntensity(0.f);
+		}
 	}
 	Layout();
 }

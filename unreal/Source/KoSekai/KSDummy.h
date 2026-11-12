@@ -12,6 +12,9 @@ class UStaticMeshComponent;
 class UMaterialInstanceDynamic;
 class UMaterialInterface;
 class UStaticMesh;
+class USkeletalMeshComponent;
+class UAnimSequence;
+class UPointLightComponent;
 
 namespace KSJoint
 {
@@ -62,6 +65,34 @@ public:
 	void Flash(const FLinearColor& Color, float Seconds);
 	FVector GetJointWorld(KSJoint::Type Joint) const;
 
+	/* ---- real fighters ---- */
+	/** Swaps the placeholder shapes for the fighter in /Game/KoSekai/Characters/<Folder>. Returns false if it is missing. */
+	bool UseCharacter(const FString& Folder);
+	bool HasCharacter() const { return bCharacter; }
+	/** Plays one of the fighter's clips by name ("Combat_Stance", "Left_Jab_from_Guard", ...). */
+	void PlayClip(const FString& Clip, bool bLoop, float Rate = 1.f, float StartSeconds = 0.f);
+	void SetClipRate(float Rate);
+	/** Shows the first of these faces that the fighter has ("hurt", "ko", "dizzy", ...); an empty list is the normal face. */
+	void SetFace(const TArray<FString>& Candidates);
+	/** Sideways lean (cm, +Y is the fighter's right) and vertical squash (1 = standing), eased over a few frames. */
+	void SetBodyShift(float SideCm, float Squash);
+
+	/* ---- contact ---- */
+	/** While a punch clip plays: steps and crouches the fighter so that the glove is at Point (world space) on the impact frame. */
+	void AimPunch(const FString& Clip, const FVector& Point, float Weight);
+	void StopAim() { bAiming = false; }
+	/** Centre of a glove in world space. */
+	FVector GloveWorld(EKSArm Arm) const;
+	/** Front of the face in world space. bHome ignores the fighter's own dodge and duck, so a dodged punch really misses. */
+	FVector FaceWorld(bool bHome) const;
+	/** A shove backwards (cm) that springs back, used when a punch is blocked. */
+	void Knock(float Cm) { KnockNow += Cm; }
+	/** A punch landed on this fighter: the body is thrown by it and wobbles back like a spring. A straight snaps the
+	 *  head back, a hook throws the fighter sideways (away from the attacker's punching arm), an uppercut lifts them. */
+	void TakeHit(EKSPunch Type, EKSArm AttackerArm, float Strength);
+	/** Freezes the pose for a moment, the way arcade fighters do on impact. */
+	void HitStop(float Seconds);
+
 private:
 	void Layout();
 	void ApplyColors(bool bFlashing);
@@ -74,6 +105,26 @@ private:
 	UPROPERTY() TObjectPtr<UMaterialInterface> GhostMaterial;
 	UPROPERTY() TObjectPtr<UMaterialInstanceDynamic> BodyMID;
 	UPROPERTY() TObjectPtr<UMaterialInstanceDynamic> GloveMID[2];
+
+	UPROPERTY() TObjectPtr<USkeletalMeshComponent> Skel;
+	UPROPERTY() TMap<FString, TObjectPtr<UAnimSequence>> Clips;
+	UPROPERTY() TMap<FString, TObjectPtr<UMaterialInterface>> Faces;
+	UPROPERTY() TObjectPtr<UMaterialInterface> NormalFace;
+	bool bCharacter = false;
+	FString FaceShown;
+	float ShiftTarget = 0.f, ShiftNow = 0.f, SquashTarget = 1.f, SquashNow = 1.f;
+	UPROPERTY() TObjectPtr<UPointLightComponent> HitLight;
+	UPROPERTY() TObjectPtr<USceneComponent> Pivot;                  // at the feet; the hit recoil tilts and moves it
+	UPROPERTY() TObjectPtr<UStaticMeshComponent> Burst;             // the flash of impact at the point of contact
+	UPROPERTY() TObjectPtr<UMaterialInstanceDynamic> BurstMID;
+	FVector RecoilPos = FVector::ZeroVector, RecoilVel = FVector::ZeroVector;   // cm, fighter space
+	FVector2D Lean = FVector2D::ZeroVector, LeanVel = FVector2D::ZeroVector;    // degrees: X = backwards, Y = to the right
+	float BurstAge = -1.f;
+	bool bAiming = false;
+	FString AimClip;
+	TMap<FString, FVector> ImpactGlove;   // glove position at each punch clip's impact frame, in the fighter's own space
+	FVector AimTarget = FVector::ZeroVector, Reach = FVector::ZeroVector;
+	float AimWeight = 0.f, ReachSquash = 1.f, KnockNow = 0.f, StopLeft = 0.f, LightLeft = 0.f;
 
 	FKSPose Current, Target;
 	float FollowSpeed = 12.f;

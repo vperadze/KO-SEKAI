@@ -61,7 +61,12 @@ public:
 	FString Subtitle, Prompt;
 	bool bLastResultWin = false, bLastResultDecision = false;
 	float ContinueLeft = 0.f;
-	const FKSFighterDef& Fighter() const { return Roster()[FighterIndex]; }
+	/** The opponent of the current fight: one of the roster, with the difficulty of its place on the ladder. */
+	const FKSFighterDef& Fighter() const { return CurrentDef; }
+	/** The fighter the player was given for this run. */
+	const FKSFighterDef& PlayerFighter() const { return Roster()[PlayerChar]; }
+	int32 NumFights() const { return Ladder.Num(); }
+	const FKSFighterDef& LadderFighter(int32 Position) const { return Roster()[Ladder[FMath::Clamp(Position, 0, Ladder.Num() - 1)]]; }
 	UKSTrackingSubsystem* Tracking() const { return TrackingSubsystem; }
 
 private:
@@ -82,6 +87,8 @@ private:
 	void TickEnding(float Dt);
 	void UpdateFightCamera(float Dt);
 	void UpdateFighterPoses(float Dt);
+	void DriveCharacters();
+	void PickFighters();
 
 	/* ---- fight rules (see fight.html) ---- */
 	struct FAttack { EKSPunch Type = EKSPunch::Straight; EKSArm Side = EKSArm::Left; float Damage = 0.f, Duration = 0.f; bool bFeint = false; };
@@ -121,6 +128,14 @@ private:
 	UPROPERTY() TObjectPtr<APlayerController> PC;
 	UPROPERTY() TObjectPtr<UKSTrackingSubsystem> TrackingSubsystem;
 
+	// Who is fighting: the player's fighter and the opponents, drawn at random each time the cabinet pulls you in.
+	int32 PlayerChar = 0;
+	TArray<int32> Ladder;
+	FKSFighterDef CurrentDef = {};
+	int32 ForcedOpponent = -1, ForcedPlayer = -1;   // test flags -KSFighter= and -KSPlayer=
+	FString OppClipKey, PlayerClipKey;              // what each real fighter is currently animating
+	float OppFollowThroughUntil = 0.f;               // lets a punch finish before the opponent drops back to his stance
+
 	FKSStreet Street;
 	FKSArena Arena;
 	bool bStreetDead = false;
@@ -148,6 +163,11 @@ private:
 
 	// test helpers: -KSAuto plays by itself, -KSShots=N saves a screenshot every N seconds, -KSStart=fight skips the street
 	bool bAuto = false;
+	bool bHitShots = false;      // -KSHitShots: save a screenshot at the moment each hit lands (hit_NN.png)
+	int32 HitShotIndex = 0;
+	TArray<TPair<float, FString>> BurstShots;   // (clock time, file name) of the follow-up frames after a hit
+	void QueueHitShots(const TCHAR* Kind);
+	bool bAutoNoGuard = false;   // -KSNoGuard: the test bot never defends, so the opponent's punches land
 	float ShotEvery = 0.f, NextShot = 0.f, AutoNextPunch = 0.f;
 	int32 ShotIndex = 0;
 };

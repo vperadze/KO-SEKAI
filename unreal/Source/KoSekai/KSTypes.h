@@ -26,7 +26,8 @@ struct FKSFighterDef
 	float FeintChance;         // chance of a fake once they are hurt
 	float IdleScale;           // < 1 = less rest between attacks
 	int32 MaxHitsOpen;         // punches you can land per opening
-	float Height;              // model scale
+	float Height;              // model scale (camera aim for the real fighters, whose models are already the right size)
+	const TCHAR* Asset;        // content folder under /Game/KoSekai/Characters, or nullptr for a placeholder dummy
 };
 
 namespace KSColors

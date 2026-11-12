@@ -22,10 +22,28 @@ namespace
 {
 	const float RoundSeconds = 120.f;
 	const float Grace = 0.14f;            // a dodge this late after his punch arrives still counts (camera delay)
-	const float OppDistance = 112.f;      // cm between the two fighters
+	const float OppDistance = 150.f;      // cm between the two fighters (the real models lunge further than the dummies did)
 	const float WindupSeconds[] = { 0.65f, 0.85f, 0.95f };   // jab, hook, uppercut
 	const float AttackDamage[] = { 7.f, 12.f, 16.f };
 	const float PunchDamage[] = { 3.f, 4.f, 5.f };            // straight, hook, uppercut
+
+	// How hard each fight on the ladder is, whoever the opponent turns out to be.
+	struct FLadderTier { float Health, WindupScale, DamageScale, FeintChance, IdleScale; int32 MaxHitsOpen; };
+	const FLadderTier LadderTiers[] = {
+		{ 100.f, 1.00f, 1.00f, 0.20f, 1.00f, 3 },
+		{ 120.f, 0.88f, 1.15f, 0.28f, 0.85f, 3 },
+		{ 140.f, 0.74f, 1.22f, 0.38f, 0.65f, 3 },
+	};
+	const int32 LadderLength = UE_ARRAY_COUNT(LadderTiers);
+
+	// The fighters' punch clips, and the moment in each (seconds) when the fist is fully out.
+	struct FPunchClip { const TCHAR* Name; float Impact; };
+	const FPunchClip PunchClips[3][2] = {
+		{ { TEXT("Left_Jab_from_Guard"), 0.50f },      { TEXT("Right_Jab_from_Guard"), 0.63f } },
+		{ { TEXT("Left_Hook_from_Guard"), 0.33f },     { TEXT("Right_Upper_Hook_from_Guard"), 0.67f } },
+		{ { TEXT("Left_Uppercut_from_Guard"), 0.37f }, { TEXT("Right_Uppercut_from_Guard"), 0.70f } },
+	};
+	const float PlayerPunchSeconds = 0.40f;   // how long the player's fighter stays in a punch clip
 
 	enum class EOutcome : uint8 { HitPlus, Hit, Half, Blocked, Dodged };   // ordered worst to best for the player
 
@@ -50,19 +68,30 @@ namespace
 
 const TArray<FKSFighterDef>& AKSGameMode::Roster()
 {
+	// The cut roster. Health and the timing numbers here are only defaults: each fight takes its difficulty from
+	// its place on the ladder (see LadderTiers), so any fighter can turn up first or last.
 	static const TArray<FKSFighterDef> Fighters = {
-		{ TEXT("PROTO"), TEXT("The first fighter drawn. The first one cut."),
-		  TEXT("PROTO steps aside and lets you through."),
-		  FLinearColor(0.45f, 0.40f, 0.62f), KSColors::Lilac, 100.f, 1.00f, 1.00f, 0.20f, 1.00f, 3, 1.00f },
 		{ TEXT("SERGEANT MULLET"), TEXT("Cut by legal. Never told why."),
 		  TEXT("The Sergeant salutes. First time anyone has seen him do it."),
-		  FLinearColor(0.20f, 0.30f, 0.10f), KSColors::Yellow, 120.f, 0.90f, 1.15f, 0.20f, 0.95f, 3, 1.08f },
-		{ TEXT("LADY STATIC"), TEXT("Her sprites were recorded over."),
-		  TEXT("The static clears. For a second you can see her face."),
-		  FLinearColor(0.05f, 0.35f, 0.45f), KSColors::Cyan, 110.f, 0.72f, 0.90f, 0.35f, 0.70f, 2, 0.96f },
-		{ TEXT("NULL"), TEXT("No name in the ROM. Only a hitbox."),
-		  TEXT("NULL finally gets a name on the high-score table: yours."),
-		  FLinearColor(0.02f, 0.02f, 0.03f), KSColors::Red, 150.f, 0.70f, 1.25f, 0.40f, 0.60f, 3, 1.18f },
+		  FLinearColor(0.20f, 0.30f, 0.10f), KSColors::Red, 120.f, 0.90f, 1.15f, 0.20f, 0.95f, 3, 1.00f, TEXT("SergeantMulletV2") },
+		{ TEXT("CHANNEL ZERO"), TEXT("His sprites were recorded over."),
+		  TEXT("The static clears. For a second the screen shows a smile."),
+		  FLinearColor(0.35f, 0.45f, 0.65f), KSColors::Green, 100.f, 1.00f, 1.00f, 0.20f, 1.00f, 3, 0.94f, TEXT("ChannelZero") },
+		{ TEXT("SIR LASERCORN"), TEXT("Focus groups found him too majestic."),
+		  TEXT("Sir Lasercorn bows. The horn dims, just a little."),
+		  FLinearColor(0.95f, 0.55f, 0.80f), KSColors::Cyan, 130.f, 0.85f, 1.20f, 0.25f, 0.90f, 3, 1.06f, TEXT("SirLasercorn") },
+		{ TEXT("AEROBICS ANNIHILATOR"), TEXT("Her workout tape outsold the game."),
+		  TEXT("And rest. She finally lets you rest."),
+		  FLinearColor(0.55f, 0.20f, 0.75f), KSColors::Magenta, 105.f, 0.92f, 0.95f, 0.25f, 0.85f, 3, 0.94f, TEXT("AerobicsAnnihilator") },
+		{ TEXT("GRANDMA THUNDER"), TEXT("Removed after the playtesters cried."),
+		  TEXT("Grandma Thunder pats your cheek. It still hurts."),
+		  FLinearColor(0.60f, 0.45f, 0.40f), KSColors::Yellow, 150.f, 0.70f, 1.25f, 0.40f, 0.60f, 3, 0.83f, TEXT("GrandmaThunder") },
+		{ TEXT("TURBOTRON"), TEXT("Shipped without batteries. Then not shipped."),
+		  TEXT("TURBOTRON displays a heart, then pretends it did not."),
+		  FLinearColor(0.60f, 0.62f, 0.66f), FLinearColor(1.0f, 0.45f, 0.10f), 140.f, 0.95f, 1.30f, 0.15f, 1.00f, 2, 1.00f, TEXT("Turbotron") },
+		{ TEXT("COUNT HAIRSPRAY"), TEXT("Too much hair for 16 kilobytes."),
+		  TEXT("The Count takes a bow and checks his hair in your reflection."),
+		  FLinearColor(0.10f, 0.08f, 0.12f), FLinearColor(0.55f, 0.20f, 0.85f), 125.f, 0.72f, 1.00f, 0.40f, 0.70f, 2, 1.08f, TEXT("CountHairspray") },
 	};
 	return Fighters;
 }
@@ -89,15 +118,17 @@ void AKSGameMode::BeginPlay()
 
 	const TCHAR* Cmd = FCommandLine::Get();
 	bAuto = FParse::Param(Cmd, TEXT("KSAuto"));
+	bAutoNoGuard = FParse::Param(Cmd, TEXT("KSNoGuard"));
+	bHitShots = FParse::Param(Cmd, TEXT("KSHitShots"));
 	FParse::Value(Cmd, TEXT("KSShots="), ShotEvery);
 	FString Start;
 	FParse::Value(Cmd, TEXT("KSStart="), Start);
 	if (Start == TEXT("fight"))
 	{
-		int32 Index = 0;
-		FParse::Value(Cmd, TEXT("KSFighter="), Index);
+		FParse::Value(Cmd, TEXT("KSFighter="), ForcedOpponent);   // roster index of the first opponent
+		FParse::Value(Cmd, TEXT("KSPlayer="), ForcedPlayer);      // roster index of the player's fighter
 		EnterArena();
-		StartCard(FMath::Clamp(Index, 0, Roster().Num() - 1));
+		StartCard(0);
 	}
 	else
 	{
@@ -228,6 +259,16 @@ void AKSGameMode::Tick(float Dt)
 			FScreenshotRequest::RequestScreenshot(FPaths::ProjectSavedDir() / FString::Printf(TEXT("Screenshots/ks_%02d.png"), ShotIndex++), true, false);
 		}
 	}
+	// -KSHitShots: a burst of frames after each hit, so the reaction can be checked.
+	for (int32 i = BurstShots.Num() - 1; i >= 0; i--)
+	{
+		if (Clock >= BurstShots[i].Key)
+		{
+			FScreenshotRequest::RequestScreenshot(FPaths::ProjectSavedDir() / TEXT("Screenshots") / BurstShots[i].Value, true, false);
+			BurstShots.RemoveAt(i);
+			break;   // one screenshot per frame
+		}
+	}
 }
 
 /* ================= the street ================= */
@@ -335,20 +376,46 @@ void AKSGameMode::EnterArena()
 	ClearWorld();
 	FKSBuilder B = MakeBuilder();
 	KSWorld::BuildArena(B, Arena);
+	PickFighters();
 	PlayerDummy = GetWorld()->SpawnActor<AKSDummy>(FVector::ZeroVector, FRotator::ZeroRotator);
 	PlayerDummy->Setup(KSColors::Cyan, KSColors::Magenta, true);
+	if (PlayerFighter().Asset) PlayerDummy->UseCharacter(PlayerFighter().Asset);
 	OppDummy = GetWorld()->SpawnActor<AKSDummy>(FVector(OppDistance, 0, 0), FRotator(0, 180, 0));
 	WorldActors.Add(PlayerDummy);
 	WorldActors.Add(OppDummy);
 	Subtitle.Reset(); Prompt.Reset();
 }
 
+void AKSGameMode::PickFighters()
+{
+	// A random fighter for the player, then a random ladder of different opponents.
+	const int32 Count = Roster().Num();
+	PlayerChar = ForcedPlayer >= 0 ? FMath::Clamp(ForcedPlayer, 0, Count - 1) : FMath::RandRange(0, Count - 1);
+	TArray<int32> Others;
+	for (int32 i = 0; i < Count; i++) if (i != PlayerChar) Others.Add(i);
+	for (int32 i = Others.Num() - 1; i > 0; i--) Others.Swap(i, FMath::RandRange(0, i));
+	if (ForcedOpponent >= 0)
+	{
+		const int32 Wanted = FMath::Clamp(ForcedOpponent, 0, Count - 1);
+		Others.Remove(Wanted);
+		Others.Insert(Wanted, 0);
+	}
+	Ladder.Reset();
+	for (int32 i = 0; i < LadderLength && i < Others.Num(); i++) Ladder.Add(Others[i]);
+}
+
 void AKSGameMode::StartCard(int32 Index)
 {
-	FighterIndex = Index;
+	FighterIndex = FMath::Clamp(Index, 0, Ladder.Num() - 1);
+	CurrentDef = Roster()[Ladder[FighterIndex]];
+	const FLadderTier& Tier = LadderTiers[FMath::Min(FighterIndex, LadderLength - 1)];
+	CurrentDef.Health = Tier.Health; CurrentDef.WindupScale = Tier.WindupScale; CurrentDef.DamageScale = Tier.DamageScale;
+	CurrentDef.FeintChance = Tier.FeintChance; CurrentDef.IdleScale = Tier.IdleScale; CurrentDef.MaxHitsOpen = Tier.MaxHitsOpen;
 	const FKSFighterDef& F = Fighter();
 	OppDummy->Setup(F.Body, F.Gloves, false, 0.25f);
-	OppDummy->SetActorScale3D(FVector(F.Height));
+	const bool bReal = F.Asset && OppDummy->UseCharacter(F.Asset);
+	OppDummy->SetActorScale3D(FVector(bReal ? 1.f : F.Height));   // the real models are already the right size
+	OppClipKey.Reset(); PlayerClipKey.Reset();
 	OppDummy->Snap(KSPoses::Guard());
 	PlayerDummy->Snap(KSPoses::Guard());
 	if (Arena.NameSign) Arena.NameSign->GetTextRender()->SetText(FText::FromString(F.Name));
@@ -375,7 +442,7 @@ void AKSGameMode::TickCard(float Dt)
 	if (PhaseTime >= 2.6f && !bFightStarted)
 	{
 		bFightStarted = true;
-		Announce(FString::Printf(TEXT("FIGHT %d OF %d"), FighterIndex + 1, Roster().Num()), 1.3f);
+		Announce(FString::Printf(TEXT("FIGHT %d OF %d"), FighterIndex + 1, NumFights()), 1.3f);
 	}
 	UpdateFighterPoses(Dt);
 	UpdateFightCamera(Dt);
@@ -486,6 +553,125 @@ void AKSGameMode::UpdateFighterPoses(float Dt)
 		KSPoses::Lean(O, 2.5f * FMath::Sin(Clock * 2.3f), 1.5f + 1.5f * FMath::Sin(Clock * 4.6f));   // breathing bob
 	}
 	OppDummy->SetTarget(O, Speed);
+	DriveCharacters();
+}
+
+/** Picks the clip and the face for each real fighter from the state of the fight. A clip only restarts when its key changes. */
+void AKSGameMode::DriveCharacters()
+{
+	const bool bLost = (Phase == EKSPhase::FightEnd || Phase == EKSPhase::Continue) && !bLastResultWin;
+	const bool bWon = (Phase == EKSPhase::FightEnd || Phase == EKSPhase::Result) && bLastResultWin;
+
+	/* ---- the opponent ---- */
+	if (OppDummy->HasCharacter())
+	{
+		const FPunchClip& Punch = PunchClips[(int32)Attack.Type][(int32)Attack.Side];
+		FString Key;
+		if (OppState == EKSOppState::KO) Key = TEXT("ko");
+		else if (bLost) Key = TEXT("win");
+		else if (Clock < OppHurtUntil) Key = TEXT("hurt");
+		else if (OppState == EKSOppState::Windup) Key = FString::Printf(TEXT("wind %.3f"), OppT);
+		else if (OppState == EKSOppState::Strike) Key = TEXT("strike");
+		else if (OppState == EKSOppState::Open) Key = TEXT("open");
+		else Key = Clock < OppGuardUntil ? TEXT("block") : TEXT("idle");
+
+		// A punch that connected is allowed to pull back before he returns to his stance.
+		if (OppClipKey == TEXT("strike") && Key == TEXT("idle"))
+		{
+			if (OppFollowThroughUntil == 0.f) { OppFollowThroughUntil = Clock + 0.30f; OppDummy->SetClipRate(1.4f); }
+			if (Clock < OppFollowThroughUntil) Key = TEXT("strike");
+		}
+
+		// Aim the punch at the player's face, or at the gloves when the player is blocking.
+		if (Phase == EKSPhase::Fight && (OppState == EKSOppState::Windup || OppState == EKSOppState::Strike))
+		{
+			const float U = FMath::Clamp((Clock - OppT) / FMath::Max(0.01f, Attack.Duration), 0.f, 1.f);
+			const float Weight = OppState == EKSOppState::Strike ? 1.f : FMath::SmoothStep(0.40f, 0.90f, U);
+			const FVector Away = (OppDummy->GetActorLocation() - PlayerDummy->GetActorLocation()).GetSafeNormal2D();
+			const bool bGuarded = Phase == EKSPhase::Fight && Defense() == EKSDefense::Block && Attack.Type != EKSPunch::Uppercut;
+			OppDummy->AimPunch(Punch.Name, PlayerDummy->FaceWorld(true) + Away * (bGuarded ? 26.f : 9.f) - FVector(0, 0, 6.f), Weight);
+		}
+		else OppDummy->StopAim();
+
+		if (Key != OppClipKey)
+		{
+			const bool bFromWindup = OppClipKey.StartsWith(TEXT("wind"));
+			OppClipKey = Key;
+			if (Key == TEXT("ko")) OppDummy->PlayClip(TEXT("Knock_Down"), false);
+			else if (Key == TEXT("win")) OppDummy->PlayClip(TEXT("victory"), true);
+			else if (Key == TEXT("hurt")) OppDummy->PlayClip(TEXT("Face_Punch_Reaction"), false, 1.8f, 0.15f);
+			else if (Key.StartsWith(TEXT("wind")))
+			{
+				// Stretch the clip so the fist is fully out exactly when the game resolves the punch (after the grace window).
+				OppDummy->PlayClip(Punch.Name, false, Punch.Impact / FMath::Max(0.05f, Attack.Duration + Grace));
+			}
+			else if (Key == TEXT("strike"))
+			{
+				if (!bFromWindup) OppDummy->PlayClip(Punch.Name, false, 1.f, FMath::Max(0.f, Punch.Impact - Grace));
+				OppFollowThroughUntil = 0.f;
+			}
+			else if (Key == TEXT("open")) OppDummy->PlayClip(TEXT("Face_Punch_Reaction_1"), true, 1.f, 0.3f);
+			else if (Key == TEXT("block")) OppDummy->PlayClip(TEXT("Block1"), true, 1.f, 0.6f);
+			else OppDummy->PlayClip(TEXT("Combat_Stance"), true);
+		}
+
+		if (OppState == EKSOppState::KO) OppDummy->SetFace({ TEXT("ko"), TEXT("hurt") });
+		else if (bLost) OppDummy->SetFace({ TEXT("smug"), TEXT("happy"), TEXT("love") });
+		else if (OppState == EKSOppState::Open) OppDummy->SetFace({ TEXT("dizzy"), TEXT("hit"), TEXT("hurt") });
+		else if (OppHP < OppMaxHP * 0.5f) OppDummy->SetFace({ TEXT("hurt"), TEXT("hit") });
+		else OppDummy->SetFace({});
+	}
+
+	/* ---- the player's fighter ---- */
+	if (PlayerDummy->HasCharacter())
+	{
+		const EKSDefense D = Phase == EKSPhase::Fight ? Defense() : EKSDefense::None;
+		int32 PunchArm = -1;
+		for (int32 i = 0; i < 2; i++)
+		{
+			if (Clock - PunchStart[i] < PlayerPunchSeconds && (PunchArm < 0 || PunchStart[i] > PunchStart[PunchArm])) PunchArm = i;
+		}
+		FString Key;
+		if (bLost && !bLastResultDecision) Key = TEXT("ko");
+		else if (bWon) Key = TEXT("win");
+		else if (Clock < PlayerHurtUntil) Key = TEXT("hurt");
+		else if (PunchArm >= 0) Key = FString::Printf(TEXT("punch %d %.3f"), PunchArm, PunchStart[PunchArm]);
+		else if (D == EKSDefense::Block) Key = TEXT("block");
+		else Key = TEXT("idle");
+
+		if (Key != PlayerClipKey)
+		{
+			PlayerClipKey = Key;
+			if (Key == TEXT("ko")) PlayerDummy->PlayClip(TEXT("Knock_Down"), false);
+			else if (Key == TEXT("win")) PlayerDummy->PlayClip(TEXT("victory"), true);
+			else if (Key == TEXT("hurt")) PlayerDummy->PlayClip(TEXT("Face_Punch_Reaction"), false, 1.8f, 0.15f);
+			else if (PunchArm >= 0 && Key.StartsWith(TEXT("punch")))
+			{
+				// The hit lands 0.09 s after the input, so the clip starts just before its impact frame.
+				const FPunchClip& Punch = PunchClips[(int32)PunchType[PunchArm]][PunchArm];
+				PlayerDummy->PlayClip(Punch.Name, false, 1.25f, FMath::Max(0.f, Punch.Impact - 0.11f));
+			}
+			else if (Key == TEXT("block")) PlayerDummy->PlayClip(TEXT("Block1"), true, 1.f, 0.6f);
+			else PlayerDummy->PlayClip(TEXT("Combat_Stance"), true);
+		}
+		// Aim the punch at the opponent's face when he is open, or at his guard when he is not.
+		if (PunchArm >= 0 && Clock - PunchStart[PunchArm] < 0.24f && !bLost && OppState != EKSOppState::KO)
+		{
+			const FVector Away = (PlayerDummy->GetActorLocation() - OppDummy->GetActorLocation()).GetSafeNormal2D();
+			const bool bOpen = OppState == EKSOppState::Open || OppState == EKSOppState::KO || Clock < OppHurtUntil;
+			PlayerDummy->AimPunch(PunchClips[(int32)PunchType[PunchArm]][PunchArm].Name, OppDummy->FaceWorld(true) + Away * (bOpen ? 9.f : 28.f) - FVector(0, 0, 6.f), 1.f);
+		}
+		else PlayerDummy->StopAim();
+
+		// Evading slides the fighter sideways (the player's own left is -Y) and ducking squashes them down.
+		const float Side = D == EKSDefense::EvadeLeft ? -42.f : D == EKSDefense::EvadeRight ? 42.f : 0.f;
+		PlayerDummy->SetBodyShift(Side, D == EKSDefense::Duck ? 0.68f : 1.f);
+
+		if (bLost && !bLastResultDecision) PlayerDummy->SetFace({ TEXT("ko"), TEXT("hurt") });
+		else if (bWon) PlayerDummy->SetFace({ TEXT("smug"), TEXT("happy"), TEXT("love") });
+		else if (PlayerHP < 50.f) PlayerDummy->SetFace({ TEXT("hurt"), TEXT("hit") });
+		else PlayerDummy->SetFace({});
+	}
 }
 
 /* ================= fight rules ================= */
@@ -566,6 +752,16 @@ void AKSGameMode::ResolveStrike()
 	if (PlayerHP > 0.f) OppIdle(FMath::FRandRange(0.8f, 1.2f));
 }
 
+void AKSGameMode::QueueHitShots(const TCHAR* Kind)
+{
+	const float Offsets[] = { 0.0f, 0.07f, 0.16f, 0.28f };
+	for (int32 i = 0; i < UE_ARRAY_COUNT(Offsets); i++)
+	{
+		BurstShots.Add({ Clock + Offsets[i], FString::Printf(TEXT("hit_%02d_%s_%d.png"), HitShotIndex, Kind, i) });
+	}
+	HitShotIndex++;
+}
+
 void AKSGameMode::PlayerHurt(float Damage, bool bLight)
 {
 	PlayerHP = FMath::Max(0.f, PlayerHP - Damage);
@@ -573,7 +769,9 @@ void AKSGameMode::PlayerHurt(float Damage, bool bLight)
 	Shake = bLight ? 4.f : 10.f; RedFlash = bLight ? 0.4f : 1.f; Combo = 0;
 	PlayerHurtUntil = Clock + 0.3f;
 	Sfx(EKSSfx::Hurt);
-	if (PlayerDummy) PlayerDummy->Flash(KSColors::Red, 0.12f);
+	if (PlayerDummy) { PlayerDummy->Flash(KSColors::Red, 0.12f); PlayerDummy->TakeHit(Attack.Type, Attack.Side, bLight ? 0.5f : 1.f); PlayerDummy->HitStop(0.08f); }
+	if (OppDummy) OppDummy->HitStop(0.08f);
+	if (bHitShots) QueueHitShots(TEXT("taken"));
 	if (PlayerHP <= 0.f) EndFight(false, false);
 }
 
@@ -603,6 +801,7 @@ void AKSGameMode::LandHit(const FPendingHit& Hit)
 	if (Hit.Mult == 0.f)
 	{
 		OppGuardUntil = Clock + 0.22f;
+		if (OppDummy) OppDummy->Knock(5.f);   // a blocked punch still nudges him
 		Sfx(EKSSfx::Blocked);
 		Popup(TEXT("BLOCKED"), KSColors::Muted, 0.56f, 0.34f);
 		return;
@@ -610,7 +809,9 @@ void AKSGameMode::LandHit(const FPendingHit& Hit)
 	OppHP = FMath::Max(0.f, OppHP - PunchDamage[(int32)Hit.Type] * Hit.Mult);
 	Stats.Landed++; Combo++; Stats.BestCombo = FMath::Max(Stats.BestCombo, Combo);
 	OppHurtUntil = Clock + 0.24f;
-	if (OppDummy) OppDummy->Flash(Hit.bCounter ? KSColors::Yellow : FLinearColor::White, 0.08f);
+	if (OppDummy) { OppDummy->Flash(Hit.bCounter ? KSColors::Yellow : FLinearColor::White, 0.08f); OppDummy->TakeHit(Hit.Type, Hit.Arm, Hit.bCounter ? 1.5f : 0.9f); OppDummy->HitStop(0.07f); }
+	if (PlayerDummy) PlayerDummy->HitStop(0.07f);
+	if (bHitShots) QueueHitShots(TEXT("landed"));
 	Shake = FMath::Max(Shake, Hit.bCounter ? 7.f : 4.f);
 	if (Hit.bCounter) { Sfx(EKSSfx::Counter); Popup(TEXT("COUNTER!"), KSColors::Yellow, 0.56f, 0.3f, true); }
 	else { Sfx(EKSSfx::Hit); if (Combo > 1) Popup(FString::Printf(TEXT("%d HITS"), Combo), KSColors::Cyan, 0.66f, 0.38f); }
@@ -635,7 +836,7 @@ void AKSGameMode::TickFight(float Dt)
 		{
 			// Test bot: defends correctly and punches every opening.
 			AutoDefense = EKSDefense::None;
-			if (OppState == EKSOppState::Windup || OppState == EKSOppState::Strike)
+			if (!bAutoNoGuard && (OppState == EKSOppState::Windup || OppState == EKSOppState::Strike))
 			{
 				AutoDefense = Attack.Type == EKSPunch::Straight ? EKSDefense::Block
 					: Attack.Type == EKSPunch::Hook ? (Attack.Side == EKSArm::Left ? EKSDefense::EvadeLeft : EKSDefense::EvadeRight) : EKSDefense::EvadeLeft;
@@ -683,7 +884,7 @@ void AKSGameMode::TickResult(float Dt)
 	UpdateFightCamera(Dt);
 	if ((PhaseTime > 1.2f && ConfirmPressed()) || (bAuto && PhaseTime > 2.5f))
 	{
-		if (FighterIndex + 1 < Roster().Num()) StartCard(FighterIndex + 1);
+		if (FighterIndex + 1 < NumFights()) StartCard(FighterIndex + 1);
 		else { WhiteFade = 1.f; EnterStreet(true); }
 	}
 }
@@ -706,7 +907,7 @@ void AKSGameMode::TickEnding(float Dt)
 	const FVector Pos = FMath::Lerp(FVector(FKSStreet::CabinetX - 210.f, 40.f, 160.f), FVector(FKSStreet::CabinetX - 620.f, 110.f, 172.f), U);
 	Pawn->SetView(Pos, (FVector(FKSStreet::CabinetX, 0, 120.f) - Pos).Rotation(), 75.f);
 	Subtitle = PhaseTime < 4.f ? TEXT("You are back on the street. The screen is dark.")
-		: PhaseTime < 8.f ? TEXT("Four fighters nobody was meant to see finally got their match.")
+		: PhaseTime < 8.f ? TEXT("The fighters nobody was meant to see finally got their match.")
 		: PhaseTime < 12.f ? TEXT("The cabinet has what it waited thirty-nine years for: a player.")
 		: TEXT("KO-SEKAI   -   thank you for playing");
 	Prompt = PhaseTime > 6.f ? TEXT("Press ENTER to walk the street again") : TEXT("");

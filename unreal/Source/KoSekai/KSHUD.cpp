@@ -98,9 +98,10 @@ void AKSHUD::DrawFight(const AKSGameMode& G)
 		const float A = FMath::Clamp(FMath::Min(G.PhaseTime / 0.3f, (2.6f - G.PhaseTime) / 0.3f), 0.f, 1.f);
 		Fill(0.f, 0.f, 1.f, 0.16f, FLinearColor(0.f, 0.f, 0.f, 0.8f * A));
 		Fill(0.f, 0.60f, 1.f, 0.40f, FLinearColor(0.f, 0.f, 0.f, 0.8f * A));
-		Label(FString::Printf(TEXT("CUT FIGHTER %d OF %d"), G.FighterIndex + 1, AKSGameMode::Roster().Num()), 0.5f, 0.08f, 1.3f, FLinearColor(Cyan.R, Cyan.G, Cyan.B, A));
+		Label(FString::Printf(TEXT("CUT FIGHTER %d OF %d"), G.FighterIndex + 1, G.NumFights()), 0.5f, 0.08f, 1.3f, FLinearColor(Cyan.R, Cyan.G, Cyan.B, A));
 		Label(F.Name, 0.5f, 0.70f, 4.2f, FLinearColor(Yellow.R, Yellow.G, Yellow.B, A));
 		Label(F.Tagline, 0.5f, 0.81f, 1.3f, FLinearColor(Lilac.R, Lilac.G, Lilac.B, A));
+		Label(FString::Printf(TEXT("YOU FIGHT AS %s"), G.PlayerFighter().Name), 0.5f, 0.88f, 1.1f, FLinearColor(Cyan.R, Cyan.G, Cyan.B, A));
 		const bool bTracked = G.Tracking() && G.Tracking()->IsConnected();
 		Label(bTracked ? TEXT("PUNCH, BLOCK, LEAN AND DUCK FOR REAL - THE CABINET IS WATCHING")
 			: TEXT("A/Q/Z left straight/hook/uppercut   D/E/C right   SPACE block   ARROWS evade + duck   P pause"), 0.5f, 0.91f, 0.9f, FLinearColor(Muted.R, Muted.G, Muted.B, A));
@@ -140,8 +141,8 @@ void AKSHUD::DrawFight(const AKSGameMode& G)
 		const FKSStats& S = G.Stats;
 		Label(FString::Printf(TEXT("LANDED %d     COUNTERS %d     DODGES %d     BLOCKS %d"), S.Landed, S.Counters, S.Dodges, S.Blocks), 0.5f, 0.48f, 1.0f, Cyan);
 		Label(FString::Printf(TEXT("HITS TAKEN %d     BEST COMBO %d     HEALTH LEFT %d"), S.Taken, S.BestCombo, FMath::RoundToInt(G.PlayerHP)), 0.5f, 0.54f, 1.0f, Cyan);
-		const bool bLast = G.FighterIndex + 1 >= AKSGameMode::Roster().Num();
-		Label(bLast ? TEXT("The screen cracks. There is a way out.") : FString::Printf(TEXT("NEXT: %s"), AKSGameMode::Roster()[G.FighterIndex + 1].Name), 0.5f, 0.63f, 1.3f, Yellow);
+		const bool bLast = G.FighterIndex + 1 >= G.NumFights();
+		Label(bLast ? TEXT("The screen cracks. There is a way out.") : FString::Printf(TEXT("NEXT: %s"), G.LadderFighter(G.FighterIndex + 1).Name), 0.5f, 0.63f, 1.3f, Yellow);
 		Label(TEXT("Press ENTER or throw a punch"), 0.5f, 0.72f, 1.0f, Lilac);
 	}
 	if (G.Phase == EKSPhase::Continue)
