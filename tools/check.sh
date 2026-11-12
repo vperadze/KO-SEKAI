@@ -61,7 +61,7 @@ while read -r line; do
 	bout=$(field "$line" bout); name=$(echo "$line" | sed -n 's/.*opponent=\(.*\) result=.*/\1/p')
 	[ "$(field "$line" opp_hand_travel)" -ge 20 ] && pass "bout $bout: the opponent ($name) moves" || fail "bout $bout: the opponent ($name) is frozen in one pose"
 	[ "$(field "$line" player_hand_travel)" -ge 20 ] && pass "bout $bout: the player's fighter moves" || fail "bout $bout: the player's fighter is frozen in one pose"
-	[ "$(field "$line" spectators)" -eq 8 ] && pass "bout $bout: eight spectators at ringside" || fail "bout $bout: $(field "$line" spectators) spectators, expected 8"
+	[ "$(field "$line" spectators)" -ge 40 ] && pass "bout $bout: $(field "$line" spectators) spectators at ringside" || fail "bout $bout: $(field "$line" spectators) spectators, expected 40 or more"
 done <<< "$(grep "KSTEST bout=" "$LOG" 2> /dev/null)"
 LAST=$(grep "KSTEST bout=" "$LOG" 2> /dev/null | tail -1)
 [ -n "$LAST" ] && [ "$(field "$LAST" landed)" -gt 0 ] && pass "punches land" || fail "no punch landed"

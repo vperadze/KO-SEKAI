@@ -155,7 +155,7 @@ void AKSGameMode::ClearWorld()
 	WorldActors.Reset();
 	Street = FKSStreet();
 	Arena = FKSArena();
-	Spectators.Reset();
+	Spectators.Reset(); Flashes.Reset(); FlashLights.Reset(); FlashesOwed = 0.f;
 	PlayerDummy = nullptr; OppDummy = nullptr;
 }
 
@@ -486,12 +486,60 @@ void AKSGameMode::UpdateFightCamera(float Dt)
 	}
 	else if (Phase == EKSPhase::FightEnd || Phase == EKSPhase::Result || Phase == EKSPhase::Continue)
 	{
+		// After the bell the camera drifts round the two fighters instead of sitting still.
 		const float U = FMath::SmoothStep(0.f, 2.f, PhaseTime);
-		Pos = FMath::Lerp(FightPos, FightPos + FVector(60, 40, -50), U);
+		const float Orbit = FMath::DegreesToRadians(14.f * FMath::Sin(PhaseTime * 0.35f));
+		const FVector Pivot(OppDistance * 0.6f, 0.f, 0.f), Arm = FightPos + FVector(60, 40, -50) - Pivot;
+		const FVector Round(Pivot.X + Arm.X * FMath::Cos(Orbit) - Arm.Y * FMath::Sin(Orbit), Pivot.Y + Arm.X * FMath::Sin(Orbit) + Arm.Y * FMath::Cos(Orbit), Arm.Z);
+		Pos = FMath::Lerp(FightPos, Round, U);
 		Aim = FMath::Lerp(FightAim, FVector(OppDistance * 0.7f, 0, 90.f), U);
 	}
+
+	/* ---- what the fight itself does to the camera ---- */
+	float WantDolly = 0.f, WantSide = 0.f, WantDrop = 0.f, WantFov = 0.f;
+	if (Phase == EKSPhase::Fight)
+	{
+		// Leans in when the opponent is open or a combo is running, backs off as he winds up.
+		if (OppState == EKSOppState::Open) { WantDolly = 48.f; WantFov = -4.f; }
+		else if (OppState == EKSOppState::Windup) { WantDolly = -24.f; WantFov = 2.5f; }
+		WantDolly += FMath::Min(30.f, 6.f * Combo);
+		// Moves with the player: slides when he leans, sinks when he ducks, tightens when he covers up.
+		switch (Defense())
+		{
+		case EKSDefense::EvadeLeft: WantSide = -38.f; break;
+		case EKSDefense::EvadeRight: WantSide = 38.f; break;
+		case EKSDefense::Duck: WantDrop = 34.f; break;
+		case EKSDefense::Block: WantDolly += 14.f; break;
+		default: break;
+		}
+		// Never quite still: a slow circling drift, and a nervous hand when the player is nearly out.
+		const float Orbit = FMath::DegreesToRadians(5.f * FMath::Sin(Clock * 0.33f) + 2.f * FMath::Sin(Clock * 0.71f + 1.3f));
+		const FVector Pivot(OppDistance * 0.5f, 0.f, 0.f), Arm = Pos - Pivot;
+		Pos = FVector(Pivot.X + Arm.X * FMath::Cos(Orbit) - Arm.Y * FMath::Sin(Orbit), Pivot.Y + Arm.X * FMath::Sin(Orbit) + Arm.Y * FMath::Cos(Orbit), Arm.Z + 6.f * FMath::Sin(Clock * 0.52f));
+		if (PlayerHP < 30.f) Pos += FVector(FMath::Sin(Clock * 7.3f), FMath::Sin(Clock * 9.1f + 2.f), FMath::Sin(Clock * 8.2f + 4.f)) * (2.5f * (1.f - PlayerHP / 30.f));
+		// Keeps the opponent's head in the picture as he sways and reels.
+		if (OppDummy) CamAimLag = FMath::VInterpTo(CamAimLag, (OppDummy->FaceWorld(false) - FVector(OppDistance, 0.f, 150.f)) * 0.35f, Dt, 5.f);
+	}
+	else CamAimLag = FMath::VInterpTo(CamAimLag, FVector::ZeroVector, Dt, 3.f);
+	CamDolly = FMath::FInterpTo(CamDolly, WantDolly, Dt, 3.2f);
+	CamSide = FMath::FInterpTo(CamSide, WantSide, Dt, 6.f);
+	CamDrop = FMath::FInterpTo(CamDrop, WantDrop, Dt, 6.f);
+	// Hits push on a spring, so the camera lurches and settles instead of jittering.
+	const float Step = FMath::Min(Dt, 0.033f);
+	CamVel += (-70.f * CamOffset - 11.f * CamVel) * Step;
+	CamOffset += CamVel * Step;
+	CamRollVel += (-110.f * CamRoll - 12.f * CamRollVel) * Step;
+	CamRoll += CamRollVel * Step;
+	CamFovKick = FMath::FInterpTo(CamFovKick, 0.f, Dt, 7.f);
+
+	const FVector Forward = (Aim - Pos).GetSafeNormal2D(), Right(-Forward.Y, Forward.X, 0.f);
+	const FVector Move = Forward * (CamDolly + CamOffset.X) + Right * (CamSide + CamOffset.Y) + FVector(0, 0, CamOffset.Z - CamDrop);
+	Pos += Move;
+	Aim += Move * 0.35f + CamAimLag + FVector(0, 0, -CamDrop * 0.5f);
 	Pos += FMath::VRand() * Shake * 0.6f;
-	Pawn->SetView(Pos, (Aim - Pos).Rotation(), Fov);
+	FRotator Rot = (Aim - Pos).Rotation();
+	Rot.Roll = CamRoll;
+	Pawn->SetView(Pos, Rot, Fov + WantFov * FMath::Clamp(FMath::Abs(CamDolly) / 24.f, 0.f, 1.f) + CamFovKick);
 }
 
 void AKSGameMode::UpdateFighterPoses(float Dt)
@@ -767,20 +815,58 @@ void AKSGameMode::SeatCrowd()
 {
 	if (Spectators.Num()) return;                      // they keep their places for the whole ladder
 	for (AKSDummy* Dummy : Arena.Crowd) if (Dummy) Dummy->SetActorHiddenInGame(true);   // the faceless stand-ins go home
-	static const TCHAR* Names[] = { TEXT("kid"), TEXT("robot"), TEXT("mom"), TEXT("luchador"), TEXT("punk"), TEXT("alien"), TEXT("nerd"), TEXT("rocker") };
-	FKSBuilder B = MakeBuilder();
-	for (int32 i = 0; i < UE_ARRAY_COUNT(Names); i++)
+	static const TCHAR* Names[] = { TEXT("kid"), TEXT("robot"), TEXT("mom"), TEXT("luchador"), TEXT("punk"), TEXT("alien"), TEXT("nerd"), TEXT("rocker"),
+		TEXT("skater"), TEXT("boss"), TEXT("bboy"), TEXT("oldman"), TEXT("ninja"), TEXT("astro"), TEXT("vampire"), TEXT("chef"), TEXT("cheer"), TEXT("cowboy"), TEXT("prof"), TEXT("wizard") };
+	// Places on three sides of the ring: three rows behind the far ropes, two rows down each side. Each row stands a
+	// little higher than the one in front, like stands.
+	TArray<FVector> Places;
+	for (int32 Row = 0; Row < 3; Row++)
 	{
-		// Two staggered rows behind the far ropes, where the camera looks.
-		const bool bBack = i >= 4;
-		const int32 k = i % 4;
-		const FVector Home(bBack ? 590.f : 470.f, bBack ? -495.f + 330.f * k : -360.f + 240.f * k, bBack ? 150.f : 112.f);
-		const FString Tex = FString::Printf(TEXT("/Game/KS/Arena/T_KS_Spec_%s.T_KS_Spec_%s"), Names[i], Names[i]);
-		UMaterialInstanceDynamic* MID = B.Image(*Tex, false, Home, FVector(0, 1, 0), FVector(0, 0, -1), 112.f, 224.f, FVector4(0.25f, 1.f, 0.f, 0.f), 0.9f, TEXT("/Game/KS/Arena/M_KS_Sprite.M_KS_Sprite"));
+		const float Half = 430.f + 70.f * Row, Step = 118.f;
+		for (float Y = -Half + (Row % 2) * Step * 0.5f; Y <= Half; Y += Step) Places.Add(FVector(465.f + 118.f * Row, Y, 112.f + 40.f * Row));
+	}
+	for (int32 Side = -1; Side <= 1; Side += 2)
+	{
+		for (int32 Row = 0; Row < 2; Row++)
+		{
+			for (float X = -190.f + (Row % 2) * 59.f; X <= 360.f; X += 118.f) Places.Add(FVector(X, Side * (470.f + 118.f * Row), 112.f + 40.f * Row));
+		}
+	}
+	// Deal the characters out so that neighbours differ, and skip any whose picture is missing.
+	TArray<int32> Deck;
+	FKSBuilder B = MakeBuilder();
+	const float Now = GetWorld()->GetTimeSeconds();
+	for (const FVector& Home : Places)
+	{
+		if (Deck.Num() == 0)
+		{
+			for (int32 i = 0; i < UE_ARRAY_COUNT(Names); i++) Deck.Add(i);
+			for (int32 i = Deck.Num() - 1; i > 0; i--) Deck.Swap(i, FMath::RandRange(0, i));
+		}
+		const TCHAR* Name = Names[Deck.Pop()];
+		const FString Tex = FString::Printf(TEXT("/Game/KS/Arena/T_KS_Spec_%s.T_KS_Spec_%s"), Name, Name);
+		// Each one faces the middle of the ring.
+		const FVector ToRing = (FVector(75.f, 0.f, 0.f) - FVector(Home.X, Home.Y, 0.f)).GetSafeNormal();
+		const float Size = FMath::FRandRange(0.88f, 1.08f);
+		UMaterialInstanceDynamic* MID = B.Image(*Tex, false, Home + FVector(0, 0, 112.f * (Size - 1.f)), FVector(-ToRing.Y, ToRing.X, 0.f), FVector(0, 0, -1), 112.f * Size, 224.f * Size,
+			FVector4(0.25f, 1.f, 0.f, 0.f), FMath::FRandRange(0.75f, 0.95f), TEXT("/Game/KS/Arena/M_KS_Sprite.M_KS_Sprite"));
 		if (!MID) continue;
-		FSpectator S; S.MID = MID; S.Actor = Cast<AActor>(MID->GetOuter()); S.Home = Home; S.Phase = FMath::FRandRange(0.f, 6.f);
+		FSpectator S; S.MID = MID; S.Actor = Cast<AActor>(MID->GetOuter()); S.Home = Home + FVector(0, 0, 112.f * (Size - 1.f));
+		S.Phase = FMath::FRandRange(0.f, 20.f); S.bFlip = FMath::RandBool(); S.bRival = FMath::FRand() < 0.18f;
+		S.IdleRate = FMath::FRandRange(0.7f, 2.6f); S.BobRate = FMath::FRandRange(1.5f, 4.5f); S.BobHeight = FMath::FRandRange(0.f, 6.f);
+		S.JumpRate = FMath::FRandRange(6.f, 12.f); S.JumpHeight = FMath::FRandRange(10.f, 30.f);
+		S.NextWhim = Now + FMath::FRandRange(1.f, 9.f);
 		Spectators.Add(S);
 	}
+	// The flash pool.
+	for (int32 i = 0; i < 10; i++)
+	{
+		UMaterialInstanceDynamic* MID = B.Shape(B.Sphere, FVector(0, 0, -500), FVector(20.f), FLinearColor::White, 90.f);
+		FCrowdFlash F; F.MID = MID; F.Actor = MID ? Cast<AActor>(MID->GetOuter()) : nullptr;
+		if (AActor* Actor = F.Actor.Get()) Actor->SetActorHiddenInGame(true);
+		Flashes.Add(F);
+	}
+	for (int32 i = 0; i < 3; i++) FlashLights.Add(B.Light(FVector(0, 0, -500), FLinearColor(0.9f, 0.95f, 1.f), 0.f, 900.f));
 }
 
 void AKSGameMode::CrowdReact(bool bCheer, float Strength)
@@ -789,9 +875,10 @@ void AKSGameMode::CrowdReact(bool bCheer, float Strength)
 	for (FSpectator& S : Spectators)
 	{
 		if (FMath::FRand() > Strength) continue;              // a light hit moves only part of the crowd
-		S.CueAt = Now + FMath::FRandRange(0.03f, 0.3f);       // nobody reacts in the same instant
-		S.CuePose = bCheer ? 1 : 2;
+		S.CueAt = Now + FMath::FRandRange(0.03f, 0.55f);      // nobody reacts in the same instant
+		S.CuePose = (bCheer != S.bRival) ? 1 : 2;             // rivals wince when the player scores and cheer when he is hit
 	}
+	CrowdFlashes(2.f + 10.f * Strength);
 }
 
 void AKSGameMode::TickCrowd()
@@ -802,17 +889,67 @@ void AKSGameMode::TickCrowd()
 	{
 		AActor* Actor = S.Actor.Get();
 		if (!Actor || !S.MID) continue;
-		if (S.CueAt > 0.f && Now >= S.CueAt) { S.Pose = S.CuePose; S.CueAt = 0.f; S.BusyUntil = Now + FMath::FRandRange(0.9f, 1.6f); }
-		else if (S.BusyUntil > 0.f && Now >= S.BusyUntil) { S.Pose = 0; S.BusyUntil = 0.f; }
+		if (S.CueAt > 0.f && Now >= S.CueAt) { S.Pose = S.CuePose; S.CueAt = 0.f; S.BusyUntil = Now + FMath::FRandRange(0.6f, 2.0f); }
+		else if (S.BusyUntil > 0.f && Now >= S.BusyUntil) { S.Pose = 0; S.BusyUntil = 0.f; S.NextWhim = Now + FMath::FRandRange(1.5f, 8.f); }
+		else if (S.BusyUntil <= 0.f && S.CueAt <= 0.f && Now >= S.NextWhim)
+		{
+			// Nobody stands still for a whole fight: now and then each one does something of his own.
+			const float Roll = FMath::FRand();
+			if (Roll < 0.45f) { S.Pose = 1; S.BusyUntil = Now + FMath::FRandRange(0.4f, 1.3f); }          // a cheer out of nowhere
+			else if (Roll < 0.60f) { S.Pose = 2; S.BusyUntil = Now + FMath::FRandRange(0.3f, 0.8f); }     // a gasp
+			else { S.bFlip = !S.bFlip; S.NextWhim = Now + FMath::FRandRange(1.f, 6.f); }                  // turns to look the other way
+		}
 		// Old-arcade animation: whole poses swapped a few times a second, never in-between frames.
 		int32 Frame = S.Pose;
 		float Lift = 0.f, Side = 0.f;
-		if (S.Pose == 0) { Frame = FMath::FloorToInt(Now * 1.6f + S.Phase) % 2 ? 3 : 0; Lift = FMath::FloorToInt(Now * 3.2f + S.Phase) % 2 ? 3.f : 0.f; }
-		else if (S.Pose == 1) Lift = FMath::FloorToInt(Now * 9.f + S.Phase) % 2 ? 22.f : 4.f;      // jumping up and down
-		else Side = FMath::FloorToInt(Now * 14.f + S.Phase) % 2 ? 3.f : -3.f;                       // shaking
-		if (Frame != S.Shown) { S.Shown = Frame; S.MID->SetVectorParameterValue(TEXT("Offset"), FLinearColor(0.25f * Frame, 0.f, 0.f, 0.f)); }
+		if (S.Pose == 0) { Frame = FMath::FloorToInt(Now * S.IdleRate + S.Phase) % 2 ? 3 : 0; Lift = FMath::FloorToInt(Now * S.BobRate + S.Phase) % 2 ? S.BobHeight : 0.f; }
+		else if (S.Pose == 1) Lift = FMath::FloorToInt(Now * S.JumpRate + S.Phase) % 2 ? S.JumpHeight : 4.f;      // jumping up and down
+		else Side = FMath::FloorToInt(Now * 14.f + S.Phase) % 2 ? 3.f : -3.f;                                    // shaking
+		if (Frame != S.Shown || S.bFlip != S.bShownFlip)
+		{
+			S.Shown = Frame; S.bShownFlip = S.bFlip;
+			// Flipped: the picture is read right to left, so the cell starts at its right-hand edge.
+			S.MID->SetVectorParameterValue(TEXT("UV"), FLinearColor(S.bFlip ? -0.25f : 0.25f, 1.f, 0.f, 0.f));
+			S.MID->SetVectorParameterValue(TEXT("Offset"), FLinearColor(0.25f * (Frame + (S.bFlip ? 1 : 0)), 0.f, 0.f, 0.f));
+		}
 		Actor->SetActorLocation(S.Home + FVector(0.f, Side, Lift));
 	}
+
+	/* ---- photo flashes ---- */
+	for (FCrowdFlash& F : Flashes)
+	{
+		if (F.Until > 0.f && Now >= F.Until) { F.Until = 0.f; if (AActor* Actor = F.Actor.Get()) Actor->SetActorHiddenInGame(true); }
+	}
+	bool bAnyLit = false;
+	for (const FCrowdFlash& F : Flashes) bAnyLit |= F.Until > 0.f;
+	if (!bAnyLit) for (const TWeakObjectPtr<APointLight>& L : FlashLights) if (APointLight* Light = L.Get()) Light->PointLightComponent->SetIntensity(0.f);
+	// A steady trickle during a fight, and a burst whenever the crowd reacts.
+	if (Phase == EKSPhase::Fight) FlashesOwed += GetWorld()->GetDeltaSeconds() * 0.9f;
+	if (FlashesOwed >= 1.f && Now >= NextFlashAt && Spectators.Num())
+	{
+		for (int32 i = 0; i < Flashes.Num(); i++)
+		{
+			FCrowdFlash& F = Flashes[i];
+			AActor* Actor = F.Actor.Get();
+			if (F.Until > 0.f || !Actor) continue;
+			const FSpectator& S = Spectators[FMath::RandRange(0, Spectators.Num() - 1)];
+			const FVector ToRing = (FVector(75.f, 0.f, 0.f) - FVector(S.Home.X, S.Home.Y, 0.f)).GetSafeNormal();
+			const FVector At = S.Home + ToRing * 20.f + FVector(FMath::FRandRange(-25.f, 25.f), FMath::FRandRange(-25.f, 25.f), FMath::FRandRange(40.f, 85.f));
+			Actor->SetActorLocation(At);
+			Actor->SetActorScale3D(FVector(FMath::FRandRange(0.10f, 0.22f)));
+			Actor->SetActorHiddenInGame(false);
+			F.Until = Now + FMath::FRandRange(0.05f, 0.09f);
+			if (APointLight* Light = FlashLights.Num() ? FlashLights[i % FlashLights.Num()].Get() : nullptr)
+			{
+				Light->SetActorLocation(At + ToRing * 40.f);
+				Light->PointLightComponent->SetIntensity(650.f);
+			}
+			FlashesOwed -= 1.f;
+			NextFlashAt = Now + FMath::FRandRange(0.03f, 0.16f);
+			break;
+		}
+	}
+	FlashesOwed = FMath::Min(FlashesOwed, 30.f);
 }
 
 void AKSGameMode::DriveCharacters()
@@ -1042,6 +1179,8 @@ void AKSGameMode::PlayerHurt(float Damage, bool bLight)
 	Stats.Taken++;
 	Shake = bLight ? 4.f : 10.f; RedFlash = bLight ? 0.4f : 1.f; Combo = 0;
 	PlayerHurtUntil = Clock + 0.3f;
+	// The camera takes the punch too: knocked back, tipped to one side.
+	CamPunch(FVector(bLight ? -70.f : -170.f, FMath::RandBool() ? 60.f : -60.f, bLight ? 10.f : 30.f), (FMath::RandBool() ? 1.f : -1.f) * (bLight ? 22.f : 60.f), bLight ? 2.f : 5.f);
 	Sfx(EKSSfx::Hurt);
 	CrowdReact(false, bLight ? 0.4f : 0.8f);
 	if (PlayerDummy) { PlayerDummy->Flash(KSColors::Red, 0.12f); PlayerDummy->TakeHit(Attack.Type, Attack.Side, bLight ? 0.5f : 1.f); PlayerDummy->HitStop(0.08f); }
@@ -1084,6 +1223,8 @@ void AKSGameMode::LandHit(const FPendingHit& Hit)
 	OppHP = FMath::Max(0.f, OppHP - PunchDamage[(int32)Hit.Type] * Hit.Mult);
 	Stats.Landed++; Combo++; Stats.BestCombo = FMath::Max(Stats.BestCombo, Combo);
 	OppHurtUntil = Clock + 0.24f;
+	// The camera drives in behind the punch, from the side of the hand that threw it, with a quick zoom.
+	CamPunch(FVector(Hit.bCounter ? 150.f : 85.f, Hit.Arm == EKSArm::Left ? 45.f : -45.f, 0.f), (Hit.Arm == EKSArm::Left ? -1.f : 1.f) * (Hit.bCounter ? 26.f : 10.f), Hit.bCounter ? -7.f : -3.5f);
 	if (OppDummy) { OppDummy->Flash(Hit.bCounter ? KSColors::Yellow : FLinearColor::White, 0.08f); OppDummy->TakeHit(Hit.Type, Hit.Arm, Hit.bCounter ? 1.5f : 0.9f); OppDummy->HitStop(0.07f); }
 	if (PlayerDummy) PlayerDummy->HitStop(0.07f);
 	if (bHitShots) QueueHitShots(TEXT("landed"));

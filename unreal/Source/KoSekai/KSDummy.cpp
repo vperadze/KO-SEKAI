@@ -290,6 +290,7 @@ void AKSDummy::PlayClip(const FString& Clip, bool bLoop, float Rate, float Start
 	// A clip never starts with a jump: remember the pose on screen and ease from it into the new clip, so a hand that
 	// is out at the end of a jab travels straight into the uppercut instead of snapping back to the guard first.
 	BlendFrom = ShownPose;
+	CurrentClip = Clip;
 	BlendPrev = PrevShownPose;
 	BlendDt = ShownDt;
 	BlendTime = Clip.Contains(TEXT("Reaction")) ? 0.06f : (Clip == TEXT("Combat_Stance") ? 0.18f : 0.11f);
@@ -357,6 +358,98 @@ void AKSDummy::PoseArm(bool bLeft)
 	const FVector Wrist = Puppet->GetBoneLocationByName(HandBone, EBoneSpaces::WorldSpace);
 	const FQuat TurnFore = FQuat::FindBetweenNormals((Wrist - F.GetLocation()).GetSafeNormal(), WantFore);
 	Puppet->SetBoneRotationByName(ForeBone, (TurnFore * F.GetRotation()).Rotator(), EBoneSpaces::WorldSpace);
+}
+
+/** Bends one leg of the drawn body so its foot is on Target (two-bone IK, knee kept pointing forwards), then levels the foot. */
+void AKSDummy::SolveLeg(bool bLeft, const FVector& FootAt, const FQuat& FootRotation)
+{
+	const FName Up = bLeft ? TEXT("LeftUpLeg") : TEXT("RightUpLeg"), Shin = bLeft ? TEXT("LeftLeg") : TEXT("RightLeg"), Foot = bLeft ? TEXT("LeftFoot") : TEXT("RightFoot");
+	const FTransform UpT = Puppet->GetBoneTransformByName(Up, EBoneSpaces::WorldSpace);
+	const FVector Hip = UpT.GetLocation(), KneeAt = Puppet->GetBoneLocationByName(Shin, EBoneSpaces::WorldSpace), Ankle = Puppet->GetBoneLocationByName(Foot, EBoneSpaces::WorldSpace);
+	const float Thigh = FVector::Dist(Hip, KneeAt), Calf = FVector::Dist(KneeAt, Ankle);
+	if (Thigh < 1.f || Calf < 1.f) return;
+	const FVector ToFoot = FootAt - Hip;
+	const float Span = FMath::Clamp(ToFoot.Size(), FMath::Abs(Thigh - Calf) + 0.5f, Thigh + Calf - 0.3f);
+	const FVector Dir = ToFoot.GetSafeNormal();
+	// The knee keeps the side it was on in the clip, pulled towards the way the fighter faces so it never folds backwards.
+	FVector Pole = (KneeAt - Hip) - Dir * FVector::DotProduct(KneeAt - Hip, Dir) + GetActorForwardVector() * (0.5f * Thigh);
+	Pole = (Pole - Dir * FVector::DotProduct(Pole, Dir)).GetSafeNormal();
+	if (Pole.IsNearlyZero()) return;
+	const float Along = (Thigh * Thigh - Calf * Calf + Span * Span) / (2.f * Span);
+	const FVector NewKnee = Hip + Dir * Along + Pole * FMath::Sqrt(FMath::Max(0.f, Thigh * Thigh - Along * Along));
+	Puppet->SetBoneRotationByName(Up, (FQuat::FindBetweenNormals((KneeAt - Hip).GetSafeNormal(), (NewKnee - Hip).GetSafeNormal()) * UpT.GetRotation()).Rotator(), EBoneSpaces::WorldSpace);
+	Puppet->RefreshBoneTransforms();
+	const FTransform ShinT = Puppet->GetBoneTransformByName(Shin, EBoneSpaces::WorldSpace);
+	const FVector AnkleNow = Puppet->GetBoneLocationByName(Foot, EBoneSpaces::WorldSpace);
+	const FQuat Turn = FQuat::FindBetweenNormals((AnkleNow - ShinT.GetLocation()).GetSafeNormal(), (Hip + Dir * Span - ShinT.GetLocation()).GetSafeNormal());
+	Puppet->SetBoneRotationByName(Shin, (Turn * ShinT.GetRotation()).Rotator(), EBoneSpaces::WorldSpace);
+	Puppet->RefreshBoneTransforms();
+	Puppet->SetBoneRotationByName(Foot, FootRotation.Rotator(), EBoneSpaces::WorldSpace);
+}
+
+/**
+ * Footwork for the drawn body. The clips are standing punches and the body is slid about by the punch aim and the
+ * recoil, which left the legs frozen and the feet skating. Here the feet stay planted on the canvas and take a real
+ * step when the body has moved away from them, the fighter bounces on his knees like a boxer, and he shuffles a
+ * foot every half second or so even when nothing is happening.
+ */
+void AKSDummy::Footwork(float DeltaSeconds)
+{
+	// Not while falling or celebrating: those clips move the legs themselves.
+	const bool bWanted = !(CurrentClip == TEXT("Knock_Down") || CurrentClip == TEXT("victory") || CurrentClip == TEXT("Chest_Pound_Taunt"));
+	LegWeight = FMath::FInterpTo(LegWeight, bWanted ? 1.f : 0.f, DeltaSeconds, 6.f);
+	if (LegWeight < 0.02f) { Feet[0].bPlaced = Feet[1].bPlaced = false; return; }
+	FootClock += DeltaSeconds;
+
+	static const FName FootBones[2] = { TEXT("LeftFoot"), TEXT("RightFoot") };
+	FVector Home[2]; FQuat FootRot[2];
+	for (int32 i = 0; i < 2; i++)
+	{
+		const FTransform T = Puppet->GetBoneTransformByName(FootBones[i], EBoneSpaces::WorldSpace);
+		Home[i] = T.GetLocation(); FootRot[i] = T.GetRotation();
+	}
+
+	// The bounce: hips sink and rise about twice a second, with a little weight shift from foot to foot.
+	const float Beat = FootClock * 2.3f * 2.f * PI;
+	const float Sink = 4.5f * (0.5f - 0.5f * FMath::Cos(Beat)) * LegWeight, Sway = 1.6f * FMath::Sin(Beat * 0.5f) * LegWeight;
+	const FVector HipsNow = Puppet->GetBoneLocationByName(TEXT("Hips"), EBoneSpaces::WorldSpace);
+	Puppet->SetBoneLocationByName(TEXT("Hips"), HipsNow + GetActorRightVector() * Sway - FVector(0, 0, Sink), EBoneSpaces::WorldSpace);
+	Puppet->RefreshBoneTransforms();
+
+	// A shuffle: every so often one foot (they take turns) hops to a slightly different spot.
+	if (FootClock >= NextShuffle && Feet[0].StepT < 0.f && Feet[1].StepT < 0.f && Feet[ShuffleFoot].bPlaced)
+	{
+		FFoot& F = Feet[ShuffleFoot];
+		F.From = F.Planted;
+		F.To = Home[ShuffleFoot] + GetActorForwardVector() * FMath::FRandRange(-6.f, 6.f) + GetActorRightVector() * FMath::FRandRange(-4.f, 4.f);
+		F.StepT = 0.f;
+		ShuffleFoot = 1 - ShuffleFoot;
+		NextShuffle = FootClock + FMath::FRandRange(0.4f, 0.95f);
+	}
+	for (int32 i = 0; i < 2; i++)
+	{
+		FFoot& F = Feet[i];
+		if (!F.bPlaced) { F.Planted = Home[i]; F.bPlaced = true; F.StepT = -1.f; }
+		const float Away = FVector::Dist2D(F.Planted, Home[i]);
+		if (F.StepT < 0.f && Feet[1 - i].StepT < 0.f && Away > 13.f)
+		{
+			// The body has left this foot behind: step to where it should be, and a little past, in the direction of travel.
+			F.From = F.Planted; F.To = Home[i] + (Home[i] - F.Planted).GetSafeNormal2D() * 5.f; F.StepT = 0.f;
+		}
+		else if (Away > 45.f) { F.Planted = Home[i]; F.StepT = -1.f; }      // far too far (a new bout, a teleport): just put it there
+		float Lift = 0.f;
+		if (F.StepT >= 0.f)
+		{
+			F.StepT += DeltaSeconds / 0.13f;
+			const float U = FMath::Min(1.f, F.StepT);
+			F.Planted = FMath::Lerp(F.From, F.To, FMath::SmoothStep(0.f, 1.f, U));
+			Lift = 7.f * FMath::Sin(U * PI);
+			if (U >= 1.f) F.StepT = -1.f;
+		}
+		const FVector OnFloor(F.Planted.X, F.Planted.Y, Home[i].Z + Lift);
+		SolveLeg(i == 0, FMath::Lerp(Home[i], OnFloor, LegWeight), FootRot[i]);
+	}
+	Puppet->RefreshBoneTransforms();
 }
 
 void AKSDummy::AimPunch(const FString& Clip, const FVector& Point, float Weight)
@@ -590,6 +683,7 @@ void AKSDummy::Tick(float DeltaSeconds)
 		ShownDt = DeltaSeconds;
 		ShownPose = Local;
 		Puppet->RefreshBoneTransforms();
+		Footwork(DeltaSeconds);
 		if (bPuppet)
 		{
 			PoseArm(true);

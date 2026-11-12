@@ -127,6 +127,14 @@ private:
 	bool bPuppet = false;
 	TArray<FTransform> ShownPose, BlendFrom;   // the pose on screen last frame, and the pose a new clip is eased in from
 	float BlendLeft = 0.f, BlendTime = 0.12f;
+	// Footwork (see Footwork()): the clips are standing punches, so the legs are given their own life.
+	struct FFoot { FVector Planted = FVector::ZeroVector, From = FVector::ZeroVector, To = FVector::ZeroVector; float StepT = -1.f; bool bPlaced = false; };
+	FFoot Feet[2];
+	float FootClock = 0.f, LegWeight = 0.f, NextShuffle = 0.f;
+	int32 ShuffleFoot = 0;
+	FString CurrentClip;
+	void Footwork(float DeltaSeconds);
+	void SolveLeg(bool bLeft, const FVector& Target, const FQuat& FootRotation);
 	TArray<FTransform> PrevShownPose, BlendPrev;   // one frame earlier: gives each bone's speed when a clip changes
 	float ShownDt = 0.f, BlendDt = 0.f;
 	UPROPERTY() TObjectPtr<USceneComponent> Pivot;                  // at the feet; the hit recoil tilts and moves it

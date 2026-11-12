@@ -153,7 +153,24 @@ private:
 	FKSStreet Street;
 	FKSArena Arena;
 	// A ringside spectator: a flat old-arcade sprite with four poses side by side (idle, cheer, wince, idle mirrored).
-	struct FSpectator { TWeakObjectPtr<AActor> Actor; TObjectPtr<UMaterialInstanceDynamic> MID; FVector Home; float Phase = 0.f, CueAt = 0.f, BusyUntil = 0.f; int32 CuePose = 0, Pose = 0, Shown = -1; };
+	struct FSpectator
+	{
+		TWeakObjectPtr<AActor> Actor; TObjectPtr<UMaterialInstanceDynamic> MID; FVector Home;
+		float Phase = 0.f, CueAt = 0.f, BusyUntil = 0.f, NextWhim = 0.f;
+		float IdleRate = 1.6f, BobRate = 3.2f, BobHeight = 3.f, JumpRate = 9.f, JumpHeight = 20.f;   // everyone moves a little differently
+		int32 CuePose = 0, Pose = 0, Shown = -1;
+		bool bFlip = false, bShownFlip = false, bRival = false;                                      // a rival cheers for the other fighter
+	};
+	// Camera flashes in the crowd: a small pool of glowing balls and lights, each shown for a few hundredths of a second.
+	struct FCrowdFlash { TWeakObjectPtr<AActor> Actor; TObjectPtr<UMaterialInstanceDynamic> MID; float Until = 0.f; };
+	TArray<FCrowdFlash> Flashes;
+	TArray<TWeakObjectPtr<APointLight>> FlashLights;
+	float FlashesOwed = 0.f, NextFlashAt = 0.f;
+	void CrowdFlashes(float Count) { FlashesOwed += Count; }
+	// The fight camera: springs that the action pushes on (see UpdateFightCamera).
+	FVector CamOffset = FVector::ZeroVector, CamVel = FVector::ZeroVector, CamAimLag = FVector::ZeroVector;
+	float CamRoll = 0.f, CamRollVel = 0.f, CamFovKick = 0.f, CamDolly = 0.f, CamSide = 0.f, CamDrop = 0.f;
+	void CamPunch(const FVector& Impulse, float RollImpulse, float FovKick) { CamVel += Impulse; CamRollVel += RollImpulse; CamFovKick += FovKick; }
 	TArray<FSpectator> Spectators;
 	bool bCalibrationDone = false, bCalDemo = false;   // -KSCalDemo: enter calibration without a camera and step through it, for the self-check
 	float CalHold = 0.f, CalPunchUntil = 0.f, CalDoneAt = -1.f;

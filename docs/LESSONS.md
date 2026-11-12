@@ -35,6 +35,9 @@ One entry per bug that cost time: what happened, the cause, the rule. Add to it 
   with a 0.01 bone scale, so the bounds were 1 cm and the mesh was culled. Rule: `SetBoundsScale(400)` on it.
 - **Clip changes snapped.** Every punch clip starts from guard. Rule: ease from the pose on screen into the new
   clip and carry each bone's speed for a few hundredths of a second (`AKSDummy::PlayClip`, `BlendFrom`).
+- **Legs frozen, feet skating.** The clips are standing punches and the body is slid by the punch aim and recoil.
+  Rule: legs are driven in code on the drawn body (`Footwork`), not by the clips; switch it off for clips that
+  move the legs themselves (knock-down, victory).
 - **Winner squashed.** The loser kept aiming a punch after the knock-out. Rule: aim only during the Fight phase.
 - **Smeared textures.** The 0.01 bone scale makes texture streaming pick tiny mips. Rule: `never_stream` on every
   fighter texture.
