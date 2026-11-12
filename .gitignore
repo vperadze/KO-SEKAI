@@ -3,3 +3,4 @@ tracking-test/recordings/
 
 __pycache__/
 *.pyc
+tracking-test/server.log

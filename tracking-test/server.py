@@ -46,8 +46,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         super().end_headers()
 
-    def log_message(self, *args):
-        pass
+    def log_message(self, fmt, *args):
+        # Request log next to this file, so a failed save can be diagnosed.
+        with open(os.path.join(ROOT, "server.log"), "a") as log:
+            log.write(time.strftime("%H:%M:%S ") + (fmt % args) + "\n")
 
 
 if __name__ == "__main__":
