@@ -14,7 +14,7 @@ class AKSDummy;
 class AKSPawn;
 class UKSTrackingSubsystem;
 
-enum class EKSPhase : uint8 { Street, PullIn, Card, Fight, FightEnd, Result, Continue, Ending, Calibrate, Menu, Intro };
+enum class EKSPhase : uint8 { Street, PullIn, Card, Fight, FightEnd, Result, Continue, Ending, Calibrate, Menu, Intro, Select };
 enum class EKSOppState : uint8 { Idle, Windup, Strike, Open, KO };
 
 struct FKSPopup
@@ -74,6 +74,10 @@ public:
 	float RedFlash = 0.f, WhiteFade = 0.f, BlackFade = 0.f;
 	FString Subtitle, Prompt;
 	bool bLastResultWin = false, bLastResultDecision = false;
+	// Choosing a fighter (after FIGHT on the menu): the one looked at stands in the hall, the seven portraits run along the bottom.
+	int32 SelectIndex = 0;
+	float SelectMovedAt = -10.f, SelectChosenAt = -1.f;   // game clock; SelectChosenAt < 0 until the player has chosen
+	bool bPortraits = false;                  // -KSPortraits: photographs every fighter's head for the portraits and quits
 	int32 MenuIndex = 0;                      // the chosen line of the start menu: fight, camera calibration, watch the intro, quit
 	bool bSpokenByOpp = false;                // who the speech bubble belongs to
 	FVector OppHead = FVector::ZeroVector, PlayerHead = FVector::ZeroVector;   // world space, for speech bubbles and damage badges
@@ -96,7 +100,11 @@ private:
 	void StartFight();
 	void ClearWorld();
 	void TickMenu(float Dt);
-	void TickIntro(float Dt);                 // the opening film (KSCineData.h); any confirm key skips it to the menu
+	void ToMenu();                            // from anywhere (Esc, game over, the end of the ladder): clears the world, shows the menu
+	void EnterSelect();
+	void ShowSelectFighter();                 // a fresh actor for the fighter being looked at
+	void TickSelect(float Dt);
+	void TickIntro(float Dt);                 // the opening film (KSCineData.h); a confirm key or a jab at the webcam skips it to the menu
 	void TickStreet(float Dt);
 	void TickPullIn(float Dt);
 	void TickCard(float Dt);
@@ -135,8 +143,17 @@ private:
 
 	/* ---- helpers ---- */
 	float Speak(class AKSDummy* Who, const TCHAR* Prefix, bool bMust = false);
-	struct FLaterVoice { TWeakObjectPtr<class AKSDummy> Who; const TCHAR* Prefix = TEXT(""); float When = 0.f; };
-	FLaterVoice LaterVoice;
+	// A line waiting for its moment, and who answers it (the loser speaks after the announcer, the winner after the loser).
+	struct FLaterVoice { TWeakObjectPtr<class AKSDummy> Who; const TCHAR* Prefix = TEXT(""); float When = 0.f; TWeakObjectPtr<class AKSDummy> Then; const TCHAR* ThenPrefix = TEXT(""); };
+	TArray<FLaterVoice> LaterVoices;
+	/** The ring announcer says a line of KSAnnouncerData.h ("ko", "round1", "name_<Folder>"...), cutting off his last one.
+	 *  Returns its length in seconds, 0 if there is no such line. */
+	float Announcer(const FString& Key, float Volume = 1.5f);
+	void HushAnnouncer();
+	float AnnouncerUntil = 0.f;               // game clock
+	bool bSelectNameSaid = false, bChampionSaid = false;
+	float SelectVoiceSeconds = 0.f;
+	int32 ChosenPlayer = -1;                  // the fighter picked on the select screen; -1: a random one (-KSStart=fight)
 	float VoiceQuietUntil = 0.f;
 	float MusicLevel = 0.f;        // the music's level for this phase, before the dip under a spoken line
 	bool bMusicDucked = false;
@@ -176,6 +193,7 @@ private:
 	UPROPERTY() TObjectPtr<APlayerController> PC;
 	UPROPERTY() TObjectPtr<UKSTrackingSubsystem> TrackingSubsystem;
 	UPROPERTY() TObjectPtr<class UAudioComponent> MusicPlayer;
+	UPROPERTY() TObjectPtr<class UAudioComponent> AnnouncerPlayer;
 
 	// Who is fighting: the player's fighter and the opponents, drawn at random each time the cabinet pulls you in.
 	int32 PlayerChar = 0;
@@ -267,6 +285,9 @@ private:
 	bool bMirrorArms = false;    // -KSMirrorArms: the fighter's arms copy the webcam arms directly (experimental, off by default)
 	bool bFakeArms = false;      // -KSFakeArms: pretend the webcam sees a fixed arm pose, to check the arm copying
 	bool bAutoNoGuard = false;   // -KSNoGuard: the test bot never defends, so the opponent's punches land
-	float ShotEvery = 0.f, NextShot = 0.f, AutoNextPunch = 0.f;
+	bool bGiveUp = false;        // -KSGiveUp: the test bot neither defends nor punches nor continues, so the count runs out
+	float TestEscAt = 0.f;       // -KSEscAt=N: as if Esc were pressed N seconds into the first bout
+	bool bFakeFilmPunches = false;   // -KSFakePunch: during the film, webcam hooks and uppercuts for five seconds, then one jab
+	float ShotEvery = 0.f, NextShot = 0.f, AutoNextPunch = 0.f, PortraitT = 0.f;
 	int32 ShotIndex = 0;
 };

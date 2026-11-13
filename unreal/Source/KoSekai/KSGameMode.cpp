@@ -1,5 +1,8 @@
 #include "KSGameMode.h"
 #include "KSCineData.h"
+#include "KSAnnouncerData.h"
+#include "Components/AudioComponent.h"
+#include "Kismet/GameplayStatics.h"
 #include "KSDummy.h"
 #include "KSPawn.h"
 #include "KSHUD.h"
@@ -121,7 +124,10 @@ void AKSGameMode::BeginPlay()
 
 	const TCHAR* Cmd = FCommandLine::Get();
 	bAuto = FParse::Param(Cmd, TEXT("KSAuto"));
-	bAutoNoGuard = FParse::Param(Cmd, TEXT("KSNoGuard"));
+	bGiveUp = FParse::Param(Cmd, TEXT("KSGiveUp"));
+	bAutoNoGuard = bGiveUp || FParse::Param(Cmd, TEXT("KSNoGuard"));
+	FParse::Value(Cmd, TEXT("KSEscAt="), TestEscAt);
+	bFakeFilmPunches = FParse::Param(Cmd, TEXT("KSFakePunch"));
 	bFakeArms = FParse::Param(Cmd, TEXT("KSFakeArms"));
 	bCalDemo = FParse::Param(Cmd, TEXT("KSCalDemo"));
 	bCalJitter = FParse::Param(Cmd, TEXT("KSCalJitter"));
@@ -132,7 +138,9 @@ void AKSGameMode::BeginPlay()
 	bArenaTour = FParse::Param(Cmd, TEXT("KSArenaTour"));
 	FString Start;
 	FParse::Value(Cmd, TEXT("KSStart="), Start);
-	if (Start == TEXT("fight"))
+	bPortraits = FParse::Param(Cmd, TEXT("KSPortraits"));
+	if (bPortraits || Start == TEXT("select")) EnterSelect();
+	else if (Start == TEXT("fight"))
 	{
 		FParse::Value(Cmd, TEXT("KSFighter="), ForcedOpponent);   // roster index of the first opponent
 		FParse::Value(Cmd, TEXT("KSPlayer="), ForcedPlayer);      // roster index of the player's fighter
@@ -184,7 +192,47 @@ void AKSGameMode::SetPhase(EKSPhase NewPhase)
 	// The hall's murmur runs under every phase that happens in the ring.
 	KSAudio::Crowd(this, CrowdPlayer, Phase == EKSPhase::Fight ? 0.2f : Level > 0.f ? 0.14f : 0.f);
 	// The start menu plays the fight music too, without the crowd.
-	if (Phase == EKSPhase::Menu || Phase == EKSPhase::Intro) { MusicLevel = Phase == EKSPhase::Intro ? 0.34f : 0.26f; PlayMusic(); }
+	if (Phase == EKSPhase::Menu || Phase == EKSPhase::Intro || Phase == EKSPhase::Select) { MusicLevel = Phase == EKSPhase::Intro ? 0.34f : 0.26f; PlayMusic(); }
+	// Choosing a fighter happens in the hall, so the hall is heard.
+	if (Phase == EKSPhase::Select) KSAudio::Crowd(this, CrowdPlayer, 0.12f);
+}
+
+void AKSGameMode::ToMenu()
+{
+	if (OppDummy) OppDummy->StopTalking();
+	if (PlayerDummy) PlayerDummy->StopTalking();
+	ClearWorld();
+	Subtitle.Reset(); Prompt.Reset(); CueMain.Reset(); CueHint.Reset(); Announcement.Reset(); Popups.Reset();
+	SpokenLine.Reset(); OppBody.Reset(); PlayerBody.Reset(); LaterVoices.Reset();
+	BlackFade = 0.f; RedFlash = 0.f; bPaused = false; bCalFromMenu = false;
+	WalkPos = FVector(-250, 0, 0);
+	MenuIndex = 0; WhiteFade = FMath::Max(WhiteFade, 0.6f);
+	UE_LOG(LogTemp, Display, TEXT("KSTEST to_menu from_phase=%d"), (int32)Phase);   // for tools/check.sh
+	SetPhase(EKSPhase::Menu);
+}
+
+float AKSGameMode::Announcer(const FString& Key, float Volume)
+{
+	for (const FKSAnnouncerLine& Line : KSAnnouncerLines)
+	{
+		if (Key != Line.Key) continue;
+		if (AnnouncerPlayer) AnnouncerPlayer->Stop();
+		const FString Asset = FString::Printf(TEXT("V_Announcer_%s"), Line.Key);
+		USoundBase* Sound = LoadObject<USoundBase>(nullptr, *FString::Printf(TEXT("/Game/KS/Voice/%s.%s"), *Asset, *Asset), nullptr, LOAD_NoWarn | LOAD_Quiet);
+		// With no sound device (the self-check runs with -nosound) there is no player; everyone still waits for him by the clock.
+		AnnouncerPlayer = Sound ? UGameplayStatics::SpawnSound2D(this, Sound, Volume) : nullptr;
+		AnnouncerUntil = Clock + Line.Seconds;
+		UE_LOG(LogTemp, Display, TEXT("KSTEST announcer line=%s sound=%d"), Line.Key, Sound ? 1 : 0);
+		return Line.Seconds;
+	}
+	UE_LOG(LogTemp, Display, TEXT("KSTEST announcer line=%s sound=0 unknown=1"), *Key);
+	return 0.f;
+}
+
+void AKSGameMode::HushAnnouncer()
+{
+	if (AnnouncerPlayer && Clock < AnnouncerUntil) AnnouncerPlayer->FadeOut(0.08f, 0.f);
+	AnnouncerUntil = FMath::Min(AnnouncerUntil, Clock);
 }
 
 bool AKSGameMode::Pressed(const FKey& Key) const { return PC && PC->WasInputKeyJustPressed(Key); }
@@ -238,7 +286,7 @@ void AKSGameMode::Tick(float Dt)
 	if (!PC || !Pawn) return;
 
 	// The music dips under a spoken line and comes back when the fighters are quiet, so the shouting is heard.
-	const bool bTalking = (OppDummy && OppDummy->IsTalking()) || (PlayerDummy && PlayerDummy->IsTalking());
+	const bool bTalking = (OppDummy && OppDummy->IsTalking()) || (PlayerDummy && PlayerDummy->IsTalking()) || Clock < AnnouncerUntil;
 	if (bTalking != bMusicDucked)
 	{
 		bMusicDucked = bTalking;
@@ -268,8 +316,19 @@ void AKSGameMode::Tick(float Dt)
 	Clock += GameDt;
 	PhaseTime += GameDt;
 
+	// Esc leaves whatever is going on for the start menu (the film handles its own Esc; on the menu there is nowhere to go).
+	const bool bTestEsc = TestEscAt > 0.f && Phase == EKSPhase::Fight && PhaseTime > TestEscAt;
+	if ((Pressed(EKeys::Escape) || bTestEsc) && Phase != EKSPhase::Menu && Phase != EKSPhase::Intro)
+	{
+		TestEscAt = 0.f;
+		Sfx(EKSSfx::Select, 0.7f); HushAnnouncer();
+		ToMenu();
+		return;
+	}
+
 	switch (Phase)
 	{
+	case EKSPhase::Select: TickSelect(GameDt); break;
 	case EKSPhase::Street: TickStreet(GameDt); break;
 	case EKSPhase::PullIn: TickPullIn(GameDt); break;
 	case EKSPhase::Card: TickCard(GameDt); break;
@@ -313,7 +372,6 @@ void AKSGameMode::Tick(float Dt)
 
 void AKSGameMode::TickMenu(float Dt)
 {
-	// The street is already built behind the menu picture; the view waits at its start.
 	Pawn->SetView(WalkPos + FVector(0, 0, 165.f), FRotator::ZeroRotator, 90.f);
 	const int32 Lines = 4;
 	// The webcam works here too, once it has found the player: a left punch moves down the list, a right punch chooses.
@@ -327,7 +385,7 @@ void AKSGameMode::TickMenu(float Dt)
 	{
 		Sfx(EKSSfx::Select, 0.8f);
 		UE_LOG(LogTemp, Display, TEXT("KSTEST menu chosen=%d"), MenuIndex);   // for tools/check.sh
-		if (MenuIndex == 0) { WhiteFade = 1.f; EnterArena(); BeginLadder(); }
+		if (MenuIndex == 0) { WhiteFade = 0.8f; EnterSelect(); }
 		else if (MenuIndex == 1)
 		{
 			// Calibration is the player's choice, here: it teaches the detector how hard this player punches.
@@ -345,13 +403,132 @@ void AKSGameMode::TickIntro(float Dt)
 	Pawn->SetView(WalkPos + FVector(0, 0, 165.f), FRotator::ZeroRotator, 90.f);
 	float Total = 0.f;
 	for (const FKSCineShot& Shot : KSCineShots) Total += Shot.Frames / KSCineFps;
-	// Any confirm key, or a punch at the webcam, skips the film. The self-playing test watches two and a half seconds.
-	const bool bSkip = PhaseTime > 0.5f && (ConfirmPressed() || Pressed(EKeys::Escape));
+	// A confirm key skips the film, and so does a jab at the webcam. Only a jab: "any punch" ended the film whenever
+	// the player moved, because someone settling in front of the camera sets off the odd hook or uppercut.
+	if (bFakeFilmPunches)
+	{
+		// For tools/check.sh: what a player moving about in front of the camera sets off, and then a real jab.
+		const float Before = PhaseTime - Dt;
+		if (PhaseTime > 1.6f && PhaseTime < 5.f && FMath::FloorToInt(PhaseTime * 2.f) != FMath::FloorToInt(Before * 2.f))
+			FramePunches.Add({ EKSArm::Right, FMath::FloorToInt(PhaseTime * 2.f) % 2 ? EKSPunch::Hook : EKSPunch::Uppercut });
+		if (Before < 6.f && PhaseTime >= 6.f) FramePunches.Add({ EKSArm::Left, EKSPunch::Straight });
+	}
+	bool bJab = false;
+	if (PhaseTime > 1.5f) for (const TPair<EKSArm, EKSPunch>& Punch : FramePunches) bJab |= Punch.Value == EKSPunch::Straight;
+	const bool bKey = Pressed(EKeys::Enter) || Pressed(EKeys::SpaceBar) || Pressed(EKeys::E) || Pressed(EKeys::Gamepad_FaceButton_Bottom) || Pressed(EKeys::Escape);
+	// The self-playing test watches two and a half seconds.
+	const bool bSkip = PhaseTime > 0.5f && (bKey || bJab);
 	if (bSkip || PhaseTime >= Total || (bAuto && PhaseTime > 2.5f))
 	{
-		UE_LOG(LogTemp, Display, TEXT("KSTEST intro ended seconds=%.1f of=%.1f skipped=%d"), PhaseTime, Total, PhaseTime < Total ? 1 : 0);
+		UE_LOG(LogTemp, Display, TEXT("KSTEST intro ended seconds=%.1f of=%.1f skipped=%d by_jab=%d"), PhaseTime, Total, PhaseTime < Total ? 1 : 0, bJab && !bKey ? 1 : 0);
 		WhiteFade = 0.8f; MenuIndex = 0;
 		SetPhase(EKSPhase::Menu);
+		Announcer(TEXT("welcome"));
+	}
+}
+
+/* ================= choosing a fighter ================= */
+
+void AKSGameMode::EnterSelect()
+{
+	ClearWorld();
+	RaiseArena(0);
+	SeatCrowd();
+	SelectIndex = FMath::Clamp(ChosenPlayer >= 0 ? ChosenPlayer : SelectIndex, 0, Roster().Num() - 1);
+	SelectChosenAt = -1.f; SelectMovedAt = Clock; bSelectNameSaid = false; PortraitT = 0.f;
+	Subtitle.Reset(); Prompt.Reset(); CueMain.Reset(); CueHint.Reset(); Announcement.Reset(); SpokenLine.Reset();
+	ShowSelectFighter();
+	SetPhase(EKSPhase::Select);
+	if (!bPortraits) Announcer(TEXT("choose"));
+}
+
+void AKSGameMode::ShowSelectFighter()
+{
+	// A fresh actor each time, as for every bout (a second mesh on an old actor froze in one pose).
+	if (PlayerDummy) { PlayerDummy->StopTalking(); WorldActors.Remove(PlayerDummy); PlayerDummy->Destroy(); }
+	const FKSFighterDef& F = Roster()[SelectIndex];
+	PlayerDummy = GetWorld()->SpawnActor<AKSDummy>(FVector::ZeroVector, FRotator::ZeroRotator);
+	WorldActors.Add(PlayerDummy);
+	PlayerDummy->Setup(F.Body, F.Gloves, false, 0.25f);
+	const bool bReal = F.Asset && PlayerDummy->UseCharacter(F.Asset);
+	PlayerDummy->SetActorScale3D(FVector(bReal ? 1.f : F.Height));
+	PlayerDummy->Snap(KSPoses::Guard());
+	if (bReal) PlayerDummy->PlayClip(TEXT("Combat_Stance"), true);
+	PlayerClipKey.Reset(); SpokenLine.Reset();
+}
+
+void AKSGameMode::TickSelect(float Dt)
+{
+	const int32 Count = Roster().Num();
+	TickCrowd();
+	if (bPortraits)
+	{
+		// One photograph of each head for the portraits (art/ui/make_avatars.py crops them): a second for the fighter
+		// to load and settle, the picture, half a second for it to be written, the next fighter.
+		const FVector Head = PlayerDummy ? PlayerDummy->FaceWorld(false) : FVector(0, 0, 160);
+		const FVector Eye = Head + FVector(140.f, 28.f, 14.f);
+		Pawn->SetView(Eye, (Head + FVector(0, 0, 10.f) - Eye).Rotation(), 40.f);
+		const float Before = PortraitT; PortraitT += Dt;
+		if (Before < 1.f && PortraitT >= 1.f)
+		{
+			FScreenshotRequest::RequestScreenshot(FPaths::ProjectSavedDir() / FString::Printf(TEXT("Screenshots/avatar_%s.png"), Roster()[SelectIndex].Asset), false, false);
+		}
+		if (PortraitT >= 1.6f)
+		{
+			PortraitT = 0.f;
+			if (SelectIndex + 1 < Count) { SelectIndex++; ShowSelectFighter(); }
+			else { UE_LOG(LogTemp, Display, TEXT("KSTEST portraits done count=%d"), Count); PC->ConsoleCommand(TEXT("quit")); }
+		}
+		return;
+	}
+
+	// The fighter stands right of the middle; the camera drifts a little so the hall behind is not a still picture.
+	const float Sway = FMath::Sin(Clock * 0.5f);
+	const FVector Eye(345.f + 12.f * FMath::Cos(Clock * 0.37f), 78.f + 26.f * Sway, 118.f);
+	Pawn->SetView(Eye, (FVector(0.f, 78.f, 96.f) - Eye).Rotation(), 52.f);
+	SpokenLine = PlayerDummy && PlayerDummy->IsTalking() ? PlayerDummy->SpokenText() : FString();
+
+	if (SelectChosenAt >= 0.f)
+	{
+		// He has had his say: on to the ladder as him.
+		if (Clock - SelectChosenAt > FMath::Max(1.3f, SelectVoiceSeconds + 0.25f))
+		{
+			ChosenPlayer = SelectIndex; WhiteFade = 1.f;
+			EnterArena(); BeginLadder();
+		}
+		return;
+	}
+
+	// Keys, or the webcam once it has the player: a left punch moves on, a right punch chooses (as on the menu).
+	const bool bTracked = TrackingSubsystem && TrackingSubsystem->IsTracking() && PhaseTime > 1.5f;
+	int32 Move = 0; bool bChoose = false;
+	if (Pressed(EKeys::Right) || Pressed(EKeys::D) || Pressed(EKeys::Gamepad_DPad_Right)) Move = 1;
+	if (Pressed(EKeys::Left) || Pressed(EKeys::A) || Pressed(EKeys::Gamepad_DPad_Left)) Move = -1;
+	if (bTracked) for (const TPair<EKSArm, EKSPunch>& Punch : FramePunches) { if (Punch.Key == EKSArm::Left) Move = 1; else bChoose = true; }
+	bChoose |= Pressed(EKeys::Enter) || Pressed(EKeys::SpaceBar) || Pressed(EKeys::Gamepad_FaceButton_Bottom);
+	if (Move != 0)
+	{
+		SelectIndex = (SelectIndex + Move + Count) % Count;
+		SelectMovedAt = Clock; bSelectNameSaid = false;
+		Sfx(EKSSfx::Menu, 0.7f); HushAnnouncer();
+		ShowSelectFighter();
+	}
+	// The announcer calls the name once the choice has rested on someone for a moment, so flicking past is quiet.
+	if (!bSelectNameSaid && Clock >= AnnouncerUntil && Clock - SelectMovedAt > 0.3f)
+	{
+		bSelectNameSaid = true;
+		Announcer(FString(TEXT("name_")) + Roster()[SelectIndex].Asset);
+	}
+	if ((PhaseTime > 0.6f && bChoose) || (bAuto && PhaseTime > 2.5f))
+	{
+		SelectChosenAt = Clock;
+		Sfx(EKSSfx::Select, 0.9f); Sfx(EKSSfx::Cheer, 0.5f); HushAnnouncer();
+		CrowdReact(true, 0.8f); CrowdFlashes(6.f);
+		WhiteFade = FMath::Max(WhiteFade, 0.45f);
+		// He introduces himself and shows off.
+		SelectVoiceSeconds = PlayerDummy ? PlayerDummy->Say(TEXT("intro"), 1.4f) : 0.f;
+		if (PlayerDummy && PlayerDummy->HasCharacter()) PlayerDummy->PlayClip(TEXT("Chest_Pound_Taunt"), false);
+		UE_LOG(LogTemp, Display, TEXT("KSTEST select chosen=%d fighter=%s"), SelectIndex, Roster()[SelectIndex].Asset);   // for tools/check.sh
 	}
 }
 
@@ -474,7 +651,9 @@ void AKSGameMode::PickFighters()
 {
 	// A random fighter for the player, then a random ladder of different opponents.
 	const int32 Count = Roster().Num();
-	PlayerChar = ForcedPlayer >= 0 ? FMath::Clamp(ForcedPlayer, 0, Count - 1) : FMath::RandRange(0, Count - 1);
+	// The player's fighter: the one chosen on the select screen; a random one when the game starts straight in the ring.
+	PlayerChar = ForcedPlayer >= 0 ? FMath::Clamp(ForcedPlayer, 0, Count - 1) : ChosenPlayer >= 0 ? FMath::Clamp(ChosenPlayer, 0, Count - 1) : FMath::RandRange(0, Count - 1);
+	UE_LOG(LogTemp, Display, TEXT("KSTEST player fighter=%s chosen=%d"), Roster()[PlayerChar].Asset, ChosenPlayer >= 0 ? 1 : 0);   // for tools/check.sh
 	TArray<int32> Others;
 	for (int32 i = 0; i < Count; i++) if (i != PlayerChar) Others.Add(i);
 	for (int32 i = Others.Num() - 1; i > 0; i--) Others.Swap(i, FMath::RandRange(0, i));
@@ -548,7 +727,7 @@ void AKSGameMode::UseArena(int32 Index)
 
 void AKSGameMode::PlayMusic(float FadeSeconds)
 {
-	const TCHAR* Track = (Phase == EKSPhase::Menu || Phase == EKSPhase::Intro || ArenaIndex < 0) ? TEXT("Fight") : KSArenas[ArenaIndex].Music;
+	const TCHAR* Track = (Phase == EKSPhase::Menu || Phase == EKSPhase::Intro || Phase == EKSPhase::Select || ArenaIndex < 0) ? TEXT("Fight") : KSArenas[ArenaIndex].Music;
 	KSAudio::Music(this, MusicPlayer, MusicLevel * (bMusicDucked ? 0.4f : 1.f), FadeSeconds, Track);
 }
 
@@ -637,8 +816,10 @@ void AKSGameMode::StartCard(int32 Index)
 	BlackFade = 0.f;
 	Sfx(EKSSfx::Coin);
 	if (PlayerDummy) PlayerDummy->StopTalking();
-	bIntroSaid = false; VoiceQuietUntil = 0.f; LaterVoice = FLaterVoice();
+	bIntroSaid = false; bChampionSaid = false; VoiceQuietUntil = 0.f; LaterVoices.Reset();
 	SetPhase(EKSPhase::Card);
+	// The announcer calls the opponent into the ring; the opponent answers when he has finished.
+	if (F.Asset) Announcer(FString(TEXT("name_")) + F.Asset);
 }
 
 void AKSGameMode::TickCard(float Dt)
@@ -649,17 +830,18 @@ void AKSGameMode::TickCard(float Dt)
 		bFightStarted = true;
 		Announce(FString::Printf(TEXT("FIGHT %d OF %d"), FighterIndex + 1, NumFights()), 1.3f);
 	}
-	if (!bIntroSaid && PhaseTime >= 0.5f) { bIntroSaid = true; Speak(OppDummy, TEXT("intro"), true); }
+	if (!bIntroSaid && PhaseTime >= 0.5f && Clock >= AnnouncerUntil + 0.1f) { bIntroSaid = true; Speak(OppDummy, TEXT("intro"), true); }
 	UpdateFighterPoses(Dt);
 	UpdateFightCamera(Dt);
 	// The bell waits for him to finish his sentence (within reason).
-	if (PhaseTime >= 4.1f && (!OppDummy || !OppDummy->IsTalking() || PhaseTime >= 7.5f)) StartFight();
+	if (PhaseTime >= 4.1f && ((bIntroSaid && (!OppDummy || !OppDummy->IsTalking())) || PhaseTime >= 8.5f)) StartFight();
 }
 
 void AKSGameMode::StartFight()
 {
 	Sfx(EKSSfx::Bell1);
 	Announce(TEXT("FIGHT!"), 0.8f);
+	Announcer(FighterIndex + 1 >= NumFights() ? TEXT("round3") : FighterIndex == 0 ? TEXT("round1") : TEXT("round2"));
 	SetPhase(EKSPhase::Fight);
 	OppIdle(1.2f);
 }
@@ -867,7 +1049,7 @@ void AKSGameMode::FinishCalibration(bool bCompleted)
 	UE_LOG(LogTemp, Display, TEXT("KSTEST calibration hint_changes=%d"), CalHintChanges);
 	UE_LOG(LogTemp, Display, TEXT("KSTEST calibration done completed=%d"), bCompleted ? 1 : 0);
 	CalClipKey.Reset(); CalChecks.Reset(); CalTitle.Reset(); CalHint.Reset();
-	if (bCalFromMenu) { bCalFromMenu = false; WhiteFade = 0.8f; EnterStreet(false); SetPhase(EKSPhase::Menu); return; }
+	if (bCalFromMenu) { WhiteFade = 0.8f; ToMenu(); return; }
 	StartCard(0);
 }
 
@@ -1547,7 +1729,13 @@ void AKSGameMode::DriveCharacters()
 	}
 
 	// A line that was waiting for its moment (the winner speaks after the loser).
-	if (LaterVoice.Who.IsValid() && Clock >= LaterVoice.When) { Speak(LaterVoice.Who.Get(), LaterVoice.Prefix, true); LaterVoice = FLaterVoice(); }
+	for (int32 i = LaterVoices.Num() - 1; i >= 0; i--)
+	{
+		if (Clock < LaterVoices[i].When) continue;
+		const FLaterVoice Due = LaterVoices[i]; LaterVoices.RemoveAt(i);
+		const float Seconds = Due.Who.IsValid() ? Speak(Due.Who.Get(), Due.Prefix, true) : 0.f;
+		if (Due.Then.IsValid()) { FLaterVoice Next; Next.Who = Due.Then; Next.Prefix = Due.ThenPrefix; Next.When = Clock + Seconds + 0.35f; LaterVoices.Add(Next); }
+	}
 	// The subtitle: whoever is speaking.
 	AKSDummy* Talker = OppDummy && OppDummy->IsTalking() ? OppDummy.Get() : PlayerDummy && PlayerDummy->IsTalking() ? PlayerDummy.Get() : nullptr;
 	SpokenLine = Talker ? Talker->SpokenText() : FString();
@@ -1563,7 +1751,7 @@ float AKSGameMode::Speak(AKSDummy* Who, const TCHAR* Prefix, bool bMust)
 {
 	if (!Who || !Who->HasCharacter()) return 0.f;
 	AKSDummy* Other = Who == OppDummy ? PlayerDummy.Get() : OppDummy.Get();
-	if (!bMust && (Clock < VoiceQuietUntil || Who->IsTalking() || (Other && Other->IsTalking()))) return 0.f;
+	if (!bMust && (Clock < VoiceQuietUntil || Clock < AnnouncerUntil || Who->IsTalking() || (Other && Other->IsTalking()))) return 0.f;
 	if (Other) Other->StopTalking();
 	const float Seconds = Who->Say(Prefix, Who == OppDummy ? 1.5f : 1.3f);   // voices are the loudest thing in the bout
 	if (Seconds > 0.f) VoiceQuietUntil = Clock + Seconds + 2.2f;
@@ -1745,11 +1933,14 @@ void AKSGameMode::EndFight(bool bWin, bool bDecision)
 	if (OppDummy) OppDummy->TakeFaceStats(Faces, Mouth);
 	UE_LOG(LogTemp, Display, TEXT("KSTEST faces bout=%d opponent=%s shown=%d mouth_opens=%d"), FighterIndex, Fighter().Name, Faces, Mouth);
 	if (PlayerDummy) PlayerDummy->TakeFaceStats(Faces, Mouth);
-	// The loser has the first word, the winner the last.
-	AKSDummy* Winner = bWin ? PlayerDummy.Get() : OppDummy.Get();
-	AKSDummy* Loser = bWin ? OppDummy.Get() : PlayerDummy.Get();
-	const float LoserSeconds = Speak(Loser, TEXT("lose"), true);
-	LaterVoice.Who = Winner; LaterVoice.Prefix = TEXT("win"); LaterVoice.When = Clock + LoserSeconds + 0.35f;
+	// The announcer calls it, then the loser has the first word and the winner the last.
+	if (OppDummy) OppDummy->StopTalking();
+	if (PlayerDummy) PlayerDummy->StopTalking();
+	const float CallSeconds = Announcer(bDecision ? TEXT("time") : bWin ? TEXT("ko") : TEXT("down"));
+	FLaterVoice After;
+	After.Who = bWin ? OppDummy.Get() : PlayerDummy.Get(); After.Prefix = TEXT("lose"); After.When = Clock + CallSeconds + 0.1f;
+	After.Then = bWin ? PlayerDummy.Get() : OppDummy.Get(); After.ThenPrefix = TEXT("win");
+	LaterVoices.Reset(); LaterVoices.Add(After);
 	CueMain.Reset(); CueHint.Reset(); Pending.Reset();
 	CrowdReact(bWin, 1.f);
 	if (bWin && !bDecision) ConfettiBurst();
@@ -1775,7 +1966,7 @@ void AKSGameMode::TickFight(float Dt)
 				AutoDefense = Attack.Type == EKSPunch::Straight ? EKSDefense::Block
 					: Attack.Type == EKSPunch::Hook ? (Attack.Side == EKSArm::Left ? EKSDefense::EvadeLeft : EKSDefense::EvadeRight) : EKSDefense::EvadeLeft;
 			}
-			if (OppState == EKSOppState::Open && Clock >= AutoNextPunch)
+			if (OppState == EKSOppState::Open && Clock >= AutoNextPunch && !bGiveUp)
 			{
 				AutoNextPunch = Clock + 0.3f;
 				FramePunches.Add({ FMath::RandBool() ? EKSArm::Left : EKSArm::Right, (EKSPunch)FMath::RandRange(0, 2) });
@@ -1816,10 +2007,15 @@ void AKSGameMode::TickResult(float Dt)
 {
 	UpdateFighterPoses(Dt);
 	UpdateFightCamera(Dt);
+	const bool bLast = FighterIndex + 1 >= NumFights();
+	// The whole ladder is won: once the fighters have had their say, the announcer crowns the player.
+	const bool bQuiet = Clock >= AnnouncerUntil && !LaterVoices.Num() && !(OppDummy && OppDummy->IsTalking()) && !(PlayerDummy && PlayerDummy->IsTalking());
+	if (bLast && !bChampionSaid && PhaseTime > 0.6f && bQuiet) { bChampionSaid = true; Announcer(TEXT("champion")); ConfettiBurst(); CrowdReact(true, 1.f); }
 	if ((PhaseTime > 1.2f && ConfirmPressed()) || (bAuto && PhaseTime > 2.5f))
 	{
-		if (FighterIndex + 1 < NumFights()) StartCard(FighterIndex + 1);
-		else { WhiteFade = 1.f; EnterStreet(true); }
+		if (!bLast) StartCard(FighterIndex + 1);
+		// It used to end on the dark street with the cabinet. The player asked for the menu instead.
+		else { WhiteFade = 1.f; ToMenu(); }
 	}
 }
 
@@ -1829,8 +2025,9 @@ void AKSGameMode::TickContinue(float Dt)
 	UpdateFightCamera(Dt);
 	ContinueLeft -= Dt;
 	BlackFade = FMath::Clamp(1.f - ContinueLeft / 10.f, 0.f, 0.85f);
-	if ((PhaseTime > 1.0f && ConfirmPressed()) || (bAuto && PhaseTime > 2.f)) { StartCard(FighterIndex); return; }
-	if (ContinueLeft <= 0.f) EnterStreet(false);
+	if ((PhaseTime > 1.0f && ConfirmPressed()) || (bAuto && !bGiveUp && PhaseTime > 2.f)) { StartCard(FighterIndex); return; }
+	// The count ran out. This used to drop the player on the old street to walk to the cabinet again.
+	if (ContinueLeft <= 0.f) { ToMenu(); Announcer(TEXT("gameover")); }
 }
 
 /* ================= the ending ================= */
@@ -1845,5 +2042,5 @@ void AKSGameMode::TickEnding(float Dt)
 		: PhaseTime < 12.f ? TEXT("The cabinet has what it waited thirty-nine years for: a player.")
 		: TEXT("KO-SEKAI   -   thank you for playing");
 	Prompt = PhaseTime > 6.f ? TEXT("Press ENTER for the menu") : TEXT("");
-	if ((PhaseTime > 6.f && ConfirmPressed()) || (bAuto && PhaseTime > 16.f)) { EnterStreet(false); MenuIndex = 0; SetPhase(EKSPhase::Menu); }
+	if ((PhaseTime > 6.f && ConfirmPressed()) || (bAuto && PhaseTime > 16.f)) ToMenu();
 }

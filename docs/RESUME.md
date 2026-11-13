@@ -52,8 +52,7 @@ Updated 2026-11-13. Deadline 2026-11-16 02:59 CET.
 - Opening film (`art/cinematic`: `gen_cinematic.py`, 6 Dreamina shots, 28 s, 185 credits quoted including two
   refused shots redone; `prep_cinematic.py` turns them into frame sheets, `KSHUD::DrawIntro` shows them at 12 a
   second with captions and tape lines, the fight music under it). It plays at start-up, any confirm key skips it,
-  then the start menu: FIGHT, CAMERA CALIBRATION, WATCH THE INTRO, QUIT. The street walk is no longer on the
-  menu (`-KSStart=street` still reaches it); the ending returns to the menu. **Not seen in motion.**
+  then the start menu: FIGHT, CAMERA CALIBRATION, WATCH THE INTRO, QUIT. **Not seen in motion.**
 - Calibration is optional: only the menu line starts it, and it returns to the menu. Nothing forces it before the
   first bout any more (`-KSNoCal` is now meaningless). Uncalibrated webcam play uses the detector's defaults;
   **nobody has tried that with a person since the change**.
@@ -89,6 +88,26 @@ Updated 2026-11-13. Deadline 2026-11-16 02:59 CET.
   The check counts the pictures and fonts and sees a bubble, a damage badge and the menu drawn. Seen in stills only:
   **the animation (pops, slams, jolts), the new sounds and their loudness are unjudged**, and nobody has used the
   menu with a keyboard or with punches (left punch = next line, right punch = choose) yet.
+
+- Flow, changed 2026-11-13 at the player's request: film -> menu -> FIGHT -> **choose your fighter** -> ladder -> menu.
+  - Select screen (`EKSPhase::Select`, `KSHUD::DrawSelect`): the fighter looked at stands in the hall, name and
+    tagline on the left, seven portraits along the bottom (photographs of the game's own models, `-KSPortraits` ->
+    `art/ui/make_avatars.py`). Left/right or a left punch moves, Enter or a right punch chooses; the fighter then
+    says his introduction and pounds his chest, and the ladder starts as him. Checked: all seven portraits load, the
+    chosen fighter is the one played. Seen in two stills. **Not seen**: scrolling through all seven, the feel of it.
+  - Esc goes to the start menu from anywhere (bout, card, result, continue, calibration, select). Checked mid-bout.
+  - The street is gone from the game: the CONTINUE? count running out used to drop the player on the street walk,
+    and winning the ladder ended on the dark street with the cabinet. Both now go to the menu (`ToMenu`). The street
+    code remains behind `-KSStart=street` only. Checked for the count running out.
+  - The film is skipped by a key or by a **jab** at the webcam, no longer by any punch (it stopped whenever the
+    player moved). Checked with fake punches; **not tried with a person**: if settling in front of the camera sets
+    off jabs too, the film will still stop.
+- Ring announcer (`art/tools/announcer.py`, `KSAnnouncerData.h`, `AKSGameMode::Announcer`): 17 lines in a deep voice
+  through a hall loudspeaker, made locally like the fighters' voices. He welcomes after the film, says "choose your
+  fighter", calls each fighter's name on the select screen and before each bout ("In this corner: ..."), calls the
+  round, the knockout, the player going down, time, the new champion after the last bout and game over. Fighters
+  wait for him; the music dips under him. Checked: every line asked for has its recording.
+  **Nobody has listened to him yet**: the voice, the pathos, the loudness and whether he talks too much are unjudged.
 
 ## Built but not verified with a person
 

@@ -23,7 +23,10 @@ namespace
 		TEXT("title_bg"), TEXT("logo"), TEXT("hpbar"), TEXT("timer"), TEXT("panel"), TEXT("banner"), TEXT("vs"), TEXT("glove"), TEXT("bubble"),
 		TEXT("burst_hit"), TEXT("burst_hurt"),
 		TEXT("w_counter"), TEXT("w_dodge"), TEXT("w_blocked"), TEXT("w_fake"), TEXT("w_guardbreak"), TEXT("w_pow"), TEXT("w_bam"), TEXT("w_wham"), TEXT("w_krak"),
-		TEXT("t_fight"), TEXT("t_ko"), TEXT("t_youwin"), TEXT("t_youlose"), TEXT("t_knockedout"), TEXT("t_time"), TEXT("t_down"), TEXT("t_continue"), TEXT("t_paused") };
+		TEXT("t_fight"), TEXT("t_ko"), TEXT("t_youwin"), TEXT("t_youlose"), TEXT("t_knockedout"), TEXT("t_time"), TEXT("t_down"), TEXT("t_continue"), TEXT("t_paused"),
+		// The fighters' portraits for the select screen: photographs of the game's own models (-KSPortraits, art/ui/make_avatars.py).
+		TEXT("av_SergeantMulletV2"), TEXT("av_ChannelZero"), TEXT("av_SirLasercorn"), TEXT("av_AerobicsAnnihilator"), TEXT("av_GrandmaThunder"),
+		TEXT("av_Turbotron"), TEXT("av_CountHairspray") };
 
 	// The words the game pops up or announces, and the picture that says each one.
 	struct FWordArt { const TCHAR* Word; const TCHAR* Art; };
@@ -425,7 +428,8 @@ void AKSHUD::DrawIntro(const AKSGameMode& G)
 	Fill(0.f, 0.915f, 1.f, 0.085f, FLinearColor::Black);
 	const float Rise = FMath::Clamp((T - 0.25f) / 0.2f, 0.f, 1.f);
 	Text(Shot.Caption, 0.5f, 0.815f + 0.02f * (1.f - Rise), 40.f, FLinearColor(1.f, 0.9f, 0.3f, Rise), 0, EKSFont::Comic, 3.f, FLinearColor(0.04f, 0.f, 0.10f, 0.95f * Rise), 0.92f);
-	if (FMath::Frac(Now * 0.8f) < 0.7f) Label(TEXT("ENTER  skip"), 0.985f, 0.957f, 0.7f, Lilac, 1);
+	const bool bJabSkips = G.Tracking() && G.Tracking()->IsTracking();
+	if (FMath::Frac(Now * 0.8f) < 0.7f) Label(bJabSkips ? TEXT("ENTER  or  JAB  skip") : TEXT("ENTER  skip"), 0.985f, 0.957f, 0.7f, Lilac, 1);
 	// The tape itself: scan lines and a band of noise that wanders up the picture.
 	for (float Y = 0.f; Y < SH; Y += 4.f * Unit) DrawRect(FLinearColor(0.f, 0.f, 0.f, 0.16f), 0.f, Y, SW, 1.5f * Unit);
 	Fill(0.f, 1.f - FMath::Frac(Now * 0.11f), 1.f, 0.014f, FLinearColor(1.f, 1.f, 1.f, 0.06f));
@@ -454,7 +458,7 @@ void AKSHUD::DrawTracker(const AKSGameMode& G, bool bWithSkeleton)
 	// the ring (the menu and the calibration screen say it their own way), and only once it has lasted over half a second.
 	if (!T->AreHandsOutOfView()) HandsOutSince = -1.f;
 	else if (HandsOutSince < 0.f) HandsOutSince = Now;
-	const bool bRing = G.Phase != EKSPhase::Menu && G.Phase != EKSPhase::Calibrate && G.Phase != EKSPhase::Intro;
+	const bool bRing = G.Phase != EKSPhase::Menu && G.Phase != EKSPhase::Calibrate && G.Phase != EKSPhase::Intro && G.Phase != EKSPhase::Select;
 	if (bRing && HandsOutSince >= 0.f && Now - HandsOutSince > 0.6f)
 	{
 		const float Pulse = 0.8f + 0.2f * FMath::Sin(Now * 6.f);
@@ -695,6 +699,87 @@ void AKSHUD::DrawMenu(const AKSGameMode& G)
 	DrawTracker(G, false);
 }
 
+void AKSHUD::DrawSelect(const AKSGameMode& G)
+{
+	if (G.bPortraits) return;   // the portrait photographs want a bare picture
+	const TArray<FKSFighterDef>& Roster = AKSGameMode::Roster();
+	const int32 Count = Roster.Num(), On = FMath::Clamp(G.SelectIndex, 0, Count - 1);
+	const FKSFighterDef& F = Roster[On];
+	const float T = G.PhaseTime, Since = G.Clock - G.SelectMovedAt;
+	const bool bChosen = G.SelectChosenAt >= 0.f;
+	const float ChosenFor = bChosen ? G.Clock - G.SelectChosenAt : 0.f;
+	const FLinearColor Dark(0.02f, 0.f, 0.06f, 1.f), Edge(0.04f, 0.f, 0.10f, 0.95f);
+
+	// The fighter stands on the right; the left is shaded so the writing reads, with a band above and below.
+	for (int32 i = 0; i < 18; i++) Fill(i * 0.032f, 0.f, 0.0325f, 1.f, Faded(Dark, 0.78f * FMath::Pow(1.f - i / 18.f, 1.3f)));
+	Fill(0.f, 0.f, 1.f, 0.15f, Faded(Dark, 0.85f));
+	Fill(0.f, 0.148f, 1.f, 0.005f, Magenta);
+	Fill(0.f, 0.715f, 1.f, 0.285f, Faded(Dark, 0.85f));
+	Fill(0.f, 0.713f, 1.f, 0.005f, Cyan);
+
+	PushSpin(0.5f, 0.076f, SlamScale(T), -1.5f);
+	Text(TEXT("CHOOSE YOUR FIGHTER"), 0.5f, 0.076f, 62.f, Yellow, 0, EKSFont::Comic, 3.f, FLinearColor::Black, 0.9f);
+	PopSpin();
+
+	// Who it is: the name slides in afresh for every fighter looked at.
+	const float In = FMath::Clamp(Since / 0.18f, 0.f, 1.f), Slide = (1.f - In) * (1.f - In);
+	Label(FString::Printf(TEXT("CUT FIGHTER %d OF %d"), On + 1, Count), 0.27f - Slide * 0.2f, 0.225f, 0.9f, Faded(Cyan, In), 0, 0.44f);
+	const FLinearColor NameColor = bChosen && FMath::Frac(ChosenFor * 5.f) < 0.5f ? FLinearColor::White : Yellow;
+	PushSpin(0.27f, 0.32f, bChosen ? PopScale(ChosenFor) : 1.f, -2.f);
+	Text(F.Name, 0.27f - Slide * 0.25f, 0.32f, 84.f, Faded(NameColor, In), 0, EKSFont::Comic, 3.f, FLinearColor::Black, 0.47f);
+	PopSpin();
+	Lines(F.Tagline, 0.27f, 0.435f, 0.44f, 2, 22.f, Faded(Lilac, In));
+	if (bChosen)
+	{
+		// He is yours: what he says about it, in his own words.
+		if (!G.SpokenLine.IsEmpty()) Lines(FString::Printf(TEXT("\"%s\""), *G.SpokenLine), 0.27f, 0.555f, 0.44f, 3, 34.f, FLinearColor::White, EKSFont::Comic, 2.5f, FLinearColor::Black);
+		PushSpin(0.27f, 0.655f, PopScale(ChosenFor), 3.f);
+		Text(TEXT("READY!"), 0.27f, 0.655f, 40.f, Green, 0, EKSFont::Comic, 3.f, FLinearColor::Black, 0.3f);
+		PopSpin();
+	}
+
+	// The seven portraits. The one looked at is bigger, framed in yellow and carries the P1 tag; drawn last, over its neighbours.
+	const float Size = 0.145f * SH, Gap = 0.02f * SH, Row = Count * Size + (Count - 1) * Gap, X0 = (SW - Row) * 0.5f, CY = 0.835f * SH;
+	int32 Avatars = 0;
+	for (int32 Pass = 0; Pass < 2; Pass++)
+	{
+		for (int32 i = 0; i < Count; i++)
+		{
+			const bool bOn = i == On;
+			if (bOn != (Pass == 1)) continue;
+			// Each tile drops in a moment after the one before it.
+			const float Drop = 1.f - FMath::Clamp((T - 0.15f - 0.05f * i) / 0.22f, 0.f, 1.f);
+			const float Scale = bOn ? 1.17f * PopScale(Since) * (bChosen ? 1.f + 0.04f * FMath::Sin(Now * 14.f) : 1.f) : 1.f;
+			const float S = Size * Scale, CX = X0 + i * (Size + Gap) + Size * 0.5f, Y = CY - (bOn ? 0.012f * SH : 0.f) + Drop * Drop * 0.3f * SH;
+			const float B = (bOn ? 5.f : 2.5f) * Unit;
+			const FLinearColor Rim = bOn ? (bChosen && FMath::Frac(ChosenFor * 5.f) < 0.5f ? FLinearColor::White : Yellow) : Muted;
+			DrawRect(FLinearColor(0.f, 0.f, 0.f, 0.6f), CX - S * 0.5f - B + 4.f * Unit, Y - S * 0.5f - B + 5.f * Unit, S + 2.f * B, S + 2.f * B);
+			DrawRect(Rim, CX - S * 0.5f - B, Y - S * 0.5f - B, S + 2.f * B, S + 2.f * B);
+			const float Dim = bOn ? 1.f : bChosen ? 0.22f : 0.5f;
+			UTexture2D* Face = Roster[i].Asset ? Tex(*FString::Printf(TEXT("av_%s"), Roster[i].Asset)) : nullptr;
+			if (Face) { Part(Face, CX - S * 0.5f, Y - S * 0.5f, S, S, 0.f, 0.f, 1.f, 1.f, FLinearColor(Dim, Dim, Dim * 1.08f, 1.f)); if (Pass == 0 || bOn) Avatars++; }
+			else
+			{
+				// No portrait in the build: the fighter's colour and initial.
+				DrawRect(FLinearColor(Roster[i].Body.R * Dim, Roster[i].Body.G * Dim, Roster[i].Body.B * Dim, 1.f), CX - S * 0.5f, Y - S * 0.5f, S, S);
+				Text(FString(Roster[i].Name).Left(1), CX / SW, Y / SH, 44.f * Scale, FLinearColor::White, 0, EKSFont::Comic, 2.f, FLinearColor::Black);
+			}
+			if (bOn)
+			{
+				const float Bob = bChosen ? 0.f : FMath::Abs(FMath::Sin(Now * 4.f)) * 0.008f;
+				Text(TEXT("P1"), CX / SW, (Y - S * 0.5f) / SH - 0.03f - Bob, 22.f, Cyan, 0, EKSFont::Hud, 2.f, Edge);
+			}
+		}
+	}
+
+	const UKSTrackingSubsystem* Tr = G.Tracking();
+	Label(Tr && Tr->IsTracking() ? TEXT("LEFT / RIGHT  or  LEFT PUNCH  choose      ENTER  or  RIGHT PUNCH  select      ESC  menu")
+		: TEXT("LEFT / RIGHT  choose          ENTER  select          ESC  menu"), 0.5f, 0.968f, 0.72f, Lilac, 0, 0.52f);
+	for (float Y = 0.f; Y < SH; Y += 4.f * Unit) DrawRect(FLinearColor(0.f, 0.f, 0.f, 0.10f), 0.f, Y, SW, 1.5f * Unit);
+	if (!bLoggedSelect) { bLoggedSelect = true; UE_LOG(LogTemp, Display, TEXT("KSTEST ui select shown fighters=%d avatars=%d"), Count, Avatars); }   // for tools/check.sh
+	DrawTracker(G, false);
+}
+
 void AKSHUD::DrawStreet(const AKSGameMode& G)
 {
 	if (G.Phase == EKSPhase::Street && G.PhaseTime < 7.f)
@@ -738,7 +823,7 @@ void AKSHUD::DrawFight(const AKSGameMode& G)
 		Label(FString::Printf(TEXT("YOU FIGHT AS %s"), G.PlayerFighter().Name), 0.60f, 0.862f, 1.05f, Faded(Cyan, A), 0, 0.72f);
 		const bool bTracked = G.Tracking() && G.Tracking()->IsConnected();
 		Label(bTracked ? TEXT("PUNCH, BLOCK, LEAN AND DUCK FOR REAL - THE CABINET IS WATCHING")
-			: TEXT("A/Q/Z left straight/hook/uppercut   D/E/C right   SPACE block   ARROWS evade + duck   P pause"), 0.5f, 0.94f, 0.78f, Faded(Muted, A), 0, 0.80f);
+			: TEXT("A/Q/Z left straight/hook/uppercut   D/E/C right   SPACE block   ARROWS evade + duck   P pause   ESC menu"), 0.5f, 0.94f, 0.78f, Faded(Muted, A), 0, 0.80f);
 		DrawTracker(G, true);
 		return;
 	}
@@ -944,6 +1029,7 @@ void AKSHUD::DrawHUD()
 	{
 	case EKSPhase::Menu: DrawMenu(*G); break;
 	case EKSPhase::Intro: DrawIntro(*G); break;
+	case EKSPhase::Select: DrawSelect(*G); break;
 	case EKSPhase::Street: case EKSPhase::PullIn: case EKSPhase::Ending: DrawStreet(*G); break;
 	case EKSPhase::Calibrate: DrawCalibrate(*G); break;
 	default: DrawFight(*G); break;

@@ -131,7 +131,7 @@ else pass "no crash and no failed engine check"; fi
 # The interface. The bug this guards: a picture or font that is not in the build makes the HUD fall back to plain
 # boxes and the engine font without a word.
 line=$(grep "KSTEST ui pictures=" "$LOG" 2> /dev/null | head -1)
-if [ "$(field "$line" missing)" = 0 ] && [ "$(field "$line" pictures)" -ge 29 ] && [ "$(field "$line" fonts)" = 2 ]; then pass "interface art loaded ($(field "$line" pictures) pictures, 2 fonts)"
+if [ "$(field "$line" missing)" = 0 ] && [ "$(field "$line" pictures)" -ge 36 ] && [ "$(field "$line" fonts)" = 2 ]; then pass "interface art loaded ($(field "$line" pictures) pictures, 2 fonts)"
 else fail "interface art incomplete (${line:-no KSTEST ui line}); run art/ui/cut_ui.py, then art/ui/import_ui.py"; fi
 grep -q "KSTEST ui speech bubble shown picture=1" "$LOG" 2> /dev/null && pass "a spoken line was shown in a speech bubble" || fail "no speech bubble was drawn"
 grep -q "KSTEST ui damage badge shown" "$LOG" 2> /dev/null && pass "a hit showed its damage badge" || fail "no damage badge was drawn"
@@ -143,14 +143,46 @@ else fail "badges cover the fighters (${line:-no KSTEST ui layout line})"; fi
 n=$(grep "KSTEST sound=Pop " "$LOG" 2> /dev/null | head -1 | tr -d "\r" | sed -n 's/.*recorded_variants=\([0-9]*\).*/\1/p')
 [ "${n:-0}" -ge 1 ] && pass "interface sounds loaded (Pop: $n takes)" || fail "interface sound Pop missing; run art/tools/prep_audio.py, then art/ui/import_ui.py"
 
-echo "== opening film and start menu (skips and chooses by itself, no camera)"
+echo "== opening film, start menu, choosing a fighter (skips and chooses by itself, no camera)"
 LOG="$OUT/menu.log"
-run_until 1 "KSTEST menu chosen" 90 "$LOG" -KSAuto -KSNoCamera
+run_until 1 "KSTEST announcer line=round" 150 "$LOG" -KSAuto -KSNoCamera
 grep -q "KSTEST ui menu shown background=1 logo=1" "$LOG" 2> /dev/null && pass "the start menu is drawn with its background and logo" || fail "the start menu was not drawn, or its pictures are missing"
 line=$(grep "KSTEST intro shown " "$LOG" 2> /dev/null | head -1 | tr -d "\r")
 [ -n "$line" ] && [ "$(field "$line" shots)" -ge 1 ] && [ "$(field "$line" shots)" = "$(field "$line" loaded)" ] && pass "the opening film plays: $(field "$line" shots) shots, every sheet loaded" || fail "the opening film is missing pictures (${line:-it was never shown})"
 grep -q "KSTEST intro ended" "$LOG" 2> /dev/null && pass "the opening film hands over to the start menu" || fail "the opening film never ended"
 grep -q "KSTEST menu chosen=0" "$LOG" 2> /dev/null && pass "the start menu's first line starts the fights" || fail "the start menu did not start the game"
+
+# Choosing a fighter. The bugs this guards: a portrait missing from the build shows a coloured box, and a choice
+# that the ladder ignores (the player's fighter used to be drawn at random).
+line=$(grep "KSTEST ui select shown " "$LOG" 2> /dev/null | head -1 | tr -d "\r")
+[ -n "$line" ] && [ "$(field "$line" fighters)" = 7 ] && [ "$(field "$line" avatars)" = 7 ] && pass "the select screen shows all 7 fighters with their portraits" || fail "the select screen is missing or lacks portraits (${line:-it was never shown}); run -KSPortraits, art/ui/make_avatars.py, art/ui/import_ui.py"
+picked=$(field "$(grep "KSTEST select chosen=" "$LOG" 2> /dev/null | head -1)" fighter)
+played=$(field "$(grep "KSTEST player fighter=" "$LOG" 2> /dev/null | tail -1)" fighter)
+[ -n "$picked" ] && [ "$picked" = "$played" ] && pass "the fighter chosen ($picked) is the one the player fights as" || fail "chose '${picked:-nobody}' but the ladder started as '${played:-nobody}'"
+# The ring announcer: every line he is asked for must be in the table and have its recording.
+asked=$(grep -c "KSTEST announcer line=" "$LOG" 2> /dev/null); asked=${asked:-0}
+silent=$(grep "KSTEST announcer line=" "$LOG" 2> /dev/null | grep -c "sound=0")
+[ "$asked" -ge 3 ] && [ "$silent" = 0 ] && pass "the announcer spoke $asked times, every line with its recording" || fail "the announcer: $asked lines asked for, $silent without a recording; run art/tools/announcer.py, then art/tools/import_voice_faces.py"
+
+echo "== the film is skipped by a jab only (fake webcam punches: hooks and uppercuts for five seconds, then a jab)"
+# The bug this guards: any punch the webcam called skipped the film, so it stopped whenever the player moved.
+LOG="$OUT/filmskip.log"
+run_until 1 "KSTEST intro ended" 90 "$LOG" -KSFakePunch -KSNoCamera
+line=$(grep "KSTEST intro ended" "$LOG" 2> /dev/null | head -1 | tr -d "\r")
+secs=$(field "$line" seconds)
+if [ "$(field "$line" by_jab)" = 1 ] && awk "BEGIN{exit !(${secs:-0} >= 5.5)}"; then pass "hooks and uppercuts did not stop the film; the jab at 6 s did (ended at ${secs} s)"
+else fail "the film ended on the wrong punch (${line:-it never ended})"; fi
+
+echo "== Esc returns to the menu; a lost bout whose count runs out returns to the menu"
+LOG="$OUT/esc.log"
+run_until 1 "KSTEST to_menu" 120 "$LOG" -KSStart=fight -KSAuto -KSNoCamera -KSEscAt=2
+grep -q "KSTEST to_menu from_phase=3" "$LOG" 2> /dev/null && pass "Esc in the middle of a bout goes to the start menu" || fail "Esc in a bout did not reach the menu"
+# The bug this guards: when the CONTINUE? count ran out the player was put on the old street with the cabinet.
+LOG="$OUT/gameover.log"
+run_until 1 "KSTEST ui menu shown" 240 "$LOG" -KSStart=fight -KSAuto -KSGiveUp -KSNoCamera
+grep -q "KSTEST to_menu from_phase=6" "$LOG" 2> /dev/null && grep -q "KSTEST ui menu shown" "$LOG" 2> /dev/null && pass "game over (count run out) shows the start menu" || fail "game over did not reach the start menu ($(grep -c "KSTEST bout=" "$LOG" 2> /dev/null) bout(s) ended)"
+calls=$(grep -c "EnterStreet(" "$ROOT/unreal/Source/KoSekai/KSGameMode.cpp")
+[ "$calls" -le 2 ] && pass "nothing in the game leads back to the street (only -KSStart=street)" || fail "$((calls - 2)) place(s) in KSGameMode.cpp still send the player to the street: $(grep -n "EnterStreet(" "$ROOT/unreal/Source/KoSekai/KSGameMode.cpp" | cut -d: -f1 | tr "\n" " ")"
 
 echo "== calibration screen (stepped through automatically, no camera)"
 LOG="$OUT/calibration.log"

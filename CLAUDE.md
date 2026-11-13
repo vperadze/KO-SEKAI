@@ -42,7 +42,7 @@ Packaged build under 1 GB, plus a 30–60 s gameplay video. Windows packaging ne
 | `unreal/Content/KoSekai/Characters/` | Seven fighters, 17 shared clips each, face materials. |
 | `unreal/Content/KS/` | Materials, arena pictures and spectator sprites (`Arena/T_KS_Crowd_*`, six poses each), sounds (`Audio/`), the pose model (`Tracker/`). |
 | `unreal/Content/KS/UI/` | Interface pictures `T_UI_<name>` and the two fonts (`F_RussoOne`, `F_Bangers`); `KSHUD` falls back to plain boxes without them. |
-| `unreal/Content/KS/Voice/` | Spoken lines `V_<Fighter>_<line>`; text and mouth timing are in the generated `KSVoiceData.h`. |
+| `unreal/Content/KS/Voice/` | Spoken lines `V_<Fighter>_<line>`; text and mouth timing are in the generated `KSVoiceData.h`. The ring announcer is `V_Announcer_<line>` (`KSAnnouncerData.h`). |
 | `art/` | Source art and the tools that make it (`art/tools`, `art/arena`, `art/tracker-model`). Mostly untracked. |
 | `tools/check.sh` | The self-check. |
 | `tests/tracking/` | Recorded move sessions with expectations. |
@@ -61,14 +61,18 @@ Test flags (all optional):
 | Flag | Effect |
 |---|---|
 | `-KSStart=fight` | Skip the street and start in the ring. |
-| `-KSStart=street` | Skip the start menu (the game opens on it by default). |
+| `-KSStart=select` | Open on the fighter-select screen. |
 | `-KSAuto` | The game plays itself. `-KSNoGuard` makes the player take hits. |
 | `-KSFighter=N` `-KSPlayer=N` | Force the first opponent / the player's fighter (roster index 0–6). |
 | `-KSShots=N` `-KSHitShots` | Save screenshots to `unreal/Saved/Screenshots` (timed / bursts around each hit). |
 | `-KSNoCamera` | Do not open the webcam. |
 | `-KSCamera=N` | Use camera index N. |
 | `-KSReplay=<file>` `-KSReplayExit` | Run the move detector over a recording and log its decisions. |
-| `-KSStart=menu` | Skip the opening film. No `-KSStart`: film, then menu. `-KSStart=street`: the old street walk. |
+| `-KSStart=menu` | Skip the opening film. No `-KSStart`: film, then menu. `-KSStart=street`: the old street walk, which nothing in the game leads to any more. |
+| `-KSPortraits` | Photograph every fighter's head to `unreal/Saved/Screenshots/avatar_<Folder>.png` and quit. |
+| `-KSGiveUp` | With `-KSAuto`: the bot neither defends, punches nor continues, so the count runs out. |
+| `-KSEscAt=N` | As if Esc were pressed N seconds into the first bout. |
+| `-KSFakePunch` | During the film: fake webcam hooks and uppercuts for five seconds, then one jab. |
 | `-KSArena=N` `-KSArenaTour` | Fight every bout in arena N (0-10, `KSArenaData.h`) / build every arena once at the start. |
 | `-KSCalDemo` | Enter calibration without a camera and step through it automatically. |
 | `-KSCalJitter` | With `-KSCalDemo`: one framing reading flips every frame, to test that the text stays steady. |
@@ -99,6 +103,12 @@ New interface art (menu, bars, badges, bubbles): `python3 art/ui/gen_ui.py quote
 `art/ui/import_ui.py` headless. It also imports the fonts (`art/ui/fonts`) and the interface sounds from `prep_audio.py`.
 
 The arena's beam material `M_KS_Beam` is made by `art/tools/make_beam_material.py` (headless; no rebuild needed).
+
+New announcer lines: `art/voice-model/venv/bin/python art/tools/announcer.py [key ...]` (local models, about two
+minutes a line; rewrites `KSAnnouncerData.h`: rebuild), then `art/tools/import_voice_faces.py -KSReimport` headless.
+
+New fighter portraits (select screen): run the game with `-KSPortraits -KSNoCamera -nosound`, then
+`art/tracker-model/venv/bin/python art/ui/make_avatars.py`, then `art/ui/import_ui.py` headless.
 
 New faces or lines: `art/tools/bake_faces.py` (faces) and `art/voice-model/venv/bin/python art/tools/voices.py`
 (lines; rebuild the game after it, it rewrites `KSVoiceData.h`), then `art/tools/import_voice_faces.py` headless.

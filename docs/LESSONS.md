@@ -125,6 +125,19 @@ One entry per bug that cost time: what happened, the cause, the rule. Add to it 
 - **A slow line in a one-off script is still slow.** `np.convolve` with a half-second window over ten seconds of
   audio ran for minutes. Rule: running sums (`cumsum`) for moving averages.
 
+- **The film stopped whenever the player moved** (player report, 2026-11-13). Every screen took "any punch the
+  webcam called" as a confirm, and a person settling in front of the camera sets off the odd hook or uppercut.
+  Rule: a screen that must not be left by accident asks for one particular move (the film: a jab), not for any
+  event; the check feeds fake hooks and uppercuts and then a jab (`-KSFakePunch`).
+- **Game over put the player on the old street** (player report, 2026-11-13). The street walk was taken off the
+  menu, but two exits still led there: the CONTINUE? count running out (`EnterStreet(false)`) and the end of the
+  ladder (`EnterStreet(true)`, the cabinet scene). Only the second was known, hence "sometimes". Rule: when a place
+  is retired, grep for every way into it; the check now counts the calls to `EnterStreet` and plays a lost bout to
+  the end of the count (`-KSGiveUp`).
+- **Two- and three-word announcer lines came out as babble** ("Round one! Fight!" as "Raggle one" and "Ratman
+  two"), as the fighters' short lines had. Rule, again: give Chatterbox five words ("Round number one! Fight!").
+  The recogniser also writes "Round 1" for "round one" and "Laser Corn" for "Lasercorn": compare letters, not words.
+
 ## Interface art
 
 - **Badges and speech bubbles landed on the fighters, and calibration text ran out of its panel.** Both were placed at

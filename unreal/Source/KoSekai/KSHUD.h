@@ -66,6 +66,7 @@ private:
 	/* ---- the screens ---- */
 	void HealthBar(float X, float W, float Fraction, float Trail, const FLinearColor& Color, bool bRightToLeft, float Jolt);
 	void DrawMenu(const AKSGameMode& G);
+	void DrawSelect(const AKSGameMode& G);    // choosing a fighter: name and tagline on the left, the seven portraits below
 	void DrawIntro(const AKSGameMode& G);     // the opening film, shown frame by frame from sheets (KSCineData.h)
 	void DrawStreet(const AKSGameMode& G);
 	void DrawFight(const AKSGameMode& G);
@@ -83,7 +84,7 @@ private:
 	bool bLoggedIntro = false;
 	float HandsOutSince = -1.f;               // when the webcam last lost the player's hands; the STEP BACK plate waits a moment
 	UPROPERTY() TObjectPtr<UFont> ComicFont;
-	bool bArtLoaded = false, bLoggedBubble = false, bLoggedDamage = false, bLoggedMenu = false, bLoggedLayout = false, bLoggedCal = false;
+	bool bArtLoaded = false, bLoggedBubble = false, bLoggedDamage = false, bLoggedMenu = false, bLoggedLayout = false, bLoggedCal = false, bLoggedSelect = false;
 
 	struct FPlacedBadge { float Start; FString Text; FVector2D At, Size; };
 	TArray<FPlacedBadge> Placed;              // the badges on screen and where each was put when it appeared
