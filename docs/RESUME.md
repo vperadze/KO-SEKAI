@@ -254,6 +254,23 @@ Updated 2026-11-13. Deadline 2026-11-16 02:59 CET.
   - **Windows**: not built since the merge (it needs the Windows PC). The effect packs must be added there from
     Fab as well (`docs/VFX.md`); they are not in the repository.
 
+- Linux package measured 2026-11-13 night (`unreal/package_linux.sh`, Development): the folder is 1558 MB, of which
+  273 MB debug symbols (`.debug`, `.sym`) and 258 MB Vulkan debugging layers that need not ship: **1026 MB without
+  them, 727 MB as a `.tar.gz`**. The content (`.ucas`) is 587 MB (it was 202 MB a day earlier: three times the
+  crowd, the arena models, the effects), the game binary 286 MB. The packaged game was run: it loads all 15
+  effects and plays both specials. **Just over 1 GB unpacked**: if the jam counts the unpacked folder, the crowd
+  pictures are the first thing to shrink, or a Shipping build of the binary. Windows not built.
+  **Left for 2026-11-14 (the player's decision)**: the crowd at half resolution (179 sheets, 255 MB cooked, to about
+  65 MB: roughly 190 MB saved, the package near 835 MB). Re-import the crowd, package, and look at stills of the
+  front rows, which the cameraman passes close to. Nothing about the crowd has been changed yet.
+
+- **Known, open (2026-11-13, last check of the night)**: `tools/check.sh` failed one line once, "badges cover the
+  fighters" (`worst_body_cover=0.39`; other runs the same evening read 0.00 to 0.07, and one log 0.79). A badge
+  stays where it was first put, and the fighters now move about the ring and the camera turns to keep both in the
+  picture, so a fighter can step under a badge. It comes and goes with the fighters and the camera of the run.
+  Not fixed: the placer (`KSHUD`: `BeginLayout`, `Reserve`, `FindSpot`) needs to follow a moving fighter or let go
+  of a badge sooner.
+
 ## Built but not verified with a person
 
 - Early punch call (punch starts while the arm is still extending).

@@ -19,9 +19,13 @@ All were free on Fab on 2026-11-13 and came in through the editor's Fab window (
 library entries: the jam may ask how each asset was obtained. Several listings say "usage with AI: no": do not feed
 them to Meshy or Dreamina.
 
-The folders are untracked and large (1.7 GB). Only what the code names is cooked: the packs' showroom levels are kept
-out by `DefaultGame.ini` (`DirectoriesToNeverCook`, and `MapsToCook` naming the only level). **Not yet measured**:
-the size of a package made since they were added.
+The folders are git-ignored (public repository, Fab's licence) and large (1.7 GB). `tools/packs.sh` says which are
+missing and where to get them; `CLAUDE.md` tells whoever builds to run it first.
+
+Only what the code names is cooked. The effects are loaded by path, which the cook cannot see, so each one is listed
+in `DefaultGame.ini` (`KSVfx` under `AssetManagerSettings`; `tools/check.sh` compares that list with `namespace Vx`).
+The packs' showroom levels stay out (`DirectoriesToNeverCook`, and `MapsToCook` naming the only level). In the
+Linux package the 15 effects and what they need come to about 43 MB before compression, 11 MB in the `.ucas`.
 
 ## Rules learnt
 

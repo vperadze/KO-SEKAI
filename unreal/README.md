@@ -94,5 +94,5 @@ If the editor is open while you build from the command line, add `-NoHotReloadFr
 The special abilities and the hit marks use free effect packs from Fab. They are not in this repository (Fab's
 licence does not allow passing them on in a public one). After cloning, open the project in the editor, open the
 Fab window, and "Add to Project": Mixed VFX (G.G.), Stylized Laser Beam VFX - Free (QP Phantom), Stylized Smoke VFX
-(PotaVFX) and Distortion VFX (Vefects). Without them the game runs, with no particle effects; `tools/check.sh`
-names what is missing. Details: `docs/VFX.md`.
+(PotaVFX) and Distortion VFX (Vefects). Without them the game runs, with no particle effects. `tools/packs.sh`
+lists which are missing, with links; the packaging scripts and `tools/check.sh` run it first. Details: `docs/VFX.md`.

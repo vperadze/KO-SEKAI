@@ -332,3 +332,12 @@ One entry per bug that cost time: what happened, the cause, the rule. Add to it 
   Rule: a promise about the picture is enforced where the picture is made, after everything else has had its say
   (the last block before `SetView` in `UpdateFightCamera`: both heads and both body middles inside the middle 86%,
   by turning the camera and, if need be, opening the lens), and the check counts on the picture as shown.
+- **The first package with the particle effects had none of them** (found only because the player asked for its
+  size, 2026-11-13). The effects are loaded by path from code; the cook takes what something refers to, and a string
+  is not a reference. Everything had looked right for hours, run from the editor's binaries. Rule: an asset loaded by
+  path is listed for the cook (`DefaultGame.ini`), a check compares the code's list with it, and "it works" is said
+  of a package only after the packaged game has been run (`Packaged/Linux/KoSekai.sh -KSSpecials`).
+- **Assets that may not be in a public repository need a gate, not a paragraph.** The Fab packs are git-ignored, and
+  a clone builds and runs without them with nothing failing. `tools/packs.sh` names the missing packs with links,
+  `check.sh` and the packaging scripts run it first, and `CLAUDE.md` tells the assistant to say so before building.
+

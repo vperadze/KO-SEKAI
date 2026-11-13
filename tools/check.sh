@@ -52,6 +52,11 @@ fail() { echo "  FAIL  $1"; FAILS=$((FAILS + 1)); }
 if game_open; then
 	echo "The game or the KoSekai editor is running. Close it first, then run the check again."; exit 2
 fi
+# The Fab effect packs are not in the repository: say which are missing before anything else (tools/packs.sh).
+echo "== the Fab effect packs are in the project"
+if PACKS_OUT=$("$ROOT/tools/packs.sh" 2>&1); then pass "all four effect packs are in the project"
+else fail "effect packs are missing: add them from Fab before building a package (the game will have no particle effects)"; echo "$PACKS_OUT" | sed 's/^/        /'; fi
+
 mkdir -p "$OUT"
 # Test runs use their own window size; Unreal would remember it and open the next real session that small.
 [ -f "$SETTINGS" ] && cp "$SETTINGS" "$OUT/GameUserSettings.keep"
@@ -248,6 +253,14 @@ while read -r line; do
 	[ "$(field "$line" max_gap)" -le 320 ] && [ "$(field "$line" max_off)" -le 230 ] && pass "bout $bout: the two stayed together and in the middle (at most $(field "$line" max_gap) cm apart, $(field "$line" max_off) cm from the centre)" || fail "bout $bout: the fighters came apart or left the middle of the ring ($line)"
 done <<< "$(grep "KSTEST ring" "$LOG" 2> /dev/null | tr -d "\r")"
 [ "$(grep -c "KSTEST ring" "$LOG" 2> /dev/null)" -ge 1 ] && pass "the ring reported where the fighters went" || fail "no report of the fighters' movement (KSTEST ring)"
+
+# The effects are loaded by path, so the cook only takes the ones listed in DefaultGame.ini. The bug this guards: a
+# packaged game with no particle effects at all, while everything looked right when run from the editor's binaries.
+unlisted=""
+for path in $(sed -n '/namespace Vx/,/const float Glow/p' "$ROOT/unreal/Source/KoSekai/KSGameMode.cpp" | grep -o 'TEXT("/Game/[^"]*")' | sed 's/TEXT("//; s/")//' | sort -u); do
+	grep -q "\"$path\." "$ROOT/unreal/Config/DefaultGame.ini" || unlisted="$unlisted $path"
+done
+[ -z "$unlisted" ] && pass "every particle effect the code names is listed for the cook (DefaultGame.ini)" || fail "effects that a packaged game would not have (add them to KSVfx in DefaultGame.ini):$unlisted"
 
 # Special abilities: the bot sets its special off as soon as the meter is full. The bugs this guards: a special that
 # never starts, one played with the stand-in chest pound, and one whose effect has no pieces.

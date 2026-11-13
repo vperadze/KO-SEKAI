@@ -9,6 +9,23 @@ Packaged build under 1 GB, plus a 30–60 s gameplay video. Windows packaging ne
 2. Read `docs/LESSONS.md` before touching the area it covers. Every entry there is a bug that already cost time.
 3. For webcam or recognition work, read `docs/TRACKING.md`.
 
+## Before building or packaging (always, and first on a fresh clone)
+
+**Run `tools/packs.sh`.** The particle effects come from four free Fab packs that are NOT in the repository (Fab's
+licence does not allow them in a public one), so each person adds them to his own copy of the project. If the script
+lists a pack as MISSING:
+
+1. **Stop and tell the person, before building anything, exactly which packs are missing**: give each pack's name,
+   its publisher and the link, as the script prints them. Do not just mention "some assets are missing".
+2. Tell him how to add one: open `unreal/KoSekai.uproject` in the Unreal editor, Window > Fab, sign in, find the pack
+   (or add it to the library from the link first), press **Add to Project**, and accept the newest version offered
+   even when Fab says it is older than the engine (they load in 5.8; `art/tools/vfx_loadtest.py` checks that).
+3. When he says they are in, run `tools/packs.sh` again and go on only when it says "All effect packs are in the project".
+
+Never build a package for anyone to play while a pack is missing: the game builds and runs without them, so nothing
+fails, but the special abilities and the hit marks then have no effects at all. Never commit the packs
+(`.gitignore` keeps them out). `docs/VFX.md` has the list, what each is used for, and what went wrong with them.
+
 ## After every code change (always)
 
 1. **Run `tools/check.sh`** and report its real output. It builds, plays two bouts by itself and replays the
