@@ -5,6 +5,8 @@
 #include "Engine/StaticMeshActor.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/PointLight.h"
+#include "Engine/SpotLight.h"
+#include "Components/SpotLightComponent.h"
 #include "Engine/SkyLight.h"
 #include "Engine/TextRenderActor.h"
 #include "Engine/ExponentialHeightFog.h"
@@ -76,6 +78,56 @@ APointLight* FKSBuilder::Light(const FVector& Pos, const FLinearColor& Color, fl
 	return Actor;
 }
 
+ASpotLight* FKSBuilder::Spot(const FVector& Pos, const FVector& Aim, const FLinearColor& Color, float Candelas, float ConeDegrees, float Radius, float Beam)
+{
+	ASpotLight* Actor = World->SpawnActor<ASpotLight>(Pos, FRotator::ZeroRotator);
+	if (!Actor) return nullptr;
+	USpotLightComponent* Comp = Actor->SpotLightComponent;
+	Comp->SetMobility(EComponentMobility::Movable);
+	Comp->SetWorldRotation((Aim - Pos).Rotation());   // the component, not the actor: a spot light actor carries its lamp tilted 90 degrees down
+	Comp->SetIntensityUnits(ELightUnits::Candelas);
+	Comp->SetIntensity(Candelas * 0.22f);   // the same trim as Light()
+	Comp->SetLightColor(Color);
+	Comp->SetAttenuationRadius(Radius);
+	Comp->SetOuterConeAngle(ConeDegrees);
+	Comp->SetInnerConeAngle(ConeDegrees * 0.6f);
+	Comp->SetCastShadows(false);
+	Comp->SetVolumetricScatteringIntensity(Beam);
+	Out->Add(Actor);
+	return Actor;
+}
+
+UMaterialInstanceDynamic* FKSBuilder::Beam(const FLinearColor& Color, float Glow)
+{
+	static UStaticMesh* Cone = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cone.Cone"));
+	UMaterialInterface* Base = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/KS/Arena/M_KS_Beam.M_KS_Beam"));
+	if (!Cone || !Base) return nullptr;
+	AStaticMeshActor* Actor = World->SpawnActor<AStaticMeshActor>(FVector::ZeroVector, FRotator::ZeroRotator);
+	if (!Actor) return nullptr;
+	UStaticMeshComponent* Comp = Actor->GetStaticMeshComponent();
+	Comp->SetMobility(EComponentMobility::Movable);
+	Comp->SetStaticMesh(Cone);
+	Comp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Comp->SetCastShadow(false);
+	UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(Base, Actor);
+	MID->SetVectorParameterValue(TEXT("Color"), Color);
+	MID->SetScalarParameterValue(TEXT("Glow"), Glow);
+	Comp->SetMaterial(0, MID);
+	Out->Add(Actor);
+	return MID;
+}
+
+void KSWorld::AimBeam(UMaterialInstanceDynamic* Cone, const FVector& From, const FVector& Aim, float Length, float Radius)
+{
+	AActor* Actor = Cone ? Cast<AActor>(Cone->GetOuter()) : nullptr;
+	if (!Actor) return;
+	// The engine's cone is 100 across and 100 tall with its point up (+Z): the point goes to the lamp.
+	const FVector Dir = (Aim - From).GetSafeNormal();
+	Actor->SetActorTransform(FTransform(FRotationMatrix::MakeFromZ(-Dir).Rotator(), From + Dir * Length * 0.5f, FVector(Radius / 50.f, Radius / 50.f, Length / 100.f)));
+	Cone->SetVectorParameterValue(TEXT("Tip"), FLinearColor(From.X, From.Y, From.Z, 0.f));
+	Cone->SetScalarParameterValue(TEXT("Length"), Length);
+}
+
 ATextRenderActor* FKSBuilder::Text(const FVector& Pos, const FRotator& Rot, const FString& String, const FLinearColor& Color, float Size)
 {
 	ATextRenderActor* Actor = World->SpawnActor<ATextRenderActor>(Pos, Rot);
@@ -91,7 +143,7 @@ ATextRenderActor* FKSBuilder::Text(const FVector& Pos, const FRotator& Rot, cons
 	return Actor;
 }
 
-void FKSBuilder::Ambient(const FLinearColor& Color, float Intensity, const FLinearColor& FogColor, float FogDensity)
+void FKSBuilder::Ambient(const FLinearColor& Color, float Intensity, const FLinearColor& FogColor, float FogDensity, float Haze)
 {
 	if (ASkyLight* Sky = World->SpawnActor<ASkyLight>(FVector(0, 0, 500), FRotator::ZeroRotator))
 	{
@@ -109,8 +161,17 @@ void FKSBuilder::Ambient(const FLinearColor& Color, float Intensity, const FLine
 		UExponentialHeightFogComponent* Comp = Fog->GetComponent();
 		Comp->SetMobility(EComponentMobility::Movable);
 		Comp->SetFogDensity(FogDensity);
-		Comp->SetFogHeightFalloff(0.05f);
+		Comp->SetFogHeightFalloff(Haze > 0.f ? 0.07f : 0.05f);
 		Comp->SetFogInscatteringColor(FogColor);
+		if (Haze > 0.f)
+		{
+			// Smoke-machine haze: it has no light of its own, the lamps that shine through it show as beams.
+			Comp->SetVolumetricFog(true);
+			Comp->SetVolumetricFogExtinctionScale(Haze);
+			Comp->SetVolumetricFogAlbedo(FColor(70, 60, 95));
+			Comp->SetVolumetricFogScatteringDistribution(0.35f);
+			Comp->SetVolumetricFogDistance(5000.f);
+		}
 		Out->Add(Fog);
 	}
 }
@@ -195,7 +256,7 @@ void KSWorld::BuildStreet(FKSBuilder& B, FKSStreet& Street, bool bDead)
 void KSWorld::BuildArena(FKSBuilder& B, FKSArena& Arena)
 {
 	using namespace KSColors;
-	B.Ambient(FLinearColor(0.5f, 0.3f, 0.9f), 0.8f, FLinearColor(0.03f, 0.0f, 0.06f), 0.006f);
+	B.Ambient(FLinearColor(0.5f, 0.3f, 0.9f), 0.8f, FLinearColor(0.035f, 0.005f, 0.075f), 0.010f, 1.f);
 	B.Box(FVector(0, 0, -10), FVector(6000, 6000, 20), FLinearColor(0.012f, 0.004f, 0.03f));
 	// Neon floor grid, like the inside of a 1987 attract screen.
 	for (float P = -2500; P <= 2500; P += 250)
@@ -235,10 +296,88 @@ void KSWorld::BuildArena(FKSBuilder& B, FKSArena& Arena)
 		const float A = FMath::DegreesToRadians(i * 360.f / 28.f), H = 500.f + 420.f * FMath::Abs(FMath::Sin(i * 1.7f));
 		B.Box(FVector(FMath::Cos(A) * 2300, FMath::Sin(A) * 2300, H * 0.5f), FVector(30, 30, H), i % 2 ? Magenta : Cyan, 2.5f, FRotator(0, FMath::RadiansToDegrees(A), 0));
 	}
-	B.Light(FVector(40, 0, 520), FLinearColor(1.0f, 0.9f, 1.0f), 5200.f, 1600.f, true);
-	B.Light(FVector(-420, -380, 260), Cyan, 900.f, 1500.f);
-	B.Light(FVector(-420, 380, 260), Magenta, 900.f, 1500.f);
-	B.Light(FVector(700, 0, 300), Magenta, 1600.f, 1800.f);
+	// The ring's own lights must not turn the haze above the canvas into a white ball: they barely light it.
+	auto Dry = [](APointLight* L, float Beam) { if (L) L->PointLightComponent->SetVolumetricScatteringIntensity(Beam); return L; };
+	Dry(B.Light(FVector(40, 0, 520), FLinearColor(1.0f, 0.9f, 1.0f), 5200.f, 1600.f, true), 0.04f);
+	Dry(B.Light(FVector(-420, -380, 260), Cyan, 900.f, 1500.f), 0.3f);
+	Dry(B.Light(FVector(-420, 380, 260), Magenta, 900.f, 1500.f), 0.3f);
+	Dry(B.Light(FVector(700, 0, 300), Magenta, 1600.f, 1800.f), 0.3f);
+
+	// The stands: steps the crowd stands on (KSGameMode's SeatCrowd puts row N at height 40 N), each with a strip of
+	// neon along its edge, and a higher platform at the back for the giants.
+	const FLinearColor Step(0.022f, 0.014f, 0.045f);
+	for (int32 Row = 1; Row <= 2; Row++)
+	{
+		const float Half = 520.f + 70.f * Row, X = 465.f + 118.f * Row;
+		B.Box(FVector(X + 59.f * (3 - Row) - 59.f, 0, 20.f * Row), FVector(118.f * (3 - Row), 2.f * Half, 40.f * Row), Step);
+		B.Box(FVector(X - 59.f, 0, 40.f * Row), FVector(5, 2.f * Half, 5), Row % 2 ? Cyan : Magenta, 5.f);
+	}
+	B.Box(FVector(980, 0, 70), FVector(260, 1700, 140), Step);
+	B.Box(FVector(850, 0, 140), FVector(5, 1700, 5), Yellow, 5.f);
+	for (int32 Side = -1; Side <= 1; Side += 2)
+	{
+		B.Box(FVector(85, Side * 588.f, 20), FVector(720, 118, 40), Step);
+		B.Box(FVector(85, Side * 529.f, 40), FVector(720, 5, 5), Cyan, 5.f);
+		B.Box(FVector(85, Side * 850.f, 50), FVector(720, 240, 100), Step);
+		B.Box(FVector(85, Side * 730.f, 100), FVector(720, 5, 5), Yellow, 5.f);
+	}
+	// Soft house lights low over the stands, so the steps and the shadows at the crowd's feet can be seen.
+	Dry(B.Light(FVector(620, -380, 330), FLinearColor(0.55f, 0.45f, 1.f), 420.f, 1100.f), 0.15f);
+	Dry(B.Light(FVector(620, 380, 330), FLinearColor(1.f, 0.45f, 0.8f), 420.f, 1100.f), 0.15f);
+	Dry(B.Light(FVector(100, -640, 300), FLinearColor(0.45f, 0.7f, 1.f), 340.f, 1000.f), 0.15f);
+	Dry(B.Light(FVector(100, 640, 300), FLinearColor(1.f, 0.5f, 0.75f), 340.f, 1000.f), 0.15f);
+
+	// The lighting rig: a square truss over the ring with lamp heads, and stage lamps on it that sweep the stands.
+	const float RigZ = 640.f, RigHalf = 430.f;
+	const FLinearColor Metal(0.02f, 0.02f, 0.03f);
+	for (int32 i = 0; i < 4; i++)
+	{
+		const float A = FMath::DegreesToRadians(i * 90.f);
+		const FVector Mid(FMath::Cos(A) * RigHalf + 60.f, FMath::Sin(A) * RigHalf, RigZ);
+		B.Box(Mid, i % 2 ? FVector(2 * RigHalf + 24, 24, 24) : FVector(24, 2 * RigHalf + 24, 24), Metal);
+		B.Box(Mid + FVector(0, 0, 400), FVector(6, 6, 800), Metal);                     // what it hangs from
+	}
+	const FLinearColor White(1.f, 0.95f, 0.9f);
+	const struct { FVector Pos, Aim; FLinearColor Color; float Candelas; } Lamps[] = {
+		{ FVector(60 + RigHalf, -300, RigZ - 20), FVector(700, -520, 120), Cyan,    9000.f },
+		{ FVector(60 + RigHalf, -100, RigZ - 20), FVector(820, -150, 150), Magenta, 9000.f },
+		{ FVector(60 + RigHalf,  100, RigZ - 20), FVector(820,  150, 150), Yellow,  8000.f },
+		{ FVector(60 + RigHalf,  300, RigZ - 20), FVector(700,  520, 120), Cyan,    9000.f },
+		{ FVector(100, -RigHalf, RigZ - 20),      FVector(120, -700, 100), Magenta, 8000.f },
+		{ FVector(100,  RigHalf, RigZ - 20),      FVector(120,  700, 100), Cyan,    8000.f },
+		// Two from high behind the stands, shining over the crowd's heads towards the ring: the shafts the crowd is seen against.
+		{ FVector(1350, -520, 760),               FVector(250, -120, 60),  White,   11000.f },
+		{ FVector(1350,  520, 760),               FVector(250,  120, 60),  White,   11000.f },
+		// Six on the floor between the ropes and the front row, pointing up and out over the crowd: these are the
+		// beams the fight camera sees, crossing in front of the stands.
+		{ FVector(415, -340, 12),                 FVector(700, -520, 900), Magenta, 3000.f },
+		{ FVector(415, -115, 12),                 FVector(720, -170, 900), Cyan,    3000.f },
+		{ FVector(415,  115, 12),                 FVector(720,  170, 900), Yellow,  3000.f },
+		{ FVector(415,  340, 12),                 FVector(700,  520, 900), Magenta, 3000.f },
+		{ FVector(160, -415, 12),                 FVector(200, -720, 900), Cyan,    3000.f },
+		{ FVector(160,  415, 12),                 FVector(200,  720, 900), Yellow,  3000.f },
+	};
+	for (const auto& L : Lamps)
+	{
+		B.Shape(B.Cylinder, L.Pos, FVector(34, 34, 40), Metal, 0.f, (L.Aim - L.Pos).Rotation() + FRotator(90, 0, 0));
+		B.Shape(B.Sphere, L.Pos + (L.Aim - L.Pos).GetSafeNormal() * 22.f, FVector(26), L.Color, 30.f);      // the glowing lens
+		// The lamp itself is weak on surfaces and only tints the haze; the beam you see is the glowing cone.
+		FKSArena::FBeam Beam; Beam.Lamp = B.Spot(L.Pos, L.Aim, L.Color, L.Candelas, 10.f, 2600.f, 25.f);
+		Beam.Aim = L.Aim; Beam.Candelas = L.Candelas;
+		const bool bFloor = L.Pos.Z < 100.f;                                          // the up-lights at ringside
+		Beam.Length = bFloor ? 950.f : (L.Aim - L.Pos).Size() * 1.05f; Beam.Radius = Beam.Length * (bFloor ? 0.09f : 0.07f); Beam.Glow = bFloor ? 1.1f : 0.4f;
+		Beam.Cone = B.Beam(L.Color, Beam.Glow);
+		KSWorld::AimBeam(Beam.Cone, L.Pos, L.Aim, Beam.Length, Beam.Radius);
+		Arena.Beams.Add(Beam);
+	}
+	// A laser show from the floor in front of the far stands: thin rods of light fanned up and out over the crowd.
+	Arena.LaserFrom = FVector(425, 0, 14);
+	B.Box(Arena.LaserFrom, FVector(40, 70, 26), Metal);
+	for (int32 i = 0; i < 8; i++)
+	{
+		UMaterialInstanceDynamic* MID = B.Box(Arena.LaserFrom, FVector(FKSArena::LaserLength, 3.2f, 3.2f), i % 3 == 0 ? Green : i % 3 == 1 ? Magenta : Cyan, 14.f);
+		Arena.Lasers.Add(MID ? Cast<AActor>(MID->GetOuter()) : nullptr);
+	}
 
 	Arena.NameSign = B.Text(FVector(1100, 0, 520), FRotator(0, 180, 0), TEXT(""), Yellow, 150.f);
 	B.Text(FVector(1100, 0, 690), FRotator(0, 180, 0), TEXT("K O - S E K A I   1 9 8 7   U N R E L E A S E D"), Magenta, 46.f);

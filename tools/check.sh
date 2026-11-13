@@ -61,8 +61,33 @@ while read -r line; do
 	bout=$(field "$line" bout); name=$(echo "$line" | sed -n 's/.*opponent=\(.*\) result=.*/\1/p')
 	[ "$(field "$line" opp_hand_travel)" -ge 20 ] && pass "bout $bout: the opponent ($name) moves" || fail "bout $bout: the opponent ($name) is frozen in one pose"
 	[ "$(field "$line" player_hand_travel)" -ge 20 ] && pass "bout $bout: the player's fighter moves" || fail "bout $bout: the player's fighter is frozen in one pose"
-	[ "$(field "$line" spectators)" -ge 40 ] && pass "bout $bout: $(field "$line" spectators) spectators at ringside" || fail "bout $bout: $(field "$line" spectators) spectators, expected 40 or more"
+	[ "$(field "$line" spectators)" -ge 55 ] && pass "bout $bout: $(field "$line" spectators) spectators at ringside" || fail "bout $bout: $(field "$line" spectators) spectators, expected 55 or more"
 done <<< "$(grep "KSTEST bout=" "$LOG" 2> /dev/null)"
+# The crowd. The bugs this guards: a sheet that did not import leaves a hole in the stands, and a crowd that only
+# ever shows one pose or one movement is the old stiff crowd again.
+line=$(grep "KSTEST crowd seated=" "$LOG" 2> /dev/null | head -1)
+[ "$(field "$line" characters)" -ge 45 ] && pass "$(field "$line" characters) different spectators to draw from" || fail "only $(field "$line" characters) spectator characters (${line:-no KSTEST crowd line}); run art/arena/slice_crowd.py, then art/tools/import_crowd.py"
+[ "$(field "$line" seated)" -ge 55 ] && pass "$(field "$line" seated) seats filled, giants and flyers included" || fail "only $(field "$line" seated) seats filled: a spectator picture is missing from /Game/KS/Arena"
+while read -r line; do
+	[ -z "$line" ] && continue
+	bout=$(field "$line" bout)
+	[ "$(field "$line" poses)" -ge 6 ] && pass "bout $bout: the crowd showed all $(field "$line" poses) poses" || fail "bout $bout: the crowd showed only $(field "$line" poses) of 6 poses"
+	[ "$(field "$line" moves)" -ge 7 ] && pass "bout $bout: the crowd moved in $(field "$line" moves) different ways" || fail "bout $bout: the crowd moved in only $(field "$line" moves) ways"
+done <<< "$(grep "KSTEST crowd bout=" "$LOG" 2> /dev/null)"
+for snd in Cheer Gasp Shout; do
+	n=$(grep "KSTEST sound=$snd " "$LOG" 2> /dev/null | head -1 | tr -d "\r" | sed -n 's/.*recorded_variants=\([0-9]*\).*/\1/p')
+	# These have no synthesised fallback: without the recordings the crowd is silent.
+	if [ -z "$n" ]; then echo "  --    crowd sound $snd: not played in this run"
+	elif [ "$n" -ge 1 ]; then pass "crowd sound $snd: $n recorded take(s) loaded"
+	else fail "crowd sound $snd: no recording loaded, the crowd is silent; run art/tools/prep_crowd.py, then art/tools/import_crowd.py"; fi
+done
+# The arena's light show: lamps and lasers that are built but never moved would be a dead rig.
+line=$(grep "KSTEST arena beams=" "$LOG" 2> /dev/null | head -1)
+[ "$(field "$line" beams)" -ge 6 ] && [ "$(field "$line" lasers)" -ge 6 ] && pass "arena light show running: $(field "$line" beams) stage lamps, $(field "$line" lasers) lasers" || fail "arena light show not running (${line:-no KSTEST arena line})"
+grep -q "KSTEST arena confetti=" "$LOG" 2> /dev/null && pass "confetti fell after a knockout win" || echo "  --    confetti: no knockout win in this run"
+line=$(grep "KSTEST crowd_murmur " "$LOG" 2> /dev/null | head -1)
+if [ "$(field "$line" loaded)" = 1 ] && [ "$(field "$line" looping)" = 1 ]; then pass "crowd murmur loaded and set to loop ($(field "$line" seconds) s)"
+else fail "crowd murmur missing or not looping (${line:-no KSTEST crowd_murmur line})"; fi
 LAST=$(grep "KSTEST bout=" "$LOG" 2> /dev/null | tail -1)
 [ -n "$LAST" ] && [ "$(field "$LAST" landed)" -gt 0 ] && pass "punches land" || fail "no punch landed"
 for snd in Hit Blocked Whoosh Hurt Footstep; do
@@ -72,6 +97,9 @@ for snd in Hit Blocked Whoosh Hurt Footstep; do
 	elif [ "$n" -ge 1 ]; then pass "sound $snd: $n recorded take(s) loaded"
 	else fail "sound $snd: no recorded take loaded, the synthesised fallback is in use"; fi
 done
+line=$(grep "KSTEST music " "$LOG" 2> /dev/null | head -1)
+if [ "$(field "$line" loaded)" = 1 ] && [ "$(field "$line" looping)" = 1 ]; then pass "fight music loaded and set to loop ($(field "$line" seconds) s)"
+else fail "fight music missing or not looping (${line:-no KSTEST music line}); run art/tools/music.py, then art/tools/import_voice_faces.py"; fi
 # Faces and voices. The bug this guards: fighters stood through a whole bout with one expression (the Count with his
 # mouth open) and never spoke.
 while read -r line; do
@@ -92,9 +120,29 @@ if grep -qE "Fatal error|Assertion failed|Ensure condition failed|Unhandled Exce
 	fail "the engine reported a crash or failed check"; grep -E "Fatal error|Assertion failed|Ensure condition failed" "$LOG" | head -3
 else pass "no crash and no failed engine check"; fi
 
+# The interface. The bug this guards: a picture or font that is not in the build makes the HUD fall back to plain
+# boxes and the engine font without a word.
+line=$(grep "KSTEST ui pictures=" "$LOG" 2> /dev/null | head -1)
+if [ "$(field "$line" missing)" = 0 ] && [ "$(field "$line" pictures)" -ge 29 ] && [ "$(field "$line" fonts)" = 2 ]; then pass "interface art loaded ($(field "$line" pictures) pictures, 2 fonts)"
+else fail "interface art incomplete (${line:-no KSTEST ui line}); run art/ui/cut_ui.py, then art/ui/import_ui.py"; fi
+grep -q "KSTEST ui speech bubble shown picture=1" "$LOG" 2> /dev/null && pass "a spoken line was shown in a speech bubble" || fail "no speech bubble was drawn"
+grep -q "KSTEST ui damage badge shown" "$LOG" 2> /dev/null && pass "a hit showed its damage badge" || fail "no damage badge was drawn"
+n=$(grep "KSTEST sound=Pop " "$LOG" 2> /dev/null | head -1 | tr -d "\r" | sed -n 's/.*recorded_variants=\([0-9]*\).*/\1/p')
+[ "${n:-0}" -ge 1 ] && pass "interface sounds loaded (Pop: $n takes)" || fail "interface sound Pop missing; run art/tools/prep_audio.py, then art/ui/import_ui.py"
+
+echo "== start menu (chooses its first line by itself, no camera)"
+LOG="$OUT/menu.log"
+run_until 1 "KSTEST menu chosen" 90 "$LOG" -KSAuto -KSNoCamera
+grep -q "KSTEST ui menu shown background=1 logo=1" "$LOG" 2> /dev/null && pass "the start menu is drawn with its background and logo" || fail "the start menu was not drawn, or its pictures are missing"
+grep -q "KSTEST menu chosen=0" "$LOG" 2> /dev/null && pass "the start menu hands over to the street" || fail "the start menu did not start the game"
+
 echo "== calibration screen (stepped through automatically, no camera)"
 LOG="$OUT/calibration.log"
-run_until 1 "KSTEST calibration done" 120 "$LOG" -KSStart=fight -KSCalDemo -KSNoCamera
+# -KSCalJitter makes one framing reading flip every frame, like a player standing right on a limit. The bug this
+# guards: every line of text on the calibration screen flickered (1594 changes of the hint in one calibration).
+run_until 1 "KSTEST calibration done" 120 "$LOG" -KSStart=fight -KSCalDemo -KSCalJitter -KSNoCamera
+n=$(grep "KSTEST calibration hint_changes=" "$LOG" 2> /dev/null | head -1 | tr -d "\r" | sed -n 's/.*hint_changes=\([0-9]*\).*/\1/p')
+[ -n "$n" ] && [ "$n" -le 40 ] && pass "calibration text is steady with a jittering camera reading ($n changes of the hint in nine steps)" || fail "calibration text flickers: the hint changed ${n:-?} times in nine steps"
 grep -q "KSTEST calibration done completed=1" "$LOG" 2> /dev/null && pass "all nine calibration steps run and hand over to the first bout" || fail "calibration did not reach its end"
 
 echo "== recorded moves (tests/tracking/*.csv with a .expect file)"

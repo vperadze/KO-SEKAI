@@ -4,9 +4,18 @@
 
 #include "CoreMinimal.h"
 
-enum class EKSSfx : uint8 { Hit, Counter, Blocked, Hurt, Whoosh, Tell, Dodge, Bell1, Bell2, Bell3, KO, PullIn, Coin, Step, Footstep, Fall, Win, Lose };
+enum class EKSSfx : uint8 { Hit, Counter, Blocked, Hurt, Whoosh, Tell, Dodge, Bell1, Bell2, Bell3, KO, PullIn, Coin, Step, Footstep, Fall, Win, Lose,
+	Cheer, Roar, Gasp, Boo, Shout, Beast,     // the crowd (art/tools/prep_crowd.py); these have no synthesised fallback
+	Pop, Menu, Select, Score, Slam };         // the interface (art/tools/prep_audio.py); no synthesised fallback either
 
 namespace KSAudio
 {
 	void Play(UObject* WorldContext, EKSSfx Sfx, float Volume = 1.f);
+
+	/** Fades the looping fight music (/Game/KS/Audio/M_Fight, made by art/tools/music.py) to Volume; 0 stops it,
+	    and the next call above 0 starts it from the top. Player is the caller's to keep alive (a UPROPERTY). */
+	void Music(UObject* WorldContext, TObjectPtr<class UAudioComponent>& Player, float Volume, float FadeSeconds = 0.8f);
+
+	/** The looping murmur of the hall (/Game/KS/Audio/M_Crowd), faded to Volume in the same way as Music. */
+	void Crowd(UObject* WorldContext, TObjectPtr<class UAudioComponent>& Player, float Volume);
 }

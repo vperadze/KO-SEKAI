@@ -7,13 +7,14 @@
 #include "KSTypes.h"
 #include "KSWorld.h"
 #include "KSAudio.h"
+#include "KSCrowdData.h"
 #include "KSGameMode.generated.h"
 
 class AKSDummy;
 class AKSPawn;
 class UKSTrackingSubsystem;
 
-enum class EKSPhase : uint8 { Street, PullIn, Card, Fight, FightEnd, Result, Continue, Ending, Calibrate };
+enum class EKSPhase : uint8 { Street, PullIn, Card, Fight, FightEnd, Result, Continue, Ending, Calibrate, Menu };
 enum class EKSOppState : uint8 { Idle, Windup, Strike, Open, KO };
 
 struct FKSPopup
@@ -24,6 +25,7 @@ struct FKSPopup
 	float Start;
 	float Life;
 	bool bBig;
+	uint8 Kind = 0;     // 0 a word at Pos; 1 damage dealt and 3 a word, both pinned to the opponent's head (Pos is the offset); 2 damage taken
 };
 
 struct FKSStats
@@ -52,6 +54,10 @@ public:
 	FString CalTitle, CalHint;
 	int32 CalCountNow = 0, CalCountNeed = 0;   // repetitions done and wanted in this step (0 wanted = not a counted step)
 	TArray<TPair<FString, bool>> CalChecks;   // the framing checklist: what is right and what is not
+	bool bCalJitter = false;                  // -KSCalJitter: test flag, see TickCalibrate
+	bool bCalSteady[5] = { false, false, false, false, false }; float CalUnsteady[5] = { 0.f, 0.f, 0.f, 0.f, 0.f };   // debounced readings: body seen, shoulders, elbows, centred, near
+	bool bCalLeftOfMiddle = false;
+	FString CalHintWas; int32 CalHintChanges = 0;   // how often the hint line changed, for the self-check
 	float Clock = 0.f;            // game clock, stops while paused
 	bool bPaused = false;
 	int32 FighterIndex = 0;
@@ -68,6 +74,9 @@ public:
 	float RedFlash = 0.f, WhiteFade = 0.f, BlackFade = 0.f;
 	FString Subtitle, Prompt;
 	bool bLastResultWin = false, bLastResultDecision = false;
+	int32 MenuIndex = 0;                      // the chosen line of the start menu: start, straight to the ring, quit
+	bool bSpokenByOpp = false;                // who the speech bubble belongs to
+	FVector OppHead = FVector::ZeroVector, PlayerHead = FVector::ZeroVector;   // world space, for speech bubbles and damage badges
 	float ContinueLeft = 0.f;
 	/** The opponent of the current fight: one of the roster, with the difficulty of its place on the ladder. */
 	const FKSFighterDef& Fighter() const { return CurrentDef; }
@@ -85,6 +94,7 @@ private:
 	void StartCard(int32 Index);
 	void StartFight();
 	void ClearWorld();
+	void TickMenu(float Dt);
 	void TickStreet(float Dt);
 	void TickPullIn(float Dt);
 	void TickCard(float Dt);
@@ -126,6 +136,8 @@ private:
 	struct FLaterVoice { TWeakObjectPtr<class AKSDummy> Who; const TCHAR* Prefix = TEXT(""); float When = 0.f; };
 	FLaterVoice LaterVoice;
 	float VoiceQuietUntil = 0.f;
+	float MusicLevel = 0.f;        // the music's level for this phase, before the dip under a spoken line
+	bool bMusicDucked = false;
 	bool bIntroSaid = false;
 	void Announce(const FString& Text, float Seconds) { Announcement = Text; AnnounceUntil = Clock + Seconds; }
 	void Cue(const FString& Main, const FString& Hint, bool bGood = false) { CueMain = Main; CueHint = Hint; bCueGood = bGood; }
@@ -147,6 +159,7 @@ private:
 	UPROPERTY() TObjectPtr<AKSPawn> Pawn;
 	UPROPERTY() TObjectPtr<APlayerController> PC;
 	UPROPERTY() TObjectPtr<UKSTrackingSubsystem> TrackingSubsystem;
+	UPROPERTY() TObjectPtr<class UAudioComponent> MusicPlayer;
 
 	// Who is fighting: the player's fighter and the opponents, drawn at random each time the cabinet pulls you in.
 	int32 PlayerChar = 0;
@@ -158,15 +171,35 @@ private:
 
 	FKSStreet Street;
 	FKSArena Arena;
-	// A ringside spectator: a flat old-arcade sprite with four poses side by side (idle, cheer, wince, idle mirrored).
+	// A ringside spectator: a flat old-arcade sprite with six poses (KSCrowdData.h), moved about in whole steps.
+	enum class ECrowdMove : uint8 { Idle, Jump, Hop, Shake, Sway, Pulse, Cower, Dance, Loop };
 	struct FSpectator
 	{
-		TWeakObjectPtr<AActor> Actor; TObjectPtr<UMaterialInstanceDynamic> MID; FVector Home;
-		float Phase = 0.f, CueAt = 0.f, BusyUntil = 0.f, NextWhim = 0.f;
-		float IdleRate = 1.6f, BobRate = 3.2f, BobHeight = 3.f, JumpRate = 9.f, JumpHeight = 20.f;   // everyone moves a little differently
-		int32 CuePose = 0, Pose = 0, Shown = -1;
+		TWeakObjectPtr<AActor> Actor; TObjectPtr<UMaterialInstanceDynamic> MID;
+		FVector Foot = FVector::ZeroVector, Across = FVector::ZeroVector;   // where it stands and which way its picture runs
+		float Width = 112.f, Height = 224.f;
+		EKSBuild Build = EKSBuild::Normal; bool bBeast = false;
+		float Phase = 0.f, CueAt = 0.f, BusyUntil = 0.f, NextWhim = 0.f, WaveAt = 0.f;
+		// Everyone moves a little differently.
+		float IdleRate = 1.6f, BobRate = 3.2f, BobHeight = 3.f, JumpRate = 9.f, JumpHeight = 20.f, SwayRate = 3.f, SwayAngle = 6.f;
+		float HoverRate = 1.f, HoverHeight = 0.f, DriftRate = 0.3f, DriftWidth = 0.f;                // flyers only
+		int32 IdleStyle = 0;                                  // 0 looks about and bobs, 1 sways, 2 breathes, 3 stands like a post
+		int32 Pose = 0, AltPose = -1, Shown = -1;             // AltPose: a second pose it flips to and fro with
+		ECrowdMove Move = ECrowdMove::Idle;
+		bool bCueCheer = false;
 		bool bFlip = false, bShownFlip = false, bRival = false;                                      // a rival cheers for the other fighter
 	};
+	void CrowdAct(FSpectator& S, bool bHappy, float Seconds);     // picks one of several ways to cheer or to despair
+	float NextCrowdVoiceAt = 0.f, NextShoutAt = 0.f, NextBeastAt = 0.f, NextWaveAt = 0.f;
+	int32 CrowdMovesSeen = 0, CrowdPosesSeen = 0;                 // bit sets, for the self-check
+	UPROPERTY() TObjectPtr<class UAudioComponent> CrowdPlayer;    // the murmur under everything
+	// Arena effects (lamps and lasers live in FKSArena; see TickArenaFx).
+	struct FConfetti { TWeakObjectPtr<AActor> Actor; FVector Pos = FVector::ZeroVector, Vel = FVector::ZeroVector; FRotator Spin = FRotator::ZeroRotator; float Phase = 0.f; bool bLive = false; };
+	TArray<FConfetti> Confetti;
+	float ArenaShowUntil = 0.f;
+	bool bArenaFxLogged = false;
+	void ConfettiBurst();
+	void TickArenaFx();
 	// Camera flashes in the crowd: a small pool of glowing balls and lights, each shown for a few hundredths of a second.
 	struct FCrowdFlash { TWeakObjectPtr<AActor> Actor; TObjectPtr<UMaterialInstanceDynamic> MID; float Until = 0.f; };
 	TArray<FCrowdFlash> Flashes;

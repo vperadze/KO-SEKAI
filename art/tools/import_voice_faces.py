@@ -6,6 +6,8 @@ Faces:  art/models/<fighter>/faces/T_<Name>_Face_<expr>.png
         -> /Game/KoSekai/Characters/<Folder>/Faces/T_<Name>_Face_<expr> and a material MI_<Name>_Face_<expr>,
            copied from one of the fighter's existing face materials with the picture swapped.
 Voices: art/audio/voice/V_<Folder>_<line>.wav -> /Game/KS/Voice/V_<Folder>_<line>
+Music:  art/audio/M_<Name>.wav (from art/tools/music.py) -> /Game/KS/Audio/M_<Name>, set to loop.
+        Brought in again whenever the WAV is newer than the asset.
 
 Only what is missing or wrong is imported. -KSNewPictures brings every face PNG in again and remakes its material;
 -KSReimport brings every voice line in again.
@@ -71,4 +73,15 @@ for wav in sorted(glob.glob(os.path.join(ROOT, 'art', 'audio', 'voice', 'V_*.wav
     if bring(wav, '/Game/KS/Voice'): voices += 1
     else: unreal.log_error('KSIMPORT failed sound %s' % wav)
 
-unreal.log('KSIMPORT done faces=%d voices=%d' % (faces, voices))
+music = 0
+for wav in sorted(glob.glob(os.path.join(ROOT, 'art', 'audio', 'M_*.wav'))):
+    name = os.path.splitext(os.path.basename(wav))[0]
+    asset = os.path.join(ROOT, 'unreal', 'Content', 'KS', 'Audio', name + '.uasset')
+    if os.path.exists(asset) and os.path.getmtime(asset) >= os.path.getmtime(wav) and not REIMPORT: continue
+    sound = bring(wav, '/Game/KS/Audio')
+    if not sound: unreal.log_error('KSIMPORT failed music %s' % wav); continue
+    sound.set_editor_property('looping', True)
+    EAL.save_loaded_asset(sound)
+    music += 1
+
+unreal.log('KSIMPORT done faces=%d voices=%d music=%d' % (faces, voices, music))

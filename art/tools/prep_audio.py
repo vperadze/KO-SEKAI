@@ -20,6 +20,12 @@ PICK = {
  'Footstep': (['Foley/foley-step-walk-textile-light-01', 'Foley/foley-step-walk-textile-light-02', 'Foley/foley-step-walk-textile-light-03'], 0.5),
  'Win':      (['UI/ui-arcade-level-up-8bit-01'], 1.1),
  'Lose':     (['UI/ui-arcade-loose-01'], 2.4),
+ # the interface (KSHUD): a badge or speech bubble popping up, the menu, a counter's score, a title slamming in
+ 'Pop':      (['UI/user-interface-cartoon-plop-bubble-pop-click-01', 'UI/ui-modern-percussive-pop-up-01'], 0.4),
+ 'Menu':     (['UI/ui-classic-click-01'], 0.3),
+ 'Select':   (['UI/ui-arcade-arpeggio-up-major-01'], 0.95),
+ 'Score':    (['UI/ui-arcade-score-01'], 0.9),
+ 'Slam':     (['Cinematics/cinematic-impact-action-boom-01'], 1.6),
 }
 def read(path):
     w = wave.open(path); n, ch, sw, sr = w.getnframes(), w.getnchannels(), w.getsampwidth(), w.getframerate()

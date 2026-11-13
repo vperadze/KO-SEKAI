@@ -1,5 +1,6 @@
 #include "KSAudio.h"
 #include "Sound/SoundWaveProcedural.h"
+#include "Sound/SoundWave.h"
 #include "Components/AudioComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/World.h"
@@ -72,7 +73,9 @@ namespace
 	const TArray<USoundBase*>& Recorded(EKSSfx Sfx)
 	{
 		static const TCHAR* Names[] = { TEXT("Hit"), TEXT("Counter"), TEXT("Blocked"), TEXT("Hurt"), TEXT("Whoosh"), TEXT("Tell"), TEXT("Dodge"), TEXT("Bell1"), TEXT("Bell2"), TEXT("Bell3"),
-			TEXT("KO"), TEXT("PullIn"), TEXT("Coin"), TEXT("Step"), TEXT("Footstep"), TEXT("Fall"), TEXT("Win"), TEXT("Lose") };
+			TEXT("KO"), TEXT("PullIn"), TEXT("Coin"), TEXT("Step"), TEXT("Footstep"), TEXT("Fall"), TEXT("Win"), TEXT("Lose"),
+			TEXT("Cheer"), TEXT("Roar"), TEXT("Gasp"), TEXT("Boo"), TEXT("Shout"), TEXT("Beast"),
+			TEXT("Pop"), TEXT("Menu"), TEXT("Select"), TEXT("Score"), TEXT("Slam") };
 		static TMap<EKSSfx, TArray<USoundBase*>> Loaded;
 		if (TArray<USoundBase*>* Found = Loaded.Find(Sfx)) return *Found;
 		TArray<USoundBase*>& List = Loaded.Add(Sfx);
@@ -129,4 +132,68 @@ void KSAudio::Play(UObject* WorldContext, EKSSfx Sfx, float Volume)
 	FTimerHandle Handle;
 	TWeakObjectPtr<UAudioComponent> Weak(Player);
 	World->GetTimerManager().SetTimer(Handle, [Weak]() { if (Weak.IsValid()) { Weak->Stop(); Weak->DestroyComponent(); } }, Seconds + 0.1f, false);
+}
+
+void KSAudio::Music(UObject* WorldContext, TObjectPtr<UAudioComponent>& Player, float Volume, float FadeSeconds)
+{
+	UWorld* World = WorldContext ? WorldContext->GetWorld() : nullptr;
+	if (!World || World->GetNetMode() == NM_DedicatedServer) return;
+
+	static USoundWave* Track = nullptr;
+	static bool bLooked = false;
+	if (!bLooked)
+	{
+		bLooked = true;
+		Track = LoadObject<USoundWave>(nullptr, TEXT("/Game/KS/Audio/M_Fight.M_Fight"), nullptr, LOAD_NoWarn | LOAD_Quiet);
+		if (Track) Track->AddToRoot();
+		// One line for tools/check.sh. A track that does not loop would fall silent 75 s into a bout.
+		UE_LOG(LogTemp, Display, TEXT("KSTEST music loaded=%d looping=%d seconds=%d"), Track ? 1 : 0, Track && Track->bLooping ? 1 : 0, Track ? FMath::RoundToInt(Track->Duration) : 0);
+	}
+	if (!Track) return;
+
+	if (Volume <= 0.f)
+	{
+		if (Player && Player->IsPlaying()) Player->FadeOut(1.2f, 0.f);
+		return;
+	}
+	if (!Player)
+	{
+		Player = UGameplayStatics::CreateSound2D(World, Track, 1.f, 1.f, 0.f, nullptr, false, false);
+		if (!Player) return;   // no audio device (-nosound)
+	}
+	if (Player->IsPlaying()) Player->AdjustVolume(FadeSeconds, Volume);
+	else
+	{
+		Player->FadeIn(0.6f, Volume);
+		UE_LOG(LogTemp, Display, TEXT("KSTEST music started volume=%.2f playing=%d"), Volume, Player->IsPlaying() ? 1 : 0);
+	}
+}
+
+void KSAudio::Crowd(UObject* WorldContext, TObjectPtr<UAudioComponent>& Player, float Volume)
+{
+	UWorld* World = WorldContext ? WorldContext->GetWorld() : nullptr;
+	if (!World || World->GetNetMode() == NM_DedicatedServer) return;
+
+	static USoundWave* Track = nullptr;
+	static bool bLooked = false;
+	if (!bLooked)
+	{
+		bLooked = true;
+		Track = LoadObject<USoundWave>(nullptr, TEXT("/Game/KS/Audio/M_Crowd.M_Crowd"), nullptr, LOAD_NoWarn | LOAD_Quiet);
+		if (Track) Track->AddToRoot();
+		UE_LOG(LogTemp, Display, TEXT("KSTEST crowd_murmur loaded=%d looping=%d seconds=%d"), Track ? 1 : 0, Track && Track->bLooping ? 1 : 0, Track ? FMath::RoundToInt(Track->Duration) : 0);
+	}
+	if (!Track) return;
+	if (Volume <= 0.f)
+	{
+		if (Player && Player->IsPlaying()) Player->FadeOut(1.5f, 0.f);
+		return;
+	}
+	if (!Player)
+	{
+		Player = UGameplayStatics::CreateSound2D(World, Track, 1.f, 1.f, 0.f, nullptr, false, false);
+		if (!Player) return;   // no audio device (-nosound)
+	}
+	if (Player->IsPlaying()) Player->AdjustVolume(1.f, Volume);
+	else Player->FadeIn(1.f, Volume);
 }

@@ -1,15 +1,22 @@
 #!/usr/bin/env python3
-"""Records every fighter's spoken lines with the local Kokoro voices and writes the table the game reads.
+"""Records every fighter's spoken lines, acted, and writes the table the game reads.
 
-    ~/ielts-listening/.venv/bin/python art/tools/voices.py            all lines
-    ~/ielts-listening/.venv/bin/python art/tools/voices.py Turbotron  one fighter
+    art/voice-model/venv/bin/python art/tools/voices.py            all lines (about an hour, no graphics card)
+    art/voice-model/venv/bin/python art/tools/voices.py Turbotron  one fighter
+    ... --keep                                                     only the lines that have no sound yet
 
-Writes art/audio/voice/V_<Fighter>_<line>.wav (24 kHz, mono, 16 bit) and
+Two local models. Kokoro gives each fighter a voice (CAST): it reads one sample sentence per fighter. Chatterbox
+copies that voice and acts the lines, with an emotion setting per kind of line (ACT) and per fighter (HEAT).
+Kokoro alone read the lines flat ("speech to text, no emotions", said the player), whatever the punctuation.
+Every line is recorded TAKES times; a speech recogniser throws out takes that say the wrong words. All takes stay
+in art/audio/voice/takes: to use another one, copy it over V_<Fighter>_<line>.wav and run with --keep.
+
+Writes art/audio/voice/V_<Fighter>_<line>.wav (24 kHz, mono, 16 bit, compressed loud) and
 unreal/Source/KoSekai/KSVoiceData.h: each line's text and how far the mouth is open, 20 times a second, so the
-face can talk in time with the sound. Import the sounds afterwards with art/tools/import_voice_faces.py.
+face can talk in time with the sound. Import the sounds afterwards with art/tools/import_voice_faces.py -KSReimport.
 
-Each fighter is one Kokoro voice, left natural ('plain'); effect() keeps the old effects for anyone who wants one back. The pitch shift is a plain
-resample: Kokoro speaks slower or faster by the same factor first, so the pace stays what CAST asks for.
+The environment: python3 -m venv art/voice-model/venv; pip install torch==2.6.0 torchaudio==2.6.0 from
+https://download.pytorch.org/whl/cpu, then chatterbox-tts kokoro-onnx faster-whisper.
 """
 import os, sys, wave, zlib
 import numpy as np
@@ -92,7 +99,7 @@ LINES = {
         'hit1': "Beep boop, bitch.",
         'hit2': "You are trash. I did the math.",
         'hit3': "Prepare to die. Please.",
-        'hurt1': "Error! Fuck!",
+        'hurt1': "Error! Error! Oh, fuck!",      # two words alone came out as mumbling in every take
         'hurt2': "Shit. There goes my warranty.",
         'win': "Human deleted. Fuck yeah.",
         'lose': "Low battery. Oh, shit.",
@@ -170,28 +177,84 @@ def mouth(x):
     return ''.join(str(int(v)) for v in np.clip(rms / (rms.max() * 0.55) * 9, 0, 9))
 
 
+# How hard each kind of line is acted: (emotion, how closely the pacing follows the reference voice).
+# Emotion 0.5 is Chatterbox's neutral; above 1 it shouts and stretches words. A looser pacing lets it act more.
+ACT = {'intro': (0.85, 0.35), 'hit': (1.05, 0.3), 'hurt': (1.25, 0.3), 'win': (0.9, 0.35), 'lose': (0.7, 0.4)}
+# Per fighter, a factor on the emotion: the robot stays drier than the drill sergeant.
+HEAT = {'SergeantMulletV2': 1.1, 'ChannelZero': 1.0, 'SirLasercorn': 0.95, 'AerobicsAnnihilator': 1.1,
+        'GrandmaThunder': 0.95, 'Turbotron': 0.75, 'CountHairspray': 0.9}
+# What each fighter's voice is copied from: Kokoro reads this, Chatterbox takes the timbre and acts the lines itself.
+SAMPLE = "Listen to me, and listen well! I have waited years for this fight, and nobody, nobody is going to stop me now!"
+TAKES = 3
+
+
+def write(path, x):
+    w = wave.open(path, 'wb'); w.setnchannels(1); w.setsampwidth(2); w.setframerate(RATE)
+    w.writeframes((np.clip(x, -1, 1) * 32767).astype('<i2').tobytes()); w.close()
+
+
+def loud(x):
+    """Brings a line up to shouting level: the quiet parts are lifted, the peaks pressed against a soft ceiling."""
+    x = x / np.abs(x).max()
+    step = RATE // 100
+    level = np.array([np.sqrt(np.mean(x[i:i + step] ** 2)) for i in range(0, len(x), step)])
+    level = np.interp(np.arange(len(x)), np.arange(len(level)) * step + step / 2, np.convolve(level, np.ones(9) / 9, 'same'))
+    x = x * (np.maximum(level, 0.02) / level.max()) ** -0.45            # 0.45: roughly a 2:1 compressor
+    x = np.tanh(x / np.percentile(np.abs(x), 99.5) * 1.3)
+    return x / np.abs(x).max() * 0.95
+
+
+def words(text): return ''.join(c.lower() if c.isalnum() or c == "'" else ' ' for c in text).split()
+
+
 def main():
+    import difflib, torch
     from kokoro_onnx import Kokoro
-    tts = Kokoro(os.path.join(MODELS, 'kokoro-v1.0.onnx'), os.path.join(MODELS, 'voices-v1.0.bin'))
-    only = set(sys.argv[1:])
-    os.makedirs(OUT, exist_ok=True)
+    from chatterbox.tts import ChatterboxTTS
+    from faster_whisper import WhisperModel
+    only = set(a for a in sys.argv[1:] if not a.startswith('--'))
+    os.makedirs(os.path.join(OUT, 'takes'), exist_ok=True)
+    kokoro = Kokoro(os.path.join(MODELS, 'kokoro-v1.0.onnx'), os.path.join(MODELS, 'voices-v1.0.bin'))
+    actor = ears = None
     rows = []
     for fighter, (voice, pitch, pace, kind) in CAST.items():
+        ref = os.path.join(OUT, 'takes', 'ref_%s.wav' % fighter)
+        if not os.path.exists(ref):
+            x, rate = kokoro.create(SAMPLE, voice=voice, speed=pace / pitch, lang='en-gb' if voice[0] == 'b' else 'en-us')
+            x = trim(resample(np.asarray(x, dtype=np.float64), pitch)); write(ref, x / np.abs(x).max() * 0.9)
         for key, text in LINES[fighter].items():
             path = os.path.join(OUT, 'V_%s_%s.wav' % (fighter, key))
             if fighter in only or not os.path.exists(path) or (not only and '--keep' not in sys.argv):
-                rng = np.random.default_rng(zlib.crc32((fighter + key).encode()))
-                x, rate = tts.create(text, voice=voice, speed=pace / pitch, lang='en-gb' if voice[0] == 'b' else 'en-us')
-                assert rate == RATE
-                dry = trim(resample(np.asarray(x, dtype=np.float64), pitch))
-                x = effect(dry, kind, rng)
-                x = x / np.abs(x).max() * 0.9
+                if actor is None:
+                    actor = ChatterboxTTS.from_pretrained(device='cpu')
+                    ears = WhisperModel('small.en', device='cpu', compute_type='int8')
+                emotion, pacing = ACT[key.rstrip('0123456789')]
+                emotion *= HEAT[fighter]
+                best = None
+                for take in range(TAKES):
+                    torch.manual_seed(zlib.crc32((fighter + key).encode()) % 100000 + take)
+                    x = actor.generate(text, audio_prompt_path=ref, exaggeration=emotion, cfg_weight=pacing, temperature=0.85)
+                    x = trim(x.squeeze().numpy().astype(np.float64))
+                    take_path = os.path.join(OUT, 'takes', 'V_%s_%s.take%d.wav' % (fighter, key, take + 1))
+                    write(take_path, loud(x))
+                    # Nobody listens to every take, so each one is checked by a speech recogniser: a take that says
+                    # other words than the line (the model sometimes babbles on short lines) loses. Among the takes
+                    # that say the line, the one the recogniser wrote down with the most '!' and CAPITALS wins (its own sign of
+                    # shouting), then the shortest: a clean take has no drawn-out tail.
+                    at16k = np.interp(np.arange(int(len(x) * 16000 / RATE)) * RATE / 16000.0, np.arange(len(x)), x / np.abs(x).max()).astype(np.float32)
+                    heard = ' '.join(seg.text for seg in ears.transcribe(at16k, language='en')[0])
+                    match = difflib.SequenceMatcher(None, words(text), words(heard)).ratio()
+                    sec = len(x) / RATE
+                    print('  take %d  %.2f s  match %.2f  "%s"' % (take + 1, sec, match, heard.strip()))
+                    shout = heard.count('!') + sum(1 for w in heard.split() if len(w) > 2 and w.isupper())
+                    score = (round(match, 1), shout, -sec)
+                    if best is None or score > best[0]: best = (score, x, take + 1, match)
+                _, x, chosen, match = best
+                np.save(path[:-4] + '.npy', x)        # the mouth follows the voice as spoken, before it is pressed loud
+                x = loud(x)
                 fade = int(0.02 * RATE); x[-fade:] *= np.linspace(1, 0, fade)
-                w = wave.open(path, 'wb'); w.setnchannels(1); w.setsampwidth(2); w.setframerate(RATE)
-                w.writeframes((x * 32767).astype('<i2').tobytes()); w.close()
-                # The mouth follows the voice before the effect: an echo's tail is not the mouth moving.
-                np.save(path[:-4] + '.npy', np.concatenate([dry, np.zeros(max(0, len(x) - len(dry)))]))
-                print('%-40s %.2f s' % (os.path.basename(path), len(x) / RATE))
+                write(path, x)
+                print('%-40s %.2f s  take %d%s' % (os.path.basename(path), len(x) / RATE, chosen, '' if match >= 0.7 else '   <-- WORDS DO NOT MATCH, listen to it'))
             dry = np.load(path[:-4] + '.npy')
             shown = text
             for said, written in SHOWN.items(): shown = shown.replace(said, written)

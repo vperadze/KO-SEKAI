@@ -40,7 +40,8 @@ Packaged build under 1 GB, plus a 30–60 s gameplay video. Windows packaging ne
 | `unreal/` | The game. C++ only, everything spawned from code, no level files. |
 | `unreal/Source/KoSekai/` | `KSGameMode` (rules, phases, crowd), `KSDummy` (a fighter), `KSWorld` (street and arena), `KSHUD`, `KSAudio`, `KSTracking` + `KSCameraTracker` + `KSDetector` (webcam). |
 | `unreal/Content/KoSekai/Characters/` | Seven fighters, 17 shared clips each, face materials. |
-| `unreal/Content/KS/` | Materials, arena pictures and spectator sprites (`Arena/`), the pose model (`Tracker/`). |
+| `unreal/Content/KS/` | Materials, arena pictures and spectator sprites (`Arena/T_KS_Crowd_*`, six poses each), sounds (`Audio/`), the pose model (`Tracker/`). |
+| `unreal/Content/KS/UI/` | Interface pictures `T_UI_<name>` and the two fonts (`F_RussoOne`, `F_Bangers`); `KSHUD` falls back to plain boxes without them. |
 | `unreal/Content/KS/Voice/` | Spoken lines `V_<Fighter>_<line>`; text and mouth timing are in the generated `KSVoiceData.h`. |
 | `art/` | Source art and the tools that make it (`art/tools`, `art/arena`, `art/tracker-model`). Mostly untracked. |
 | `tools/check.sh` | The self-check. |
@@ -60,6 +61,7 @@ Test flags (all optional):
 | Flag | Effect |
 |---|---|
 | `-KSStart=fight` | Skip the street and start in the ring. |
+| `-KSStart=street` | Skip the start menu (the game opens on it by default). |
 | `-KSAuto` | The game plays itself. `-KSNoGuard` makes the player take hits. |
 | `-KSFighter=N` `-KSPlayer=N` | Force the first opponent / the player's fighter (roster index 0–6). |
 | `-KSShots=N` `-KSHitShots` | Save screenshots to `unreal/Saved/Screenshots` (timed / bursts around each hit). |
@@ -68,6 +70,7 @@ Test flags (all optional):
 | `-KSReplay=<file>` `-KSReplayExit` | Run the move detector over a recording and log its decisions. |
 | `-KSNoCal` | Skip the calibration screen (webcam players get it before the first bout). |
 | `-KSCalDemo` | Enter calibration without a camera and step through it automatically. |
+| `-KSCalJitter` | With `-KSCalDemo`: one framing reading flips every frame, to test that the text stays steady. |
 | `-KSMirrorArms` | Experimental: fighter's arms copy the webcam arms directly. Off by default, it looks bad. |
 | `-KSFakeArms` | Feed a fixed arm pose into the arm copying, to test it without a person. |
 
@@ -82,7 +85,20 @@ The KoSekai editor has no MCP. Import textures and create materials with a headl
 UnrealEditor-Cmd KoSekai.uproject -run=pythonscript -script=<file.py>
 ```
 
-New faces or lines: `art/tools/bake_faces.py` (faces) and `~/ielts-listening/.venv/bin/python art/tools/voices.py`
+New music: edit and run `python3 art/tools/music.py` (numpy only, 12 s), then `art/tools/import_voice_faces.py`
+headless; no rebuild needed.
+
+New spectators or crowd sounds: `art/arena/gen_crowd.py` and `gen_crowd_sound.py` (Dreamina, credits), then
+`art/tracker-model/venv/bin/python art/arena/slice_crowd.py` (rewrites `KSCrowdData.h`: rebuild) and
+`~/ielts-listening/.venv/bin/python art/tools/prep_crowd.py`, then `art/tools/import_crowd.py` headless.
+
+New interface art (menu, bars, badges, bubbles): `python3 art/ui/gen_ui.py quote|run <ceiling> [name]` (Dreamina,
+2 credits a picture), `art/tracker-model/venv/bin/python art/ui/cut_ui.py` (rewrites `KSUIData.h`: rebuild), then
+`art/ui/import_ui.py` headless. It also imports the fonts (`art/ui/fonts`) and the interface sounds from `prep_audio.py`.
+
+The arena's beam material `M_KS_Beam` is made by `art/tools/make_beam_material.py` (headless; no rebuild needed).
+
+New faces or lines: `art/tools/bake_faces.py` (faces) and `art/voice-model/venv/bin/python art/tools/voices.py`
 (lines; rebuild the game after it, it rewrites `KSVoiceData.h`), then `art/tools/import_voice_faces.py` headless.
 
 Fighters are built in the staging project `~/UnrealProjects/MegaJam2026` (the only editor with MCP, port 8123)

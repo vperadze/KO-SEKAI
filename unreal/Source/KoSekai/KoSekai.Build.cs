@@ -11,5 +11,7 @@ public class KoSekai : ModuleRules
 		PrivateDependencyModuleNames.AddRange(new string[] { "HTTPServer", "HTTP", "Json" });
 		// The built-in webcam tracker (KSCameraTracker): OpenCV reads the camera, NNE runs the pose model.
 		PrivateDependencyModuleNames.AddRange(new string[] { "NNE", "OpenCV", "OpenCVHelper" });
+		// The HUD draws its text with two imported fonts (KSHUD).
+		PrivateDependencyModuleNames.AddRange(new string[] { "SlateCore" });
 	}
 }
