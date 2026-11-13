@@ -1,0 +1,68 @@
+image-to-image 01a1d02c-89ed-7451-91db-e99f78797804
+[image-to-image] IN_PROGRESS 30%
+[image-to-image] SUCCEEDED 100%
+      ok in 49s
+{
+  "schema_version": "meshy.cli/v1",
+  "command": "image-to-image.create",
+  "ok": true,
+  "result": {
+    "task": {
+      "task_id": "01a1d02c-89ed-7451-91db-e99f78797804",
+      "resource": "image-to-image",
+      "endpoint": "/openapi/v1/image-to-image",
+      "type": "image-to-image",
+      "name": null,
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "preceding_tasks": null,
+      "created_at": 1794493947499,
+      "started_at": 1794493947595,
+      "finished_at": 1794493991479,
+      "expires_at": 1794753191479,
+      "face_count": null,
+      "consumed_credits": 9,
+      "model_urls": {},
+      "image_urls": [
+        "https://assets.meshy.ai/10ddecf2-9b23-4b1d-a3a0-fc75caf54778/uploads/image_01a1d02c-89ed-7451-91db-e99f78797804_0.png?Expires=1794753191&Signature=nlynHRQVXCKBLcey2lL0b1XUwtbzTbNX6uJtDY~KufmRJod8A1dBNRnABV3LsqFagT3rpChvROk9a3y3StGGHNao6rC1QSGlkY7LwGMigQx6Viq2GFPvEYV8uWmtNBABBuMvKoR2bwrrp6mPFw0ebbszcGVq2AbR1rkbS9DMxLTUXcpAlGpvjvUeZ2IC0HvR9atu1JKPKYkkZWg6lQT0Sk2ub-G6~gIjRY62q~WwHzku6lL5SJ1VHltF066esksu8aetpedyiBN9Nf5puxo~4NlKtQ3oOfDf3pXegYFK1umk6GLsbURL~1RC7Q2csS53UoVESOk7HqE4D9W7nAp5Kg__&Key-Pair-Id=K1VGYTHIYLM9UM"
+      ],
+      "texture_urls": [],
+      "thumbnail_url": null,
+      "thumbnail_urls": null,
+      "alpha_thumbnail_url": null,
+      "result": null,
+      "printability": null,
+      "task_error": null
+    },
+    "submission": {
+      "state": "accepted",
+      "operation_id": "3e886661-f6d5-465e-94f5-b476178b0a91",
+      "task_id": "01a1d02c-89ed-7451-91db-e99f78797804",
+      "request_id": null
+    },
+    "downloads": {
+      "state": "completed",
+      "files": [
+        {
+          "key": "image.0",
+          "path": "/home/nikoloz/ko-sekai/art/concepts/character-2/b-crt-kid-pixel/image_0.png",
+          "status": "written",
+          "bytes": 1633126,
+          "sha256": "ee8989e544caa89ac0326cab57e81d2297a2269d22222d974588d9444cc4c457",
+          "error": null
+        }
+      ],
+      "metadata_path": "/home/nikoloz/ko-sekai/art/concepts/character-2/b-crt-kid-pixel/meta.json",
+      "material_links": null,
+      "skipped": []
+    },
+    "saved_json": null,
+    "wait": {
+      "timed_out": false,
+      "elapsed_seconds": 48.73,
+      "polls": 9
+    }
+  },
+  "error": null,
+  "warnings": []
+}

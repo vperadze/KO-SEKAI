@@ -1,0 +1,73 @@
+text-to-image 01a1d029-6a54-74d3-885b-5617c94db7b5
+[text-to-image] IN_PROGRESS 30%
+[text-to-image] SUCCEEDED 100%
+      ok in 19s
+{
+  "schema_version": "meshy.cli/v1",
+  "command": "text-to-image.create",
+  "ok": true,
+  "result": {
+    "task": {
+      "task_id": "01a1d029-6a54-74d3-885b-5617c94db7b5",
+      "resource": "text-to-image",
+      "endpoint": "/openapi/v1/text-to-image",
+      "type": "text-to-image",
+      "name": null,
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "preceding_tasks": null,
+      "created_at": 1794493739645,
+      "started_at": 1794493739656,
+      "finished_at": 1794493758797,
+      "expires_at": 1794752958797,
+      "face_count": null,
+      "consumed_credits": 9,
+      "model_urls": {},
+      "image_urls": [
+        "https://assets.meshy.ai/10ddecf2-9b23-4b1d-a3a0-fc75caf54778/uploads/image_01a1d029-6a54-74d3-885b-5617c94db7b5_0.png?Expires=1794752958&Signature=p5ijaSKkECTqPX8~t0Gre9IwcAohMYS6UPjST7NEpyMWJOHxQkKhQhoAnW1~pUhhCIaQRuvCY87VIophPuSdIfEfy0mgfx~OYW0OBRhdQnsX8Mh9ECS7FZkymi4~qDUeL7Dz01L8V-b2AiI0rhWaOLSW0W-EfLlD0EJiwtnKNI04jZWi78cQ-tKcHrRBUNaXZcy1ieNwRSIPsjIu~RvohIjY-88~h~S7io2snZgcU~X6zWuj9zPjwgYcdOFi3HhDPOJ1IVx5cmqSei0SGHJ~8waQr7AUDMAQUwJnNOsagWPtBdREN3z0kVAFm~1HzYg~NugDPj4pV5ojrimWTcvg2w__&Key-Pair-Id=K1VGYTHIYLM9UM"
+      ],
+      "texture_urls": [],
+      "thumbnail_url": null,
+      "thumbnail_urls": null,
+      "alpha_thumbnail_url": null,
+      "result": null,
+      "printability": null,
+      "task_error": null
+    },
+    "submission": {
+      "state": "accepted",
+      "operation_id": "0e64d20b-9650-4423-8616-2757b48809f3",
+      "task_id": "01a1d029-6a54-74d3-885b-5617c94db7b5",
+      "request_id": null
+    },
+    "downloads": {
+      "state": "completed",
+      "files": [
+        {
+          "key": "image.0",
+          "path": "/home/nikoloz/ko-sekai/art/concepts/character-2/c-aerobics/image_0.png",
+          "status": "written",
+          "bytes": 1218471,
+          "sha256": "476cc01365ba957cf31719ea82a201e0b0e052efe6505c40a5ea675741a2dc4d",
+          "error": null
+        }
+      ],
+      "metadata_path": "/home/nikoloz/ko-sekai/art/concepts/character-2/c-aerobics/meta.json",
+      "material_links": null,
+      "skipped": []
+    },
+    "saved_json": null,
+    "wait": {
+      "timed_out": false,
+      "elapsed_seconds": 19.17,
+      "polls": 3
+    }
+  },
+  "error": null,
+  "warnings": [
+    {
+      "code": "pose_aspect_ratio",
+      "message": "nano-banana-pro renders a t-pose image at 3:4, so the image will not be 1:1; the GPT Image models keep the ratio"
+    }
+  ]
+}

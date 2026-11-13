@@ -1,0 +1,68 @@
+image-to-image 01a1d04d-671c-7261-a67c-79c44c38a1af
+[image-to-image] IN_PROGRESS 30%
+[image-to-image] SUCCEEDED 100%
+      ok in 18s
+{
+  "schema_version": "meshy.cli/v1",
+  "command": "image-to-image.create",
+  "ok": true,
+  "result": {
+    "task": {
+      "task_id": "01a1d04d-671c-7261-a67c-79c44c38a1af",
+      "resource": "image-to-image",
+      "endpoint": "/openapi/v1/image-to-image",
+      "type": "image-to-image",
+      "name": null,
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "preceding_tasks": null,
+      "created_at": 1794496098228,
+      "started_at": 1794496098240,
+      "finished_at": 1794496115556,
+      "expires_at": 1794755315556,
+      "face_count": null,
+      "consumed_credits": 9,
+      "model_urls": {},
+      "image_urls": [
+        "https://assets.meshy.ai/10ddecf2-9b23-4b1d-a3a0-fc75caf54778/uploads/image_01a1d04d-671c-7261-a67c-79c44c38a1af_0.png?Expires=1794755315&Signature=d1XtXNJo04DbXL2B2ACFI97~HKkFYLsyKQr~AzN1qigQXnh2ZVM2ppfT-DvBvpNKsOZCxtqpzUYp6r6A1fJVFVNMb24gujj7Ib8RBZiKgYNgeIqaHUklaxnakjN-iqGoQXkeeZSaypI2vhYMSGJxZt6Ph634QplXMLKKGOUzbm54iqCob8wViPsNO5ddqDa4Zh0OeKyQeEZQyHv~yDhpI3NiDLdK7OJXmRo86NkYedHGzJIysu49wQVD3eQWR0k6Dk2YIRKyTxunAOZDhQTPdiCDpvLi4bu7opZHcbMS2bAP8ugxhv9~jr5d-XyIBvo0aGrx123xOyuI1IP4AJTDGg__&Key-Pair-Id=K1VGYTHIYLM9UM"
+      ],
+      "texture_urls": [],
+      "thumbnail_url": null,
+      "thumbnail_urls": null,
+      "alpha_thumbnail_url": null,
+      "result": null,
+      "printability": null,
+      "task_error": null
+    },
+    "submission": {
+      "state": "accepted",
+      "operation_id": "47ea0db0-035a-4570-9e63-7aa6bccb5e9d",
+      "task_id": "01a1d04d-671c-7261-a67c-79c44c38a1af",
+      "request_id": null
+    },
+    "downloads": {
+      "state": "completed",
+      "files": [
+        {
+          "key": "image.0",
+          "path": "/home/nikoloz/ko-sekai/art/concepts/character-3/c-count-hairspray-v2/image_0.png",
+          "status": "written",
+          "bytes": 1288409,
+          "sha256": "9227cf017e59789c1106b62d96c2729f198c9e26382a27f5ebee9dbabe53b67f",
+          "error": null
+        }
+      ],
+      "metadata_path": "/home/nikoloz/ko-sekai/art/concepts/character-3/c-count-hairspray-v2/meta.json",
+      "material_links": null,
+      "skipped": []
+    },
+    "saved_json": null,
+    "wait": {
+      "timed_out": false,
+      "elapsed_seconds": 17.5,
+      "polls": 4
+    }
+  },
+  "error": null,
+  "warnings": []
+}

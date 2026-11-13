@@ -1,0 +1,25 @@
+{
+  "resource": "text-to-image",
+  "task": {
+    "id": "01a1d029-6a41-722f-b2a2-8c198255e720",
+    "type": "text-to-image",
+    "status": "SUCCEEDED",
+    "progress": 100,
+    "preceding_tasks": 0,
+    "created_at": 1794493738145,
+    "started_at": 1794493738159,
+    "finished_at": 1794493757244,
+    "expires_at": 1794752957244,
+    "image_urls": [
+      "https://assets.meshy.ai/10ddecf2-9b23-4b1d-a3a0-fc75caf54778/uploads/image_01a1d029-6a41-722f-b2a2-8c198255e720_0.png?Expires=1794752957&Signature=L7outa8fE87oP89BdyqU7U-FCEztC4dmect6-kw0zv8O24AMP5uPw160I-JxFs3PppUu0bl1LKZ36RUeEkSdxQSlLTgSFre0bG~w3eRVY~o9BaQ1unei~3Qu3pO3W8W2QwA4BQCUtTrQYn59R13~2gWMBRCURNS-srSN4gyNmJiimW7QQW2JwWvHSkvpIRl5fXKPdmLxezfKzPkWeVdlumyGb71cY3gNY25ZDiaze19q-U9smH4P576rzmfa2XNoxOKt0vwgT6ytStD2cNcBr9sfsY7Q60H-TV00w89OzNNiFgO2llVpwmFXE~k5lDzjRidSmF28lnrxt5q6fDfATw__&Key-Pair-Id=K1VGYTHIYLM9UM"
+    ],
+    "consumed_credits": 9,
+    "ai_model": "nano-banana-pro",
+    "prompt": "Full body, front view, strict T-pose: both arms raised to shoulder height and stretched perfectly horizontal, forming a straight line like the letter T, legs slightly apart, whole body in frame from top of head to shoes, single character centered. Plain light grey studio background, no text, no logos. Original video game fighter: a hugely muscular man wearing a full rubber unicorn head mask with crazy bulging googly eyes, big goofy teeth, a wild rainbow mane and a glowing neon pink horn; he wears a tight pastel pink and turquoise 1980s aerobics leotard over shiny tights, striped leg warmers, white high-top sneakers, sweatbands on the upper arms, and big bright blue boxing gloves. Art style: over-the-top 1980s straight-to-VHS action movie parody, photorealistic live action costume photo, saturated colours, heroic and absurdly serious, soft even lighting with no cast shadows."
+  },
+  "saved_files": [
+    "/home/nikoloz/ko-sekai/art/concepts/character-2/a-lasercorn/image_0.png"
+  ],
+  "skipped": [],
+  "downloaded_at": "2026-11-12T14:29:44.927Z"
+}

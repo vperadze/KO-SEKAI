@@ -1,0 +1,25 @@
+{
+  "resource": "text-to-image",
+  "task": {
+    "id": "01a1d029-6a54-74d3-885b-5617c94db7b5",
+    "type": "text-to-image",
+    "status": "SUCCEEDED",
+    "progress": 100,
+    "preceding_tasks": 0,
+    "created_at": 1794493739645,
+    "started_at": 1794493739656,
+    "finished_at": 1794493758797,
+    "expires_at": 1794752958797,
+    "image_urls": [
+      "https://assets.meshy.ai/10ddecf2-9b23-4b1d-a3a0-fc75caf54778/uploads/image_01a1d029-6a54-74d3-885b-5617c94db7b5_0.png?Expires=1794752958&Signature=p5ijaSKkECTqPX8~t0Gre9IwcAohMYS6UPjST7NEpyMWJOHxQkKhQhoAnW1~pUhhCIaQRuvCY87VIophPuSdIfEfy0mgfx~OYW0OBRhdQnsX8Mh9ECS7FZkymi4~qDUeL7Dz01L8V-b2AiI0rhWaOLSW0W-EfLlD0EJiwtnKNI04jZWi78cQ-tKcHrRBUNaXZcy1ieNwRSIPsjIu~RvohIjY-88~h~S7io2snZgcU~X6zWuj9zPjwgYcdOFi3HhDPOJ1IVx5cmqSei0SGHJ~8waQr7AUDMAQUwJnNOsagWPtBdREN3z0kVAFm~1HzYg~NugDPj4pV5ojrimWTcvg2w__&Key-Pair-Id=K1VGYTHIYLM9UM"
+    ],
+    "consumed_credits": 9,
+    "ai_model": "nano-banana-pro",
+    "prompt": "Full body, front view, strict T-pose: both arms raised to shoulder height and stretched perfectly horizontal, forming a straight line like the letter T, legs slightly apart, whole body in frame from top of head to shoes, single character centered. Plain light grey studio background, no text, no logos. Original video game fighter: a deeply tanned, intensely cheerful aerobics instructor woman with an enormous permed blonde hairdo, a neon headband, wild wide-open crazy eyes and a huge manic toothy grin; she wears a high-cut neon purple and orange 1980s leotard over shiny lycra tights, a wide belt, fluffy leg warmers, white aerobics trainers, and big hot pink boxing gloves. Art style: over-the-top 1980s straight-to-VHS action movie parody, photorealistic live action costume photo, saturated colours, heroic and absurdly serious, soft even lighting with no cast shadows."
+  },
+  "saved_files": [
+    "/home/nikoloz/ko-sekai/art/concepts/character-2/c-aerobics/image_0.png"
+  ],
+  "skipped": [],
+  "downloaded_at": "2026-11-12T14:29:19.797Z"
+}

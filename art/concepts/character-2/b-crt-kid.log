@@ -1,0 +1,73 @@
+text-to-image 01a1d029-6a56-70bc-86b1-32415ffd4340
+[text-to-image] IN_PROGRESS 30%
+[text-to-image] SUCCEEDED 100%
+      ok in 29s
+{
+  "schema_version": "meshy.cli/v1",
+  "command": "text-to-image.create",
+  "ok": true,
+  "result": {
+    "task": {
+      "task_id": "01a1d029-6a56-70bc-86b1-32415ffd4340",
+      "resource": "text-to-image",
+      "endpoint": "/openapi/v1/text-to-image",
+      "type": "text-to-image",
+      "name": null,
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "preceding_tasks": null,
+      "created_at": 1794493739467,
+      "started_at": 1794493739477,
+      "finished_at": 1794493760201,
+      "expires_at": 1794752960201,
+      "face_count": null,
+      "consumed_credits": 9,
+      "model_urls": {},
+      "image_urls": [
+        "https://assets.meshy.ai/10ddecf2-9b23-4b1d-a3a0-fc75caf54778/uploads/image_01a1d029-6a56-70bc-86b1-32415ffd4340_0.png?Expires=1794752960&Signature=hF4AImPZG9r2RPuyOFjlytFNvIF5cWrF4Lcjxz8N7x-u7zSyDIsDBoIz8zr3mj7uHsE~VdKO2r7se~l9Zq-b-GU7rjHsvkNBXlBl3t4BpyZwClIiwfldDF1FZ5g1RCEAW4JsBkzf436364C0TRS~aE59rZXykz1Qc2UB3fWG81b~Ak76~qFzMOP0k1fSdMQKa4~JToiKc-Y~4FKsrUTKjl32Tn9MsWZrpUpAYNAQAxNxfHFIArQfrvnENpAkIqVUJdqa7AHuPR9tFNzynuzxT4UhYMC5eX9d77EXCBwoUi0dl8UXYH0YRJdIET6qATU~q~QK9lOxMPQKYn9otYWWUg__&Key-Pair-Id=K1VGYTHIYLM9UM"
+      ],
+      "texture_urls": [],
+      "thumbnail_url": null,
+      "thumbnail_urls": null,
+      "alpha_thumbnail_url": null,
+      "result": null,
+      "printability": null,
+      "task_error": null
+    },
+    "submission": {
+      "state": "accepted",
+      "operation_id": "122446c4-7aa7-4abe-b77f-91395baf0d63",
+      "task_id": "01a1d029-6a56-70bc-86b1-32415ffd4340",
+      "request_id": null
+    },
+    "downloads": {
+      "state": "completed",
+      "files": [
+        {
+          "key": "image.0",
+          "path": "/home/nikoloz/ko-sekai/art/concepts/character-2/b-crt-kid/image_0.png",
+          "status": "written",
+          "bytes": 1706065,
+          "sha256": "a407d07c8b9c1784e70e9a793da4abacd8b8f926b5116ea7272714f702a9f6ff",
+          "error": null
+        }
+      ],
+      "metadata_path": "/home/nikoloz/ko-sekai/art/concepts/character-2/b-crt-kid/meta.json",
+      "material_links": null,
+      "skipped": []
+    },
+    "saved_json": null,
+    "wait": {
+      "timed_out": false,
+      "elapsed_seconds": 29.36,
+      "polls": 3
+    }
+  },
+  "error": null,
+  "warnings": [
+    {
+      "code": "pose_aspect_ratio",
+      "message": "nano-banana-pro renders a t-pose image at 3:4, so the image will not be 1:1; the GPT Image models keep the ratio"
+    }
+  ]
+}

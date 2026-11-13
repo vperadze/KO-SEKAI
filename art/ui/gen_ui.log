@@ -1,0 +1,32 @@
+pictures 29 quote 58
+title_bg succeeded
+logo succeeded
+hpbar succeeded
+timer succeeded
+panel succeeded
+banner succeeded
+vs succeeded
+glove succeeded
+bubble succeeded
+burst_hit succeeded
+burst_hurt succeeded
+w_counter succeeded
+w_dodge succeeded
+w_blocked succeeded
+w_fake succeeded
+w_guardbreak succeeded
+w_pow succeeded
+w_bam succeeded
+w_wham succeeded
+w_krak succeeded
+t_fight succeeded
+t_ko succeeded
+t_youwin succeeded
+t_youlose succeeded
+t_knockedout succeeded
+t_time succeeded
+t_down succeeded
+t_continue succeeded
+t_paused succeeded
+pictures 6 quote 12
+('resource', 'download', '99f0d20c-52d1-4c6a-9d6a-36a481311aec'): {'schemaVersion': '1', 'ok': False, 'error': {'code': 'cli.invalid_download_output', 'class': 'invalid_input', 'message': 'Invalid download output path. Choose a writable file or directory.', 'retryable': False, 'requiredAction': 'none', 'requestId': '2026111315165923DDA61429DB829C5599', 'traceId': '2026111315165923DDA61429DB829C5599'}}

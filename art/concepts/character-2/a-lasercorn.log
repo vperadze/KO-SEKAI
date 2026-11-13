@@ -1,0 +1,73 @@
+text-to-image 01a1d029-6a41-722f-b2a2-8c198255e720
+[text-to-image] IN_PROGRESS 30%
+[text-to-image] SUCCEEDED 100%
+      ok in 30s
+{
+  "schema_version": "meshy.cli/v1",
+  "command": "text-to-image.create",
+  "ok": true,
+  "result": {
+    "task": {
+      "task_id": "01a1d029-6a41-722f-b2a2-8c198255e720",
+      "resource": "text-to-image",
+      "endpoint": "/openapi/v1/text-to-image",
+      "type": "text-to-image",
+      "name": null,
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "preceding_tasks": null,
+      "created_at": 1794493738145,
+      "started_at": 1794493738159,
+      "finished_at": 1794493757244,
+      "expires_at": 1794752957244,
+      "face_count": null,
+      "consumed_credits": 9,
+      "model_urls": {},
+      "image_urls": [
+        "https://assets.meshy.ai/10ddecf2-9b23-4b1d-a3a0-fc75caf54778/uploads/image_01a1d029-6a41-722f-b2a2-8c198255e720_0.png?Expires=1794752957&Signature=L7outa8fE87oP89BdyqU7U-FCEztC4dmect6-kw0zv8O24AMP5uPw160I-JxFs3PppUu0bl1LKZ36RUeEkSdxQSlLTgSFre0bG~w3eRVY~o9BaQ1unei~3Qu3pO3W8W2QwA4BQCUtTrQYn59R13~2gWMBRCURNS-srSN4gyNmJiimW7QQW2JwWvHSkvpIRl5fXKPdmLxezfKzPkWeVdlumyGb71cY3gNY25ZDiaze19q-U9smH4P576rzmfa2XNoxOKt0vwgT6ytStD2cNcBr9sfsY7Q60H-TV00w89OzNNiFgO2llVpwmFXE~k5lDzjRidSmF28lnrxt5q6fDfATw__&Key-Pair-Id=K1VGYTHIYLM9UM"
+      ],
+      "texture_urls": [],
+      "thumbnail_url": null,
+      "thumbnail_urls": null,
+      "alpha_thumbnail_url": null,
+      "result": null,
+      "printability": null,
+      "task_error": null
+    },
+    "submission": {
+      "state": "accepted",
+      "operation_id": "35dde1e1-136f-44b3-96c8-3906a6ae9a8d",
+      "task_id": "01a1d029-6a41-722f-b2a2-8c198255e720",
+      "request_id": null
+    },
+    "downloads": {
+      "state": "completed",
+      "files": [
+        {
+          "key": "image.0",
+          "path": "/home/nikoloz/ko-sekai/art/concepts/character-2/a-lasercorn/image_0.png",
+          "status": "written",
+          "bytes": 1098383,
+          "sha256": "727e2599b9c16649d70ff856a74c31506d47e485eb6c3e51e44fb4c139242edf",
+          "error": null
+        }
+      ],
+      "metadata_path": "/home/nikoloz/ko-sekai/art/concepts/character-2/a-lasercorn/meta.json",
+      "material_links": null,
+      "skipped": []
+    },
+    "saved_json": null,
+    "wait": {
+      "timed_out": false,
+      "elapsed_seconds": 29.5,
+      "polls": 4
+    }
+  },
+  "error": null,
+  "warnings": [
+    {
+      "code": "pose_aspect_ratio",
+      "message": "nano-banana-pro renders a t-pose image at 3:4, so the image will not be 1:1; the GPT Image models keep the ratio"
+    }
+  ]
+}

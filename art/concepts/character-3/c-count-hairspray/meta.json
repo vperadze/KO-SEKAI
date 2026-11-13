@@ -1,0 +1,25 @@
+{
+  "resource": "text-to-image",
+  "task": {
+    "id": "01a1d04c-b1ff-733a-a237-c5ad33face3c",
+    "type": "text-to-image",
+    "status": "SUCCEEDED",
+    "progress": 100,
+    "preceding_tasks": 0,
+    "created_at": 1794496050172,
+    "started_at": 1794496050188,
+    "finished_at": 1794496070772,
+    "expires_at": 1794755270772,
+    "image_urls": [
+      "https://assets.meshy.ai/10ddecf2-9b23-4b1d-a3a0-fc75caf54778/uploads/image_01a1d04c-b1ff-733a-a237-c5ad33face3c_0.png?Expires=1794755270&Signature=qjFREkbkZbEK4uKIinJC2hVCYnl1CR2-j1j~1pxsLtyEuTe9rYhzOraqbVBL6Qn43P9lkMPveQTFHPzM7cuQYEiXva~LPH1s9XLcrQDlUw9aParCtnD0PZK65x6cqB4GcIFs5Djrlat4Cw9TtX2EcYsHJ9GvbBkB-cznEbJSOkBzTbQ82ib1axgonrrQDUbTQ8cvuE4qhVoXFBmf5EhDB6nvo4wF5~jmPuklBhJRJk-pZUsDYdgxL55tz8wdTLXqO0~lNAb6aZFBSvV10KHyt-z4ls3UdQpCiVcH0bfXq0ODPOyBz~lwOmgxLsSQmY1-R-IzkiMOAsNFteTsDJH9bQ__&Key-Pair-Id=K1VGYTHIYLM9UM"
+    ],
+    "consumed_credits": 9,
+    "ai_model": "nano-banana-pro",
+    "prompt": "Full body, front view, strict T-pose: both arms raised to shoulder height and stretched perfectly horizontal, forming a straight line like the letter T, legs slightly apart with a clear gap between them, whole body in frame from top of head to shoes, single character centered. Plain light grey studio background, no text, no logos. Original video game fighter: a very tall, skinny glam rock vampire with a gigantic teased jet-black hairsprayed hairdo, chalk-white face with a glittery silver star painted over one eye, heavy eyeliner, a huge manic grin showing long fangs and wild staring eyes; he wears a studded black leather biker jacket with long sleeves and spiked shoulder pads over a bare chest, skin-tight leopard print spandex trousers, towering silver platform boots, and oversized purple boxing gloves. Art style: over-the-top 1980s straight-to-VHS action movie parody, photorealistic live action costume photo, saturated colours, heroic and absurdly serious, soft even lighting with no cast shadows."
+  },
+  "saved_files": [
+    "/home/nikoloz/ko-sekai/art/concepts/character-3/c-count-hairspray/image_0.png"
+  ],
+  "skipped": [],
+  "downloaded_at": "2026-11-12T15:07:55.775Z"
+}

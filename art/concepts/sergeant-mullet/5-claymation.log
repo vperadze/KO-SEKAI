@@ -1,0 +1,73 @@
+text-to-image 01a1cfd6-ce19-732f-869f-8e59dbd6bedf
+[text-to-image] IN_PROGRESS 30%
+[text-to-image] SUCCEEDED 100%
+      ok in 12s
+{
+  "schema_version": "meshy.cli/v1",
+  "command": "text-to-image.create",
+  "ok": true,
+  "result": {
+    "task": {
+      "task_id": "01a1cfd6-ce19-732f-869f-8e59dbd6bedf",
+      "resource": "text-to-image",
+      "endpoint": "/openapi/v1/text-to-image",
+      "type": "text-to-image",
+      "name": null,
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "preceding_tasks": null,
+      "created_at": 1794488324245,
+      "started_at": 1794488324270,
+      "finished_at": 1794488335527,
+      "expires_at": 1794747535527,
+      "face_count": null,
+      "consumed_credits": 9,
+      "model_urls": {},
+      "image_urls": [
+        "https://assets.meshy.ai/10ddecf2-9b23-4b1d-a3a0-fc75caf54778/uploads/image_01a1cfd6-ce19-732f-869f-8e59dbd6bedf_0.png?Expires=1794747535&Signature=TENFP4Ntr5Hd2rbzm4IeNyH6k5y7FEdVoznRHjCVcwIQdxYtqJLOv9its9cYY3PgO6P6hXtFlTlvaOVnzULQCBhY0vfKH5AIdA6Jk~hg-GegQ5CD9kPJxCP1CKgNg5A~tpBI1cphBsHFT8yn5uO8U8bhTMdEEPzekInqGoZiUbEPaivrNvO2Ils4cU2rQ-duu1RC0JhES6w4kgqzpbUoLrSdXGc1MzLY6~P6OgH67wt7DQCtTpr~u7UrvqvHlSdBXmCkF8RwpN~JpBFIGvs7S~BBlHyYWQFT09KdaJqX2T5~E-hvBMP1CYHoNPG6LmVDv3mJmkzeyU38DVDyUyyC2g__&Key-Pair-Id=K1VGYTHIYLM9UM"
+      ],
+      "texture_urls": [],
+      "thumbnail_url": null,
+      "thumbnail_urls": null,
+      "alpha_thumbnail_url": null,
+      "result": null,
+      "printability": null,
+      "task_error": null
+    },
+    "submission": {
+      "state": "accepted",
+      "operation_id": "cd625a79-cbbe-40a1-9503-15f0fe660fac",
+      "task_id": "01a1cfd6-ce19-732f-869f-8e59dbd6bedf",
+      "request_id": null
+    },
+    "downloads": {
+      "state": "completed",
+      "files": [
+        {
+          "key": "image.0",
+          "path": "/home/nikoloz/ko-sekai/art/concepts/sergeant-mullet/5-claymation/image_0.png",
+          "status": "written",
+          "bytes": 1019624,
+          "sha256": "39e827f9ea0537a7a255a5515f7b2e9a5742f42cbcd33a7ed983152ed8bffb9a",
+          "error": null
+        }
+      ],
+      "metadata_path": "/home/nikoloz/ko-sekai/art/concepts/sergeant-mullet/5-claymation/meta.json",
+      "material_links": null,
+      "skipped": []
+    },
+    "saved_json": null,
+    "wait": {
+      "timed_out": false,
+      "elapsed_seconds": 11.92,
+      "polls": 3
+    }
+  },
+  "error": null,
+  "warnings": [
+    {
+      "code": "pose_aspect_ratio",
+      "message": "nano-banana-pro renders a t-pose image at 3:4, so the image will not be 1:1; the GPT Image models keep the ratio"
+    }
+  ]
+}

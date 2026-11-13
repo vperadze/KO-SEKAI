@@ -1,0 +1,73 @@
+text-to-image 01a1cfdb-cb99-76bd-b8f5-8b8686fe21c3
+[text-to-image] IN_PROGRESS 30%
+[text-to-image] SUCCEEDED 100%
+      ok in 12s
+{
+  "schema_version": "meshy.cli/v1",
+  "command": "text-to-image.create",
+  "ok": true,
+  "result": {
+    "task": {
+      "task_id": "01a1cfdb-cb99-76bd-b8f5-8b8686fe21c3",
+      "resource": "text-to-image",
+      "endpoint": "/openapi/v1/text-to-image",
+      "type": "text-to-image",
+      "name": null,
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "preceding_tasks": null,
+      "created_at": 1794488651602,
+      "started_at": 1794488651613,
+      "finished_at": 1794488662215,
+      "expires_at": 1794747862215,
+      "face_count": null,
+      "consumed_credits": 9,
+      "model_urls": {},
+      "image_urls": [
+        "https://assets.meshy.ai/10ddecf2-9b23-4b1d-a3a0-fc75caf54778/uploads/image_01a1cfdb-cb99-76bd-b8f5-8b8686fe21c3_0.png?Expires=1794747862&Signature=ZgBVCUDRUohAA4Ybw7QwFMdawh1SOhF24KzPL4kAk95-exYsPsGkGbAph-aIYyHdoeUTy-P2rA6Gt-IaP8F9y9OCTP4xtzZ~2jwmHIfpjyBdcw62nXtQSJ88j04I4t3Byg71uPXFglBNrQSWiLCOdiMTyHPVPL4s~CTHhbtahpMzAAZwtHC7XR2~1i4gf-OaAY~cuZ73BYKvAd0tXVSxtI9~YESaoJnI43OyW~SJub3j4ZEpyoAcUecRYgGY-wKES0Hteg3M-HmyIejf-Jkffrg5TqK8MJhvCaucNjgmKIMqRdpHKK3DXdt5Ko2k7r78Rf9q-R5L1VQb2ONH37leCA__&Key-Pair-Id=K1VGYTHIYLM9UM"
+      ],
+      "texture_urls": [],
+      "thumbnail_url": null,
+      "thumbnail_urls": null,
+      "alpha_thumbnail_url": null,
+      "result": null,
+      "printability": null,
+      "task_error": null
+    },
+    "submission": {
+      "state": "accepted",
+      "operation_id": "7f923299-c434-46df-b2c5-61ba10050017",
+      "task_id": "01a1cfdb-cb99-76bd-b8f5-8b8686fe21c3",
+      "request_id": null
+    },
+    "downloads": {
+      "state": "completed",
+      "files": [
+        {
+          "key": "image.0",
+          "path": "/home/nikoloz/ko-sekai/art/concepts/sergeant-mullet/6-vhs-action-clean/image_0.png",
+          "status": "written",
+          "bytes": 1217768,
+          "sha256": "61e7e7e0bf69913c264846236f0d30075c5ae42ef9707ab58b55b692f8a902f5",
+          "error": null
+        }
+      ],
+      "metadata_path": "/home/nikoloz/ko-sekai/art/concepts/sergeant-mullet/6-vhs-action-clean/meta.json",
+      "material_links": null,
+      "skipped": []
+    },
+    "saved_json": null,
+    "wait": {
+      "timed_out": false,
+      "elapsed_seconds": 11.82,
+      "polls": 3
+    }
+  },
+  "error": null,
+  "warnings": [
+    {
+      "code": "pose_aspect_ratio",
+      "message": "nano-banana-pro renders a t-pose image at 3:4, so the image will not be 1:1; the GPT Image models keep the ratio"
+    }
+  ]
+}

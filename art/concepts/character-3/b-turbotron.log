@@ -1,0 +1,73 @@
+text-to-image 01a1d04c-b20f-7651-b96f-1814bd8d497f
+[text-to-image] IN_PROGRESS 30%
+[text-to-image] SUCCEEDED 100%
+      ok in 23s
+{
+  "schema_version": "meshy.cli/v1",
+  "command": "text-to-image.create",
+  "ok": true,
+  "result": {
+    "task": {
+      "task_id": "01a1d04c-b20f-7651-b96f-1814bd8d497f",
+      "resource": "text-to-image",
+      "endpoint": "/openapi/v1/text-to-image",
+      "type": "text-to-image",
+      "name": null,
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "preceding_tasks": null,
+      "created_at": 1794496051783,
+      "started_at": 1794496051793,
+      "finished_at": 1794496074259,
+      "expires_at": 1794755274259,
+      "face_count": null,
+      "consumed_credits": 9,
+      "model_urls": {},
+      "image_urls": [
+        "https://assets.meshy.ai/10ddecf2-9b23-4b1d-a3a0-fc75caf54778/uploads/image_01a1d04c-b20f-7651-b96f-1814bd8d497f_0.png?Expires=1794755274&Signature=JdDI974byGxzWqqQPbMIpKrnsHyniSDv1b4k5NLfGBKdKYPydzHBC0ZAfDdo0s6CHgG~6gUONcI-phkYh3-MXddM8TCOieHIvSc7AFRy-epEH3c5mxKlxq-LmOSrzro3yQHeAdaDZlzMHcKwuTERqnaV5QyByzMq8VDnhqI7carzybnq~FpcGz6Nsj5IHbZm6XmEOXA4Y6wuWNKJFEth3n1jIfdOg5d8HDpALkDnvVmXwlCt~Uea1pSjg2Hlxd7QdN9sQrboq0rU~TLlL57Lk5XKoApUKc9qnonbLDumWXJ1r586q7tw1FLUsBTMtCGDCrD3hDfr3T6mD-0WdJ3ITw__&Key-Pair-Id=K1VGYTHIYLM9UM"
+      ],
+      "texture_urls": [],
+      "thumbnail_url": null,
+      "thumbnail_urls": null,
+      "alpha_thumbnail_url": null,
+      "result": null,
+      "printability": null,
+      "task_error": null
+    },
+    "submission": {
+      "state": "accepted",
+      "operation_id": "23bd382e-ed92-45c5-a4b3-09d0953f6974",
+      "task_id": "01a1d04c-b20f-7651-b96f-1814bd8d497f",
+      "request_id": null
+    },
+    "downloads": {
+      "state": "completed",
+      "files": [
+        {
+          "key": "image.0",
+          "path": "/home/nikoloz/ko-sekai/art/concepts/character-3/b-turbotron/image_0.png",
+          "status": "written",
+          "bytes": 1382800,
+          "sha256": "04485dfe4c05403ba3bf9fb74c70cf3ef1f304f7ddf09ee1af011b76adc67b26",
+          "error": null
+        }
+      ],
+      "metadata_path": "/home/nikoloz/ko-sekai/art/concepts/character-3/b-turbotron/meta.json",
+      "material_links": null,
+      "skipped": []
+    },
+    "saved_json": null,
+    "wait": {
+      "timed_out": false,
+      "elapsed_seconds": 23.38,
+      "polls": 5
+    }
+  },
+  "error": null,
+  "warnings": [
+    {
+      "code": "pose_aspect_ratio",
+      "message": "nano-banana-pro renders a t-pose image at 3:4, so the image will not be 1:1; the GPT Image models keep the ratio"
+    }
+  ]
+}

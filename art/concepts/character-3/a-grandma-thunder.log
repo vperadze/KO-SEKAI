@@ -1,0 +1,73 @@
+text-to-image 01a1d04c-b210-72f3-b40c-c3ef7b1c15a7
+[text-to-image] IN_PROGRESS 30%
+[text-to-image] SUCCEEDED 100%
+      ok in 23s
+{
+  "schema_version": "meshy.cli/v1",
+  "command": "text-to-image.create",
+  "ok": true,
+  "result": {
+    "task": {
+      "task_id": "01a1d04c-b210-72f3-b40c-c3ef7b1c15a7",
+      "resource": "text-to-image",
+      "endpoint": "/openapi/v1/text-to-image",
+      "type": "text-to-image",
+      "name": null,
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "preceding_tasks": null,
+      "created_at": 1794496050268,
+      "started_at": 1794496050278,
+      "finished_at": 1794496073010,
+      "expires_at": 1794755273010,
+      "face_count": null,
+      "consumed_credits": 9,
+      "model_urls": {},
+      "image_urls": [
+        "https://assets.meshy.ai/10ddecf2-9b23-4b1d-a3a0-fc75caf54778/uploads/image_01a1d04c-b210-72f3-b40c-c3ef7b1c15a7_0.png?Expires=1794755273&Signature=THSt0sA58HF~7v8DnpeIHRVo4SmyksOD7p4OpHyLnQFlx99d3IDY~HgsxLPSfdVo~gx5xg-dEoAZI3x1~SP5VU8bo2ML3D7xKC1rmca7l23rWjjpYYEa7lsXCjf5cR8IrB7bAejKt3zT5Czb17CxDCR0RLLPVl-i36M27MV1u3zyPQvDrxy043ZrYz2Md~bvXwDH7y~GN08Tzzalhl8eFAxcos3jZJzmrjs43l6~k2Wh1cPh7M9MpO-6lAveBPPLng36NRtYyHFQolbWmdLOhSwt9ZnlL3aKmYxsVfuU9-0G~qfyvCQQyokTeTntsqhIZST04~6uWtEodSpKhY4L8g__&Key-Pair-Id=K1VGYTHIYLM9UM"
+      ],
+      "texture_urls": [],
+      "thumbnail_url": null,
+      "thumbnail_urls": null,
+      "alpha_thumbnail_url": null,
+      "result": null,
+      "printability": null,
+      "task_error": null
+    },
+    "submission": {
+      "state": "accepted",
+      "operation_id": "8ff599ab-09ac-48fc-ae82-998818e26951",
+      "task_id": "01a1d04c-b210-72f3-b40c-c3ef7b1c15a7",
+      "request_id": null
+    },
+    "downloads": {
+      "state": "completed",
+      "files": [
+        {
+          "key": "image.0",
+          "path": "/home/nikoloz/ko-sekai/art/concepts/character-3/a-grandma-thunder/image_0.png",
+          "status": "written",
+          "bytes": 1586046,
+          "sha256": "2fc59a928ccb829f85f6865cbea92b027aa20dba21c5397bf2f2c0e196ebd961",
+          "error": null
+        }
+      ],
+      "metadata_path": "/home/nikoloz/ko-sekai/art/concepts/character-3/a-grandma-thunder/meta.json",
+      "material_links": null,
+      "skipped": []
+    },
+    "saved_json": null,
+    "wait": {
+      "timed_out": false,
+      "elapsed_seconds": 23.34,
+      "polls": 5
+    }
+  },
+  "error": null,
+  "warnings": [
+    {
+      "code": "pose_aspect_ratio",
+      "message": "nano-banana-pro renders a t-pose image at 3:4, so the image will not be 1:1; the GPT Image models keep the ratio"
+    }
+  ]
+}

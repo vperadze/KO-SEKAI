@@ -1,0 +1,9 @@
+quote 175 ceiling 175
+gasps succeeded [{"resourceId": "34619e88-149a-4327-b185-3f77afb8af6f"}]
+{"schemaVersion":"1","ok":true,"data":{"resourceId":"34619e88-149a-4327-b185-3f77afb8af6f","path":"/home/nikoloz/ko-sekai/art/arena/sound/gasps.mp4","size":16432290,"sha256":"64b38839f1167bb3e6600b5404a92f3ff4b5dc73f0b518c69436372c3214b114"},"meta":{"requestId":"202611131512031A439078539B92DBF327"}}
+shouts succeeded [{"resourceId": "428f7543-da4b-4070-ac92-3ecabe335c68"}]
+{"schemaVersion":"1","ok":true,"data":{"resourceId":"428f7543-da4b-4070-ac92-3ecabe335c68","path":"/home/nikoloz/ko-sekai/art/arena/sound/shouts.mp4","size":15153341,"sha256":"a2e5bf9bd62be3bfcd8e94eb63816f71401d2e1dac5f4eb7e61f4dfcc25ded10"},"meta":{"requestId":"20261113151209C4BCCD844E6F30DCE563"}
+murmur succeeded [{"resourceId": "be5f039c-fc18-4abd-b3b7-1dbd7deef026"}]
+{"schemaVersion":"1","ok":true,"data":{"resourceId":"be5f039c-fc18-4abd-b3b7-1dbd7deef026","path":"/home/nikoloz/ko-sekai/art/arena/sound/murmur.mp4","size":13754642,"sha256":"0fbb93f4b21707dd68c65d9ecf76aa715a22d4a7373ee3858c76c9227cf3c0e9"},"meta":{"requestId":"20261113151214B0E7402567505D002775"}
+beasts succeeded [{"resourceId": "f880948a-30b8-4310-886b-fbafe6aa94f1"}]
+{"schemaVersion":"1","ok":true,"data":{"resourceId":"f880948a-30b8-4310-886b-fbafe6aa94f1","path":"/home/nikoloz/ko-sekai/art/arena/sound/beasts.mp4","size":8656838,"sha256":"1d30fee2247e93645b1a911b55d38d90654d55eb563f72966118ef5dfb593028"},"meta":{"requestId":"20261113151218A741EE071137D59B1ED1"}}

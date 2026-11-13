@@ -1,0 +1,25 @@
+{
+  "resource": "image-to-image",
+  "task": {
+    "id": "01a1d02c-89ed-7451-91db-e99f78797804",
+    "type": "image-to-image",
+    "status": "SUCCEEDED",
+    "progress": 100,
+    "preceding_tasks": 0,
+    "created_at": 1794493947499,
+    "started_at": 1794493947595,
+    "finished_at": 1794493991479,
+    "expires_at": 1794753191479,
+    "image_urls": [
+      "https://assets.meshy.ai/10ddecf2-9b23-4b1d-a3a0-fc75caf54778/uploads/image_01a1d02c-89ed-7451-91db-e99f78797804_0.png?Expires=1794753191&Signature=nlynHRQVXCKBLcey2lL0b1XUwtbzTbNX6uJtDY~KufmRJod8A1dBNRnABV3LsqFagT3rpChvROk9a3y3StGGHNao6rC1QSGlkY7LwGMigQx6Viq2GFPvEYV8uWmtNBABBuMvKoR2bwrrp6mPFw0ebbszcGVq2AbR1rkbS9DMxLTUXcpAlGpvjvUeZ2IC0HvR9atu1JKPKYkkZWg6lQT0Sk2ub-G6~gIjRY62q~WwHzku6lL5SJ1VHltF066esksu8aetpedyiBN9Nf5puxo~4NlKtQ3oOfDf3pXegYFK1umk6GLsbURL~1RC7Q2csS53UoVESOk7HqE4D9W7nAp5Kg__&Key-Pair-Id=K1VGYTHIYLM9UM"
+    ],
+    "consumed_credits": 9,
+    "ai_model": "nano-banana-pro",
+    "prompt": "Keep everything exactly the same: same person, same T-pose, same clothes, same green boxing gloves, same beige CRT television head, same plain grey background. Change only the picture on the television screen: replace the photographic face with a chunky low-resolution 8-bit pixel art face, furious and screaming, with huge square eyes and a wide open square mouth, bright arcade colours on a dark blue screen with visible scanlines."
+  },
+  "saved_files": [
+    "/home/nikoloz/ko-sekai/art/concepts/character-2/b-crt-kid-pixel/image_0.png"
+  ],
+  "skipped": [],
+  "downloaded_at": "2026-11-12T14:33:17.495Z"
+}

@@ -1,0 +1,25 @@
+{
+  "resource": "text-to-image",
+  "task": {
+    "id": "01a1d029-6a56-70bc-86b1-32415ffd4340",
+    "type": "text-to-image",
+    "status": "SUCCEEDED",
+    "progress": 100,
+    "preceding_tasks": 0,
+    "created_at": 1794493739467,
+    "started_at": 1794493739477,
+    "finished_at": 1794493760201,
+    "expires_at": 1794752960201,
+    "image_urls": [
+      "https://assets.meshy.ai/10ddecf2-9b23-4b1d-a3a0-fc75caf54778/uploads/image_01a1d029-6a56-70bc-86b1-32415ffd4340_0.png?Expires=1794752960&Signature=hF4AImPZG9r2RPuyOFjlytFNvIF5cWrF4Lcjxz8N7x-u7zSyDIsDBoIz8zr3mj7uHsE~VdKO2r7se~l9Zq-b-GU7rjHsvkNBXlBl3t4BpyZwClIiwfldDF1FZ5g1RCEAW4JsBkzf436364C0TRS~aE59rZXykz1Qc2UB3fWG81b~Ak76~qFzMOP0k1fSdMQKa4~JToiKc-Y~4FKsrUTKjl32Tn9MsWZrpUpAYNAQAxNxfHFIArQfrvnENpAkIqVUJdqa7AHuPR9tFNzynuzxT4UhYMC5eX9d77EXCBwoUi0dl8UXYH0YRJdIET6qATU~q~QK9lOxMPQKYn9otYWWUg__&Key-Pair-Id=K1VGYTHIYLM9UM"
+    ],
+    "consumed_credits": 9,
+    "ai_model": "nano-banana-pro",
+    "prompt": "Full body, front view, strict T-pose: both arms raised to shoulder height and stretched perfectly horizontal, forming a straight line like the letter T, legs slightly apart, whole body in frame from top of head to shoes, single character centered. Plain light grey studio background, no text, no logos. Original video game fighter: a skinny teenager whose head is a chunky beige 1980s CRT television set with a rabbit-ear antenna, the screen showing a furious screaming pixel art face with huge eyes; he wears a sleeveless stonewashed denim vest covered in pin badges over a neon yellow t-shirt, acid wash jeans, a coin belt full of arcade tokens, bright red high-top sneakers, and big neon green boxing gloves. Art style: over-the-top 1980s straight-to-VHS action movie parody, photorealistic live action costume photo, saturated colours, heroic and absurdly serious, soft even lighting with no cast shadows."
+  },
+  "saved_files": [
+    "/home/nikoloz/ko-sekai/art/concepts/character-2/b-crt-kid/image_0.png"
+  ],
+  "skipped": [],
+  "downloaded_at": "2026-11-12T14:30:02.774Z"
+}

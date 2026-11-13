@@ -1,0 +1,73 @@
+text-to-image 01a1cfd6-ce13-76cb-b585-0619d12e2709
+[text-to-image] IN_PROGRESS 30%
+[text-to-image] SUCCEEDED 100%
+      ok in 23s
+{
+  "schema_version": "meshy.cli/v1",
+  "command": "text-to-image.create",
+  "ok": true,
+  "result": {
+    "task": {
+      "task_id": "01a1cfd6-ce13-76cb-b585-0619d12e2709",
+      "resource": "text-to-image",
+      "endpoint": "/openapi/v1/text-to-image",
+      "type": "text-to-image",
+      "name": null,
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "preceding_tasks": null,
+      "created_at": 1794488324081,
+      "started_at": 1794488324093,
+      "finished_at": 1794488342583,
+      "expires_at": 1794747542583,
+      "face_count": null,
+      "consumed_credits": 9,
+      "model_urls": {},
+      "image_urls": [
+        "https://assets.meshy.ai/10ddecf2-9b23-4b1d-a3a0-fc75caf54778/uploads/image_01a1cfd6-ce13-76cb-b585-0619d12e2709_0.png?Expires=1794747542&Signature=QqcHZK4-R6ny-4Pp0HuMCE-HYvWIScGgW~580dnypGicynuQN3NUM4bm8dxT3i2PPvfR-ywArCnzN5jOB7MHfchtEPw~eHAJk6UgNxRH4CnCvZroZ4fKYagC8g~gHTuULcy6Fwj-4q4mBTCP~Cstw4MqWAoa97QsJvcvbrABWaDH3c5c-zge8FpUmWprYmEsaBxy2c3xP5oydsDRKWEqukPo5kER89wXx4y57muPNjxLOjzKrCHwCQEGTnGFeb5RUZw6woBxikxYZl9BNxsAVgbyPgc~5DOM-IGbNDcO11lAM75PL4QUTgBWT76mCMkbnmXpz2ygTRlZ8mAbBkZuNQ__&Key-Pair-Id=K1VGYTHIYLM9UM"
+      ],
+      "texture_urls": [],
+      "thumbnail_url": null,
+      "thumbnail_urls": null,
+      "alpha_thumbnail_url": null,
+      "result": null,
+      "printability": null,
+      "task_error": null
+    },
+    "submission": {
+      "state": "accepted",
+      "operation_id": "49da2be1-a01b-401e-bc2e-fe7884fd0e74",
+      "task_id": "01a1cfd6-ce13-76cb-b585-0619d12e2709",
+      "request_id": null
+    },
+    "downloads": {
+      "state": "completed",
+      "files": [
+        {
+          "key": "image.0",
+          "path": "/home/nikoloz/ko-sekai/art/concepts/sergeant-mullet/4-action-figure/image_0.png",
+          "status": "written",
+          "bytes": 930641,
+          "sha256": "b85e661d73cb739a021b86239b74734ac751a3b99c1773a43acd69d34bd5fd26",
+          "error": null
+        }
+      ],
+      "metadata_path": "/home/nikoloz/ko-sekai/art/concepts/sergeant-mullet/4-action-figure/meta.json",
+      "material_links": null,
+      "skipped": []
+    },
+    "saved_json": null,
+    "wait": {
+      "timed_out": false,
+      "elapsed_seconds": 23.5,
+      "polls": 5
+    }
+  },
+  "error": null,
+  "warnings": [
+    {
+      "code": "pose_aspect_ratio",
+      "message": "nano-banana-pro renders a t-pose image at 3:4, so the image will not be 1:1; the GPT Image models keep the ratio"
+    }
+  ]
+}

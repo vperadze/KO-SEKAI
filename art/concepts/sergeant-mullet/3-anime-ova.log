@@ -1,0 +1,73 @@
+text-to-image 01a1cfd6-ce0e-702d-8758-f793b6011195
+[text-to-image] IN_PROGRESS 30%
+[text-to-image] SUCCEEDED 100%
+      ok in 24s
+{
+  "schema_version": "meshy.cli/v1",
+  "command": "text-to-image.create",
+  "ok": true,
+  "result": {
+    "task": {
+      "task_id": "01a1cfd6-ce0e-702d-8758-f793b6011195",
+      "resource": "text-to-image",
+      "endpoint": "/openapi/v1/text-to-image",
+      "type": "text-to-image",
+      "name": null,
+      "status": "SUCCEEDED",
+      "progress": 100,
+      "preceding_tasks": null,
+      "created_at": 1794488324066,
+      "started_at": 1794488324080,
+      "finished_at": 1794488346875,
+      "expires_at": 1794747546875,
+      "face_count": null,
+      "consumed_credits": 9,
+      "model_urls": {},
+      "image_urls": [
+        "https://assets.meshy.ai/10ddecf2-9b23-4b1d-a3a0-fc75caf54778/uploads/image_01a1cfd6-ce0e-702d-8758-f793b6011195_0.png?Expires=1794747546&Signature=jDDCLko85BETtFgHf~9mA5yjLp75bRF43FqbQj2tIQ3ahG-PC~oSJEy-3CUFeVzOxC4djW13azOfnFys~KiOtpXqkYGYadnhSjo6JPL0dNUZ0ivpLGlXcGJeDeqZYT~NRJYujLbnT0AdZgEm8PZ0L9Y8AEgsVC7hjroSSxBUd405ibRG~KH6xS5rSS40hh2mIUbR1A~YE~EXJj-axxzzizDpdF7hf1fLhySmIpf5Nk6mffNlYu25FWSd3EvX7MQXWQ8C9OtyNVhzN3sHHtiKX~WgKO-Hv6sfzYOl53Sdr4iEaOdRPpfH~fKTX1zTzdxHIK4NhFP5Q0IN2kodmLoQ4A__&Key-Pair-Id=K1VGYTHIYLM9UM"
+      ],
+      "texture_urls": [],
+      "thumbnail_url": null,
+      "thumbnail_urls": null,
+      "alpha_thumbnail_url": null,
+      "result": null,
+      "printability": null,
+      "task_error": null
+    },
+    "submission": {
+      "state": "accepted",
+      "operation_id": "a9d7aab1-e8f6-43c1-b628-2a4d9d6c820e",
+      "task_id": "01a1cfd6-ce0e-702d-8758-f793b6011195",
+      "request_id": null
+    },
+    "downloads": {
+      "state": "completed",
+      "files": [
+        {
+          "key": "image.0",
+          "path": "/home/nikoloz/ko-sekai/art/concepts/sergeant-mullet/3-anime-ova/image_0.png",
+          "status": "written",
+          "bytes": 1230390,
+          "sha256": "3fafd17ee6f77edf6c4c326d7a5419d01edcbc14ac20de3c744ad2cc2df3fe58",
+          "error": null
+        }
+      ],
+      "metadata_path": "/home/nikoloz/ko-sekai/art/concepts/sergeant-mullet/3-anime-ova/meta.json",
+      "material_links": null,
+      "skipped": []
+    },
+    "saved_json": null,
+    "wait": {
+      "timed_out": false,
+      "elapsed_seconds": 23.86,
+      "polls": 5
+    }
+  },
+  "error": null,
+  "warnings": [
+    {
+      "code": "pose_aspect_ratio",
+      "message": "nano-banana-pro renders a t-pose image at 3:4, so the image will not be 1:1; the GPT Image models keep the ratio"
+    }
+  ]
+}

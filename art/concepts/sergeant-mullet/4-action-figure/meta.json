@@ -1,0 +1,25 @@
+{
+  "resource": "text-to-image",
+  "task": {
+    "id": "01a1cfd6-ce13-76cb-b585-0619d12e2709",
+    "type": "text-to-image",
+    "status": "SUCCEEDED",
+    "progress": 100,
+    "preceding_tasks": 0,
+    "created_at": 1794488324081,
+    "started_at": 1794488324093,
+    "finished_at": 1794488342583,
+    "expires_at": 1794747542583,
+    "image_urls": [
+      "https://assets.meshy.ai/10ddecf2-9b23-4b1d-a3a0-fc75caf54778/uploads/image_01a1cfd6-ce13-76cb-b585-0619d12e2709_0.png?Expires=1794747542&Signature=QqcHZK4-R6ny-4Pp0HuMCE-HYvWIScGgW~580dnypGicynuQN3NUM4bm8dxT3i2PPvfR-ywArCnzN5jOB7MHfchtEPw~eHAJk6UgNxRH4CnCvZroZ4fKYagC8g~gHTuULcy6Fwj-4q4mBTCP~Cstw4MqWAoa97QsJvcvbrABWaDH3c5c-zge8FpUmWprYmEsaBxy2c3xP5oydsDRKWEqukPo5kER89wXx4y57muPNjxLOjzKrCHwCQEGTnGFeb5RUZw6woBxikxYZl9BNxsAVgbyPgc~5DOM-IGbNDcO11lAM75PL4QUTgBWT76mCMkbnmXpz2ygTRlZ8mAbBkZuNQ__&Key-Pair-Id=K1VGYTHIYLM9UM"
+    ],
+    "consumed_credits": 9,
+    "ai_model": "nano-banana-pro",
+    "prompt": "Original video game character concept, full body, front view, strict T-pose with both arms stretched straight out horizontally and legs slightly apart, whole body in frame from head to boots. Sergeant Mullet: a cocky comedic 1980s action-hero boxer in his thirties, enormous voluminous blond mullet haircut, thick moustache, red headband, smug grin, olive green tank top, dog tags, camouflage cargo trousers, black combat boots, big red boxing gloves, a plastic comb tucked in his belt. Plain light grey studio background, even flat lighting, no cast shadows, no text, no logos, single character centered. Art style: 1980s plastic action figure toy, glossy moulded plastic, visible articulation joints at shoulders elbows and knees, chunky heroic proportions."
+  },
+  "saved_files": [
+    "/home/nikoloz/ko-sekai/art/concepts/sergeant-mullet/4-action-figure/image_0.png"
+  ],
+  "skipped": [],
+  "downloaded_at": "2026-11-12T12:59:09.576Z"
+}

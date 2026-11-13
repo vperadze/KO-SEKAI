@@ -1,0 +1,25 @@
+{
+  "resource": "image-to-image",
+  "task": {
+    "id": "01a1d04d-671c-7261-a67c-79c44c38a1af",
+    "type": "image-to-image",
+    "status": "SUCCEEDED",
+    "progress": 100,
+    "preceding_tasks": 0,
+    "created_at": 1794496098228,
+    "started_at": 1794496098240,
+    "finished_at": 1794496115556,
+    "expires_at": 1794755315556,
+    "image_urls": [
+      "https://assets.meshy.ai/10ddecf2-9b23-4b1d-a3a0-fc75caf54778/uploads/image_01a1d04d-671c-7261-a67c-79c44c38a1af_0.png?Expires=1794755315&Signature=d1XtXNJo04DbXL2B2ACFI97~HKkFYLsyKQr~AzN1qigQXnh2ZVM2ppfT-DvBvpNKsOZCxtqpzUYp6r6A1fJVFVNMb24gujj7Ib8RBZiKgYNgeIqaHUklaxnakjN-iqGoQXkeeZSaypI2vhYMSGJxZt6Ph634QplXMLKKGOUzbm54iqCob8wViPsNO5ddqDa4Zh0OeKyQeEZQyHv~yDhpI3NiDLdK7OJXmRo86NkYedHGzJIysu49wQVD3eQWR0k6Dk2YIRKyTxunAOZDhQTPdiCDpvLi4bu7opZHcbMS2bAP8ugxhv9~jr5d-XyIBvo0aGrx123xOyuI1IP4AJTDGg__&Key-Pair-Id=K1VGYTHIYLM9UM"
+    ],
+    "consumed_credits": 9,
+    "ai_model": "nano-banana-pro",
+    "prompt": "Keep everything exactly the same: same person, same T-pose, same giant black hair, same studded leather jacket, leopard print trousers, silver platform boots, purple boxing gloves and plain grey background. Change only the face makeup: remove the black star shape around the eye completely. Give him pale lilac-grey vampire skin, bright glittery green eyeshadow on both eyelids, dark purple lips, and keep the huge manic grin with long fangs and wild staring eyes."
+  },
+  "saved_files": [
+    "/home/nikoloz/ko-sekai/art/concepts/character-3/c-count-hairspray-v2/image_0.png"
+  ],
+  "skipped": [],
+  "downloaded_at": "2026-11-12T15:08:37.567Z"
+}
