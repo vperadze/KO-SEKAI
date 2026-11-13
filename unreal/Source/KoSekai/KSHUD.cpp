@@ -640,9 +640,8 @@ void AKSHUD::SpeechCaption(const AKSGameMode& G)
 
 /* ================= the screens ================= */
 
-void AKSHUD::DrawMenu(const AKSGameMode& G)
+void AKSHUD::Backdrop()
 {
-	const float T = G.PhaseTime;
 	// The background painting, cropped to cover the screen whatever its shape.
 	if (UTexture2D* Bg = Tex(TEXT("title_bg")))
 	{
@@ -654,6 +653,12 @@ void AKSHUD::DrawMenu(const AKSGameMode& G)
 	}
 	else Fill(0.f, 0.f, 1.f, 1.f, FLinearColor(0.04f, 0.f, 0.10f, 1.f));
 	Fill(0.f, 0.f, 1.f, 1.f, FLinearColor(0.03f, 0.f, 0.08f, 0.28f));
+}
+
+void AKSHUD::DrawMenu(const AKSGameMode& G)
+{
+	const float T = G.PhaseTime;
+	Backdrop();
 
 	// The logo drops in, then floats.
 	const float LogoY = 0.235f + 0.008f * FMath::Sin(Now * 1.7f);
@@ -668,22 +673,22 @@ void AKSHUD::DrawMenu(const AKSGameMode& G)
 	Label(TEXT("T H E   G A M E   T H A T   W A S   N E V E R   R E L E A S E D"), 0.5f, 0.435f, 0.95f, Faded(Lilac, In), 0, 0.94f);
 
 	if (G.MenuIndex != SeenMenu) { SeenMenu = G.MenuIndex; MenuAt = Now; }
-	static const TCHAR* Items[] = { TEXT("FIGHT"), TEXT("CAMERA CALIBRATION"), TEXT("WATCH THE INTRO"), TEXT("QUIT") };
+	static const TCHAR* Items[] = { TEXT("FIGHT"), TEXT("CAMERA CALIBRATION"), TEXT("WATCH THE INTRO"), TEXT("PLAY ONLINE"), TEXT("QUIT") };
 	for (int32 i = 0; i < UE_ARRAY_COUNT(Items); i++)
 	{
 		const bool bOn = i == G.MenuIndex;
 		// Each plate slides in from the side a moment after the one above it.
 		const float Slide = 1.f - FMath::Clamp((T - 0.45f - 0.09f * i) / 0.25f, 0.f, 1.f);
-		const float Y = 0.535f + 0.089f * i, X = 0.5f + Slide * Slide * (i % 2 ? 0.7f : -0.7f);
+		const float Y = 0.520f + 0.075f * i, X = 0.5f + Slide * Slide * (i % 2 ? 0.7f : -0.7f);   // five lines between the motto and the key help
 		const float Bump = bOn ? PopScale(Now - MenuAt) * (1.06f + 0.012f * FMath::Sin(Now * 6.f)) : 0.92f;
 		PushSpin(X, Y, Bump, 0.f);
-		Plate(X - 0.21f, Y - 0.038f, 0.42f, 0.076f, bOn ? 1.f : 0.8f, bOn ? FLinearColor::White : FLinearColor(0.42f, 0.36f, 0.6f));
-		Text(Items[i], X, Y - 0.002f, 30.f, bOn ? FLinearColor(1.f, 0.95f, 0.45f) : Lilac, 0, EKSFont::Hud, 2.2f, FLinearColor(0.04f, 0.f, 0.10f, 0.95f), 0.33f);
+		Plate(X - 0.21f, Y - 0.033f, 0.42f, 0.066f, bOn ? 1.f : 0.8f, bOn ? FLinearColor::White : FLinearColor(0.42f, 0.36f, 0.6f));
+		Text(Items[i], X, Y - 0.002f, 26.f, bOn ? FLinearColor(1.f, 0.95f, 0.45f) : Lilac, 0, EKSFont::Hud, 2.2f, FLinearColor(0.04f, 0.f, 0.10f, 0.95f), 0.33f);
 		if (bOn)
 		{
 			// The glove punches at the chosen line.
 			const float Jab = FMath::Abs(FMath::Sin(Now * 5.f)) * 0.012f;
-			if (!Pic(TEXT("glove"), X - 0.255f + Jab, Y, 0.10f)) Text(TEXT(">"), X - 0.24f + Jab, Y, 34.f, Yellow);
+			if (!Pic(TEXT("glove"), X - 0.255f + Jab, Y, 0.085f)) Text(TEXT(">"), X - 0.24f + Jab, Y, 34.f, Yellow);
 		}
 		PopSpin();
 	}
@@ -699,6 +704,78 @@ void AKSHUD::DrawMenu(const AKSGameMode& G)
 	for (float Y = 0.f; Y < SH; Y += 4.f * Unit) DrawRect(FLinearColor(0.f, 0.f, 0.f, 0.13f), 0.f, Y, SW, 1.5f * Unit);
 	if (!bLoggedMenu) { bLoggedMenu = true; UE_LOG(LogTemp, Display, TEXT("KSTEST ui menu shown background=%d logo=%d"), Tex(TEXT("title_bg")) ? 1 : 0, Tex(TEXT("logo")) ? 1 : 0); }
 	DrawTracker(G, false);
+}
+
+void AKSHUD::DrawOnline(const AKSGameMode& G)
+{
+	const float T = G.PhaseTime;
+	Backdrop();
+	const float LogoY = 0.175f + 0.006f * FMath::Sin(Now * 1.7f);
+	if (!Pic(TEXT("logo"), 0.5f, LogoY, 0.25f)) Text(TEXT("KO-SEKAI"), 0.5f, LogoY, 96.f, Magenta, 0, EKSFont::Comic, 4.f);
+	Text(TEXT("PLAY ONLINE"), 0.5f, 0.345f, 46.f, Yellow, 0, EKSFont::Comic, 2.6f, FLinearColor::Black);
+	// What went wrong last time (nobody answered, the opponent left) stays up until the next attempt.
+	if (!G.LobbyNote.IsEmpty()) Label(G.LobbyNote, 0.5f, 0.415f, 1.0f, FLinearColor(1.f, 0.45f, 0.35f), 0, 0.9f);
+
+	if (G.Lobby == EKSLobby::Choose)
+	{
+		if (G.LobbyIndex != SeenLobby) { SeenLobby = G.LobbyIndex; MenuAt = Now; }
+		static const TCHAR* Items[] = { TEXT("HOST A MATCH"), TEXT("JOIN A MATCH"), TEXT("BACK") };
+		for (int32 i = 0; i < UE_ARRAY_COUNT(Items); i++)
+		{
+			const bool bOn = i == G.LobbyIndex;
+			const float Slide = 1.f - FMath::Clamp((T - 0.05f - 0.07f * i) / 0.22f, 0.f, 1.f);
+			const float Y = 0.515f + 0.100f * i, X = 0.5f + Slide * Slide * (i % 2 ? 0.7f : -0.7f);
+			PushSpin(X, Y, bOn ? PopScale(Now - MenuAt) * (1.06f + 0.012f * FMath::Sin(Now * 6.f)) : 0.92f, 0.f);
+			Plate(X - 0.21f, Y - 0.041f, 0.42f, 0.082f, bOn ? 1.f : 0.8f, bOn ? FLinearColor::White : FLinearColor(0.42f, 0.36f, 0.6f));
+			Text(Items[i], X, Y - 0.002f, 29.f, bOn ? FLinearColor(1.f, 0.95f, 0.45f) : Lilac, 0, EKSFont::Hud, 2.2f);
+			if (bOn)
+			{
+				const float Jab = FMath::Abs(FMath::Sin(Now * 5.f)) * 0.012f;
+				if (!Pic(TEXT("glove"), X - 0.255f + Jab, Y, 0.09f)) Text(TEXT(">"), X - 0.24f + Jab, Y, 34.f, Yellow);
+			}
+			PopSpin();
+		}
+		Label(TEXT("HOST: a friend joins by your address.     JOIN: type a friend's address, or a relay server's."), 0.5f, 0.845f, 0.78f, Lilac, 0, 0.94f);
+		Label(TEXT("UP / DOWN  choose          ENTER  select          ESC  back"), 0.5f, 0.905f, 0.8f, Lilac, 0, 0.94f);
+	}
+	else if (G.Lobby == EKSLobby::Hosting)
+	{
+		Panel(0.17f, 0.45f, 0.66f, 0.40f);
+		const int32 Dots = (int32)(Now * 2.f) % 4;
+		Text(G.LobbyStatus + FString::ChrN(Dots, TEXT('.')), 0.5f, 0.515f, 30.f, FLinearColor(1.f, 0.95f, 0.45f));
+		Label(TEXT("Your friend chooses JOIN A MATCH and types this address:"), 0.5f, 0.585f, 0.9f, Lilac, 0, 0.6f);
+		FString Addresses;
+		for (int32 i = 0; i < G.HostAddresses.Num() && i < 3; i++) Addresses += (i ? TEXT("     or     ") : TEXT("")) + G.HostAddresses[i];
+		if (Addresses.IsEmpty()) Addresses = TEXT("(this machine has no network address)");
+		if (G.HostPort != 7777) Addresses += FString::Printf(TEXT("   port %d"), G.HostPort);
+		Text(Addresses, 0.5f, 0.665f, 40.f, Cyan, 0, EKSFont::Comic, 2.4f, FLinearColor::Black, 0.6f);
+		Label(TEXT("That works on the same network or over a VPN. For a friend far away, both of you"), 0.5f, 0.745f, 0.76f, Muted, 0, 0.6f);
+		Label(TEXT("JOIN the same relay server instead, or forward this port in your router."), 0.5f, 0.785f, 0.76f, Muted, 0, 0.6f);
+		Label(TEXT("ESC  cancel"), 0.5f, 0.905f, 0.8f, Lilac);
+	}
+	else if (G.Lobby == EKSLobby::Typing)
+	{
+		Panel(0.17f, 0.45f, 0.66f, 0.36f);
+		Label(TEXT("ADDRESS OF THE HOST, OR OF A RELAY SERVER"), 0.5f, 0.515f, 0.95f, Lilac, 0, 0.6f);
+		Plate(0.24f, 0.565f, 0.52f, 0.095f);
+		const bool bCursor = FMath::Frac(Now * 1.6f) < 0.55f;
+		Text(G.JoinAddress + (bCursor ? TEXT("_") : TEXT(" ")), 0.5f, 0.610f, 34.f, FLinearColor(1.f, 0.95f, 0.45f), 0, EKSFont::Hud, 2.f, FLinearColor(0.04f, 0.f, 0.10f, 0.95f), 0.44f);
+		Label(TEXT("for example   192.168.1.20   or   myserver.net:7777#ourroom"), 0.5f, 0.705f, 0.76f, Muted, 0, 0.6f);
+		Label(TEXT("#room on a relay server meets only the friend who types the same word"), 0.5f, 0.745f, 0.76f, Muted, 0, 0.6f);
+		Label(TEXT("ENTER  connect          CTRL+V  paste          DEL  clear          ESC  back"), 0.5f, 0.905f, 0.8f, Lilac, 0, 0.94f);
+	}
+	else
+	{
+		Panel(0.17f, 0.45f, 0.66f, 0.30f);
+		const int32 Dots = (int32)(Now * 2.f) % 4;
+		Text(G.LobbyStatus + FString::ChrN(Dots, TEXT('.')), 0.5f, 0.535f, 30.f, FLinearColor(1.f, 0.95f, 0.45f), 0, EKSFont::Hud, 2.f, FLinearColor(0.04f, 0.f, 0.10f, 0.95f), 0.6f);
+		Text(G.JoinAddress, 0.5f, 0.625f, 34.f, Cyan, 0, EKSFont::Comic, 2.4f, FLinearColor::Black, 0.6f);
+		Label(TEXT("ESC  cancel"), 0.5f, 0.905f, 0.8f, Lilac);
+	}
+	Label(FString::Printf(TEXT("YOU FIGHT AS %s"), G.PlayerFighter().Name), 0.985f, 0.975f, 0.6f, Cyan, 1);
+
+	for (float Y = 0.f; Y < SH; Y += 4.f * Unit) DrawRect(FLinearColor(0.f, 0.f, 0.f, 0.13f), 0.f, Y, SW, 1.5f * Unit);
+	if (!bLoggedLobby) { bLoggedLobby = true; UE_LOG(LogTemp, Display, TEXT("KSTEST ui lobby shown")); }   // for tools/check.sh
 }
 
 void AKSHUD::DrawSelect(const AKSGameMode& G)
@@ -814,7 +891,7 @@ void AKSHUD::DrawFight(const AKSGameMode& G)
 		Fill(0.f, 0.60f, 1.f, 0.40f, FLinearColor(0.02f, 0.f, 0.06f, 0.85f * A));
 		Fill(0.f, 0.598f, 1.f, 0.005f, Faded(Cyan, A));
 		Plate(0.33f, 0.035f, 0.34f, 0.085f, A);
-		Label(FString::Printf(TEXT("CUT FIGHTER %d OF %d"), G.FighterIndex + 1, G.NumFights()), 0.5f, 0.076f, 1.15f, Faded(FLinearColor::White, A), 0, 0.25f);
+		Label(G.bOnline ? FString(TEXT("ONLINE MATCH")) : FString::Printf(TEXT("CUT FIGHTER %d OF %d"), G.FighterIndex + 1, G.NumFights()), 0.5f, 0.076f, 1.15f, Faded(FLinearColor::White, A), 0, 0.25f);
 		// The name slides in from the right, the VS badge bangs in on the left.
 		const float Slide = 1.f - FMath::Clamp(T / 0.28f, 0.f, 1.f);
 		// Everything on the card's lower band stays right of the VS badge.
@@ -822,7 +899,7 @@ void AKSHUD::DrawFight(const AKSGameMode& G)
 		PushSpin(0.115f, 0.71f, SlamScale(FMath::Max(0.f, T - 0.15f)) * (1.f + 0.03f * FMath::Sin(Now * 9.f)), -8.f);
 		if (T > 0.15f) Pic(TEXT("vs"), 0.115f, 0.71f, 0.24f, A);
 		PopSpin();
-		Label(F.Tagline, 0.60f, 0.805f, 1.15f, Faded(Lilac, A), 0, 0.72f);
+		Label(G.bOnline ? TEXT("Another player. Nobody knows what they will do.") : F.Tagline, 0.60f, 0.805f, 1.15f, Faded(Lilac, A), 0, 0.72f);
 		Label(FString::Printf(TEXT("YOU FIGHT AS %s"), G.PlayerFighter().Name), 0.60f, 0.862f, 1.05f, Faded(Cyan, A), 0, 0.72f);
 		const bool bTracked = G.Tracking() && G.Tracking()->IsConnected();
 		Label(bTracked ? TEXT("PUNCH, BLOCK, LEAN AND DUCK FOR REAL - THE CABINET IS WATCHING")
@@ -830,6 +907,12 @@ void AKSHUD::DrawFight(const AKSGameMode& G)
 		DrawTracker(G, true);
 		return;
 	}
+
+	// After an online bout: who has asked for another, in place of the cabinet's own next step.
+	const FString Rematch = G.bOnlineReady ? (G.bOnlineOppReady ? TEXT("HERE WE GO AGAIN") : TEXT("WAITING FOR THE OTHER PLAYER"))
+		: (G.bOnlineOppReady ? TEXT("THE OTHER PLAYER WANTS A REMATCH") : TEXT("REMATCH?"));
+	const TCHAR* const RematchKeys = TEXT("ENTER or jab left + right: rematch          ESC: leave");
+	if (G.bOnline) Label(G.OnlinePingMs >= 0.f ? FString::Printf(TEXT("ONLINE   %d ms"), FMath::RoundToInt(G.OnlinePingMs)) : FString(TEXT("ONLINE")), 0.015f, 0.975f, 0.6f, Muted, -1);
 
 	/* health, names, clock */
 	if (SeenPlayerHP >= 0.f && G.PlayerHP < SeenPlayerHP - 0.01f) PlayerJoltAt = Now;
@@ -843,34 +926,38 @@ void AKSHUD::DrawFight(const AKSGameMode& G)
 		HealthBar(0.025f, 0.405f, G.PlayerHP / 100.f, G.PlayerTrail / 100.f, Cyan, false, Jolt(PlayerJoltAt));
 		HealthBar(0.57f, 0.405f, G.OppHP / G.OppMaxHP, G.OppTrail / G.OppMaxHP, Magenta, true, Jolt(OppJoltAt));
 		Text(FString::Printf(TEXT("YOU  -  %s"), G.PlayerFighter().Name), 0.07f, 0.150f, 19.f, Cyan, -1, EKSFont::Hud, 2.f, Edge, 0.36f);
-		Text(F.Name, 0.93f, 0.150f, 19.f, Magenta, 1, EKSFont::Hud, 2.f, Edge, 0.36f);
-		// The special meters: a thin bar under each name. A full one flashes, and the player is told what to shout.
-		auto Meter = [this](float X, float W, float V, const FLinearColor& Color, bool bFromRight)
+		Text(G.bOnline ? FString::Printf(TEXT("%s  -  RIVAL"), F.Name) : FString(F.Name), 0.93f, 0.150f, 19.f, Magenta, 1, EKSFont::Hud, 2.f, Edge, 0.36f);
+		// Special abilities are not played online yet (each game judges only its own health), so no meters there.
+		if (!G.bOnline)
 		{
-			V = FMath::Clamp(V, 0.f, 1.f);
-			Fill(X - 0.002f, 0.1765f, W + 0.004f, 0.014f, FLinearColor(0.02f, 0.f, 0.06f, 0.85f));
-			const bool bFull = V >= 1.f;
-			Fill(bFromRight ? X + W * (1.f - V) : X, 0.179f, W * V, 0.009f, bFull ? (FMath::Frac(Now * 4.f) < 0.5f ? FLinearColor::White : Yellow) : Color);
-		};
-		Meter(0.07f, 0.24f, G.PlayerMeter, Cyan, false);
-		Meter(0.69f, 0.24f, G.OppMeter, Magenta, true);
-		if (G.Phase == EKSPhase::Fight && G.PlayerMeter >= 1.f && !G.bSpecialOn)
-		{
-			Reserve(0.05f, 0.19f, 0.42f, 0.085f);
-			const float Beat = 1.f + 0.05f * FMath::Abs(FMath::Sin(Now * 6.f));
-			PushSpin(0.07f, 0.225f, Beat, 0.f);
-			Text(FString::Printf(TEXT("%s  %s"), G.bMicOpen ? TEXT("SHOUT") : TEXT("PRESS S"), *G.PlayerCry()), 0.07f, 0.225f, 30.f, Yellow, -1, EKSFont::Comic, 2.5f, FLinearColor::Black, 0.40f);
-			PopSpin();
-			if (G.bMicOpen)
+			// The special meters: a thin bar under each name. A full one flashes, and the player is told what to shout.
+			auto Meter = [this](float X, float W, float V, const FLinearColor& Color, bool bFromRight)
 			{
-				// How loud the microphone hears the room, so a player whose shout does nothing can see why.
-				Label(TEXT("MIC"), 0.07f, 0.262f, 0.55f, Lilac, -1);
-				Fill(0.105f, 0.257f, 0.12f, 0.009f, FLinearColor(0.02f, 0.f, 0.06f, 0.85f));
-				Fill(0.105f, 0.257f, 0.12f * G.MicLevel, 0.009f, Green);
-				Label(TEXT("or press S"), 0.235f, 0.262f, 0.55f, Muted, -1);
+				V = FMath::Clamp(V, 0.f, 1.f);
+				Fill(X - 0.002f, 0.1765f, W + 0.004f, 0.014f, FLinearColor(0.02f, 0.f, 0.06f, 0.85f));
+				const bool bFull = V >= 1.f;
+				Fill(bFromRight ? X + W * (1.f - V) : X, 0.179f, W * V, 0.009f, bFull ? (FMath::Frac(Now * 4.f) < 0.5f ? FLinearColor::White : Yellow) : Color);
+			};
+			Meter(0.07f, 0.24f, G.PlayerMeter, Cyan, false);
+			Meter(0.69f, 0.24f, G.OppMeter, Magenta, true);
+			if (G.Phase == EKSPhase::Fight && G.PlayerMeter >= 1.f && !G.bSpecialOn)
+			{
+				Reserve(0.05f, 0.19f, 0.42f, 0.085f);
+				const float Beat = 1.f + 0.05f * FMath::Abs(FMath::Sin(Now * 6.f));
+				PushSpin(0.07f, 0.225f, Beat, 0.f);
+				Text(FString::Printf(TEXT("%s  %s"), G.bMicOpen ? TEXT("SHOUT") : TEXT("PRESS S"), *G.PlayerCry()), 0.07f, 0.225f, 30.f, Yellow, -1, EKSFont::Comic, 2.5f, FLinearColor::Black, 0.40f);
+				PopSpin();
+				if (G.bMicOpen)
+				{
+					// How loud the microphone hears the room, so a player whose shout does nothing can see why.
+					Label(TEXT("MIC"), 0.07f, 0.262f, 0.55f, Lilac, -1);
+					Fill(0.105f, 0.257f, 0.12f, 0.009f, FLinearColor(0.02f, 0.f, 0.06f, 0.85f));
+					Fill(0.105f, 0.257f, 0.12f * G.MicLevel, 0.009f, Green);
+					Label(TEXT("or press S"), 0.235f, 0.262f, 0.55f, Muted, -1);
+				}
 			}
+			else Label(TEXT("SPECIAL"), 0.07f, 0.2f, 0.5f, Muted, -1);
 		}
-		else Label(TEXT("SPECIAL"), 0.07f, 0.2f, 0.5f, Muted, -1);
 		const int32 Secs = FMath::CeilToInt(FMath::Max(0.f, G.TimeLeft));
 		const bool bLate = Secs <= 10 && G.Phase == EKSPhase::Fight;
 		PushSpin(0.5f, 0.088f, bLate ? 1.f + 0.08f * FMath::Abs(FMath::Sin(Now * PI)) : 1.f, 0.f);
@@ -923,7 +1010,7 @@ void AKSHUD::DrawFight(const AKSGameMode& G)
 		if (!Pic(TEXT("t_youwin"), 0.5f, 0.155f, 0.26f)) Text(TEXT("YOU WIN"), 0.5f, 0.155f, 90.f, Green, 0, EKSFont::Comic, 3.f);
 		PopSpin();
 		if (G.bLastResultDecision) Text(TEXT("ON POINTS"), 0.5f, 0.372f, 24.f, Yellow, 0, EKSFont::Comic, 2.f, FLinearColor::Black);
-		Lines(F.DefeatLine, 0.5f, 0.435f, 0.58f, 2, 19.f, Lilac);
+		Lines(G.bOnline ? TEXT("A real opponent, and you put them down.") : F.DefeatLine, 0.5f, 0.435f, 0.58f, 2, 19.f, Lilac);
 		// The numbers count in one after another.
 		const FKSStats& S = G.Stats;
 		const TPair<const TCHAR*, int32> Rows[] = { { TEXT("LANDED"), S.Landed }, { TEXT("COUNTERS"), S.Counters }, { TEXT("DODGES"), S.Dodges }, { TEXT("BLOCKS"), S.Blocks },
@@ -940,8 +1027,8 @@ void AKSHUD::DrawFight(const AKSGameMode& G)
 		}
 		const bool bLast = G.FighterIndex + 1 >= G.NumFights();
 		Plate(0.27f, 0.632f, 0.46f, 0.07f);
-		Label(bLast ? TEXT("The screen cracks. There is a way out.") : FString::Printf(TEXT("NEXT: %s"), G.LadderFighter(G.FighterIndex + 1).Name), 0.5f, 0.666f, 1.05f, Yellow, 0, 0.36f);
-		if (FMath::Frac(Now * 0.9f) < 0.65f) Label(TEXT("Press ENTER or jab left + right"), 0.5f, 0.733f, 0.9f, Lilac, 0, 0.58f);
+		Label(G.bOnline ? Rematch : bLast ? FString(TEXT("The screen cracks. There is a way out.")) : FString::Printf(TEXT("NEXT: %s"), G.LadderFighter(G.FighterIndex + 1).Name), 0.5f, 0.666f, 1.05f, Yellow, 0, 0.36f);
+		if (FMath::Frac(Now * 0.9f) < 0.65f) Label(G.bOnline ? RematchKeys : TEXT("Press ENTER or jab left + right"), 0.5f, 0.733f, 0.9f, Lilac, 0, 0.58f);
 	}
 	if (G.Phase == EKSPhase::Continue)
 	{
@@ -951,6 +1038,16 @@ void AKSHUD::DrawFight(const AKSGameMode& G)
 		const TCHAR* Art = G.bLastResultDecision ? TEXT("t_youlose") : TEXT("t_knockedout");
 		if (!Pic(Art, 0.5f, 0.24f, 0.34f)) Text(G.bLastResultDecision ? TEXT("LOST ON POINTS") : TEXT("KNOCKED OUT"), 0.5f, 0.27f, 80.f, Red, 0, EKSFont::Comic, 3.f);
 		PopSpin();
+		if (G.bOnline)
+		{
+			// No countdown against a person: the two players agree on a rematch or one of them leaves.
+			Label(G.bLastResultDecision ? TEXT("Lost on points, to another player.") : TEXT("Put down by another player."), 0.5f, 0.475f, 1.1f, Lilac, 0, 0.94f);
+			Plate(0.27f, 0.585f, 0.46f, 0.085f);
+			Label(Rematch, 0.5f, 0.626f, 1.05f, Yellow, 0, 0.38f);
+			if (FMath::Frac(Now * 0.9f) < 0.65f) Label(RematchKeys, 0.5f, 0.775f, 1.0f, Lilac, 0, 0.94f);
+			DrawTracker(G, true);
+			return;
+		}
 		Label(G.bLastResultDecision ? TEXT("Lost on points. The cabinet keeps you for another round.") : TEXT("The cabinet keeps you for another round."), 0.5f, 0.475f, 1.1f, Lilac, 0, 0.94f);
 		const int32 Count = FMath::Max(0, FMath::FloorToInt(G.ContinueLeft));
 		if (Count != SeenCount) { SeenCount = Count; CountAt = Now; }
@@ -1060,6 +1157,7 @@ void AKSHUD::DrawHUD()
 	case EKSPhase::Menu: DrawMenu(*G); break;
 	case EKSPhase::Intro: DrawIntro(*G); break;
 	case EKSPhase::Select: DrawSelect(*G); break;
+	case EKSPhase::Online: DrawOnline(*G); break;
 	case EKSPhase::Street: case EKSPhase::PullIn: case EKSPhase::Ending: DrawStreet(*G); break;
 	case EKSPhase::Calibrate: DrawCalibrate(*G); break;
 	default: DrawFight(*G); break;

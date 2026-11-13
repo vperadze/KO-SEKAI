@@ -17,6 +17,25 @@ Open `KoSekai.uproject` and press Play, or run it directly:
 Street: `W A S D` walk, mouse look, `Shift` run, `E` at the cabinet.
 Fight: `A/Q/Z` left straight/hook/uppercut, `D/E/C` right, `Space` block, arrows evade and duck, `P` pause.
 
+## Play online
+
+Two players, one ring: choose **PLAY ONLINE** on the start menu.
+
+- **Same network or VPN:** one player chooses **HOST A MATCH** and reads out the address the screen shows; the other
+  chooses **JOIN A MATCH** and types it. The host's game listens on TCP port 7777 (Windows asks once to let it through
+  the firewall).
+- **Anywhere else:** run the relay on a machine both can reach, `python3 ../tools/ko_relay.py`, and both players choose
+  **JOIN A MATCH** and type that machine's address. The first two to arrive are put together; to meet one friend, both
+  add the same word after a `#` (`myserver.net#ourroom`). Nobody but the relay needs an open port. A build can name
+  the team's relay in `Config/DefaultGame.ini` (`[KoSekai]`, `OnlineServer=myserver.net`), and the address box starts
+  with it.
+
+Each player sees their own fighter from behind and the other player's fighter in front. A punch is in the air for about
+half a second, so it can be blocked, ducked or dodged as the cabinet's punches can; dodging one leaves the puncher open
+for counters. After a bout either player can ask for a rematch; `Esc` leaves.
+
+`-KSHost` and `-KSJoin=<address>` skip the menus.
+
 ## Package for Linux
 
 Run `./package_linux.sh`. The build lands in `Packaged/Linux`; start it with `Packaged/Linux/KoSekai.sh`.
@@ -58,6 +77,8 @@ that plugin asks for (about 500 MB, into `Intermediate/PipInstall`). That happen
 | `Source/KoSekai/KSDetector.*` | Turns poses into punches, blocks, dodges and ducks |
 | `Source/KoSekai/KSWorld.*` | Builds the street and the arena |
 | `Source/KoSekai/KSHUD.*` | Health bars, cues, subtitles |
+| `Source/KoSekai/KSNet.*` | Online: one TCP connection to the other player (host, join, or through the relay) |
+| `Source/KoSekai/KSGameModeOnline.cpp` | Online: the lobby and the rules of a bout between two players |
 | `Source/KoSekai/KSAudio.*` | Synthesised sound effects |
 | `Tools/make_materials.py` | Regenerates the two materials in `Content/KS/Materials` |
 
@@ -67,3 +88,11 @@ Test flags: `-KSAuto` plays by itself, `-KSStart=fight` skips to the fights, `-K
 shows the ending, `-KSShots=3` saves a screenshot every 3 seconds to `Saved/Screenshots`.
 
 If the editor is open while you build from the command line, add `-NoHotReloadFromIDE` to the build command.
+
+## Particle effects (add them yourself)
+
+The special abilities and the hit marks use free effect packs from Fab. They are not in this repository (Fab's
+licence does not allow passing them on in a public one). After cloning, open the project in the editor, open the
+Fab window, and "Add to Project": Mixed VFX (G.G.), Stylized Laser Beam VFX - Free (QP Phantom), Stylized Smoke VFX
+(PotaVFX) and Distortion VFX (Vefects). Without them the game runs, with no particle effects; `tools/check.sh`
+names what is missing. Details: `docs/VFX.md`.

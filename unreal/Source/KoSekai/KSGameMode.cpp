@@ -8,6 +8,7 @@
 #include "KSHUD.h"
 #include "KSTracking.h"
 #include "NiagaraComponent.h"
+#include "KSNet.h"
 #include "Engine/World.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/TextureCube.h"
@@ -213,6 +214,11 @@ void AKSGameMode::BeginPlay()
 		if (Start.IsEmpty()) SetPhase(EKSPhase::Intro);
 		else if (Start == TEXT("menu")) SetPhase(EKSPhase::Menu);
 	}
+	// Online shortcuts, also used by tools/check.sh: -KSHost waits for a visitor, -KSJoin=<address> dials one.
+	FParse::Value(Cmd, TEXT("KSPort="), HostPort);
+	FString JoinArg;
+	if (FParse::Param(Cmd, TEXT("KSHost"))) { EnterLobby(); LobbyHost(); }
+	else if (FParse::Value(Cmd, TEXT("KSJoin="), JoinArg)) { EnterLobby(); JoinAddress = JoinArg; LobbyJoin(); }
 }
 
 /* ================= helpers ================= */
@@ -261,13 +267,14 @@ void AKSGameMode::SetPhase(EKSPhase NewPhase)
 	// The hall's murmur runs under every phase that happens in the ring.
 	KSAudio::Crowd(this, CrowdPlayer, Phase == EKSPhase::Fight ? 0.2f : Level > 0.f ? 0.14f : 0.f);
 	// The start menu plays the fight music too, without the crowd.
-	if (Phase == EKSPhase::Menu || Phase == EKSPhase::Intro || Phase == EKSPhase::Select) { MusicLevel = Phase == EKSPhase::Intro ? 0.34f : 0.26f; PlayMusic(); }
+	if (Phase == EKSPhase::Menu || Phase == EKSPhase::Intro || Phase == EKSPhase::Select || Phase == EKSPhase::Online) { MusicLevel = Phase == EKSPhase::Intro ? 0.34f : 0.26f; PlayMusic(); }
 	// Choosing a fighter happens in the hall, so the hall is heard.
 	if (Phase == EKSPhase::Select) KSAudio::Crowd(this, CrowdPlayer, 0.12f);
 }
 
 void AKSGameMode::ToMenu()
 {
+	OnlineHangUp();   // whatever led here, a match against another player is over
 	if (OppDummy) OppDummy->StopTalking();
 	if (PlayerDummy) PlayerDummy->StopTalking();
 	ClearWorld();
@@ -405,15 +412,18 @@ void AKSGameMode::Tick(float Dt)
 		if (Pressed(EKeys::C)) FramePunches.Add({ EKSArm::Right, EKSPunch::Uppercut });
 	}
 
-	if (Phase == EKSPhase::Fight && Pressed(EKeys::P)) bPaused = !bPaused;
+	if (Phase == EKSPhase::Fight && Pressed(EKeys::P) && !bOnline) bPaused = !bPaused;   // nobody can stop the clock on another player
 	if (Phase != EKSPhase::Fight) bPaused = false;
 	const float GameDt = bPaused ? 0.f : Dt;
 	Clock += GameDt;
 	PhaseTime += GameDt;
 
-	// Esc leaves whatever is going on for the start menu (the film handles its own Esc; on the menu there is nowhere to go).
+	if (Net) TickOnline();
+
+	// Esc leaves whatever is going on for the start menu (the film handles its own Esc; on the menu there is nowhere to go;
+	// the online lobby steps back one screen at a time, see TickLobby).
 	const bool bTestEsc = TestEscAt > 0.f && Phase == EKSPhase::Fight && PhaseTime > TestEscAt;
-	if ((Pressed(EKeys::Escape) || bTestEsc) && Phase != EKSPhase::Menu && Phase != EKSPhase::Intro)
+	if ((Pressed(EKeys::Escape) || bTestEsc) && Phase != EKSPhase::Menu && Phase != EKSPhase::Intro && Phase != EKSPhase::Online)
 	{
 		TestEscAt = 0.f;
 		Sfx(EKSSfx::Select, 0.7f); HushAnnouncer();
@@ -435,6 +445,7 @@ void AKSGameMode::Tick(float Dt)
 	case EKSPhase::Calibrate: TickCalibrate(GameDt); break;
 	case EKSPhase::Menu: TickMenu(GameDt); break;
 	case EKSPhase::Intro: TickIntro(GameDt); break;
+	case EKSPhase::Online: TickLobby(GameDt); break;
 	}
 
 	TickFx(GameDt);
@@ -469,7 +480,7 @@ void AKSGameMode::Tick(float Dt)
 void AKSGameMode::TickMenu(float Dt)
 {
 	Pawn->SetView(WalkPos + FVector(0, 0, 165.f), FRotator::ZeroRotator, 90.f);
-	const int32 Lines = 4;
+	const int32 Lines = 5;
 	// The webcam works here too, once it has found the player: a hand swept down or up moves down or up the list, and
 	// a jab with one hand and then the other chooses. (It was "left punch next, right punch choose": the menu moved
 	// and chose by itself whenever the player shifted his weight.)
@@ -493,6 +504,8 @@ void AKSGameMode::TickMenu(float Dt)
 			SetPhase(EKSPhase::Calibrate); SetCalStep(0);
 		}
 		else if (MenuIndex == 2) { WhiteFade = 0.6f; SetPhase(EKSPhase::Intro); }
+		// Online: first choose a fighter, as for a fight against the cabinet, then on to the lobby (TickSelect).
+		else if (MenuIndex == 3) { WhiteFade = 0.8f; bSelectForOnline = true; EnterSelect(); }
 		else PC->ConsoleCommand(TEXT("quit"));
 	}
 }
@@ -681,6 +694,7 @@ void AKSGameMode::TickSelect(float Dt)
 		{
 			ChosenPlayer = SelectIndex; WhiteFade = 1.f;
 			LogSelectFrame();
+			if (bSelectForOnline) { ToMenu(); EnterLobby(); return; }   // PLAY ONLINE was chosen: the fighter is picked, now find an opponent
 			EnterArena(); BeginLadder();
 		}
 		return;
@@ -859,6 +873,8 @@ void AKSGameMode::PickFighters()
 {
 	// A random fighter for the player, then a random ladder of different opponents.
 	const int32 Count = Roster().Num();
+	// Online the host settled who fights and where (OnlinePickMatch).
+	if (bOnline) { PlayerChar = OnlineMine; Ladder = { OnlineTheirs }; ArenaLadder = { OnlineArena }; return; }
 	// The player's fighter: the one chosen on the select screen; a random one when the game starts straight in the ring.
 	PlayerChar = ForcedPlayer >= 0 ? FMath::Clamp(ForcedPlayer, 0, Count - 1) : ChosenPlayer >= 0 ? FMath::Clamp(ChosenPlayer, 0, Count - 1) : FMath::RandRange(0, Count - 1);
 	UE_LOG(LogTemp, Display, TEXT("KSTEST player fighter=%s chosen=%d"), Roster()[PlayerChar].Asset, ChosenPlayer >= 0 ? 1 : 0);   // for tools/check.sh
@@ -935,7 +951,7 @@ void AKSGameMode::UseArena(int32 Index)
 
 void AKSGameMode::PlayMusic(float FadeSeconds)
 {
-	const TCHAR* Track = (Phase == EKSPhase::Menu || Phase == EKSPhase::Intro || Phase == EKSPhase::Select || ArenaIndex < 0) ? TEXT("Fight") : KSArenas[ArenaIndex].Music;
+	const TCHAR* Track = (Phase == EKSPhase::Menu || Phase == EKSPhase::Intro || Phase == EKSPhase::Select || Phase == EKSPhase::Online || ArenaIndex < 0) ? TEXT("Fight") : KSArenas[ArenaIndex].Music;
 	KSAudio::Music(this, MusicPlayer, MusicLevel * (bMusicDucked ? 0.4f : 1.f), FadeSeconds, Track);
 }
 
@@ -995,6 +1011,8 @@ void AKSGameMode::StartCard(int32 Index)
 	const FLadderTier& Tier = LadderTiers[FMath::Min(FighterIndex, LadderLength - 1)];
 	CurrentDef.Health = Tier.Health; CurrentDef.WindupScale = Tier.WindupScale; CurrentDef.DamageScale = Tier.DamageScale;
 	CurrentDef.FeintChance = Tier.FeintChance; CurrentDef.IdleScale = Tier.IdleScale; CurrentDef.MaxHitsOpen = Tier.MaxHitsOpen;
+	// Two players meet as equals: the same health as the player's own, and no ladder difficulty.
+	if (bOnline) { CurrentDef.Health = 100.f; CurrentDef.WindupScale = CurrentDef.DamageScale = CurrentDef.IdleScale = 1.f; CurrentDef.FeintChance = 0.f; }
 	const FKSFighterDef& F = Fighter();
 	// A fresh actor for every bout. Putting a second fighter's mesh on the old actor left the drawn body frozen in
 	// one pose (the animation ran, the picture did not follow), so the opponent is spawned new, as in the first fight.
@@ -1044,20 +1062,23 @@ void AKSGameMode::TickCard(float Dt)
 	if (PhaseTime >= 2.6f && !bFightStarted)
 	{
 		bFightStarted = true;
-		Announce(FString::Printf(TEXT("FIGHT %d OF %d"), FighterIndex + 1, NumFights()), 1.3f);
+		Announce(bOnline ? FString(TEXT("ONLINE MATCH")) : FString::Printf(TEXT("FIGHT %d OF %d"), FighterIndex + 1, NumFights()), 1.3f);
 	}
 	if (!bIntroSaid && PhaseTime >= 0.5f && Clock >= AnnouncerUntil + 0.1f) { bIntroSaid = true; Speak(OppDummy, TEXT("intro"), true); }
 	UpdateFighterPoses(Dt);
 	UpdateFightCamera(Dt);
 	// The bell waits for him to finish his sentence (within reason).
+	// Online the host rings the bell for both, so the two clocks start together; the guest waits for it (see OnlineLine).
+	if (bOnline && Net && !Net->IsHost()) return;
 	if (PhaseTime >= 4.1f && ((bIntroSaid && (!OppDummy || !OppDummy->IsTalking())) || PhaseTime >= 8.5f)) StartFight();
 }
 
 void AKSGameMode::StartFight()
 {
+	if (bOnline && Net && Net->IsHost()) Net->Send(TEXT("GO"));
 	Sfx(EKSSfx::Bell1);
 	Announce(TEXT("FIGHT!"), 0.8f);
-	Announcer(FighterIndex + 1 >= NumFights() ? TEXT("round3") : FighterIndex == 0 ? TEXT("round1") : TEXT("round2"));
+	Announcer(bOnline ? TEXT("round1") : FighterIndex + 1 >= NumFights() ? TEXT("round3") : FighterIndex == 0 ? TEXT("round1") : TEXT("round2"));
 	SetPhase(EKSPhase::Fight);
 	OppIdle(1.2f);
 }
@@ -2164,7 +2185,14 @@ void AKSGameMode::DriveCharacters()
 		else if (OppState == EKSOppState::Windup) Key = FString::Printf(TEXT("wind %.3f"), OppT);
 		else if (OppState == EKSOppState::Strike) Key = TEXT("strike");
 		else if (OppState == EKSOppState::Open) Key = Clock < OppStaggerUntil ? TEXT("stagger") : TEXT("open");
-		else Key = Clock < OppGuardUntil ? FString(TEXT("block")) : FString::Printf(TEXT("idle %d"), OppIdleCount);
+		else Key = (Clock < OppGuardUntil || (bOnline && RemoteDefense == EKSDefense::Block)) ? FString(TEXT("block")) : FString::Printf(TEXT("idle %d"), OppIdleCount);
+		// Online, the other player's leans and ducks are shown on his fighter (his own left is his -Y, as for the player's).
+		if (bOnline)
+		{
+			const bool bFree = Phase == EKSPhase::Fight && OppState != EKSOppState::KO && OppState != EKSOppState::Open;
+			OppDummy->SetBodyShift(!bFree ? 0.f : RemoteDefense == EKSDefense::EvadeLeft ? -42.f : RemoteDefense == EKSDefense::EvadeRight ? 42.f : 0.f,
+				bFree && RemoteDefense == EKSDefense::Duck ? 0.68f : 1.f);
+		}
 
 		// A punch that connected is allowed to pull back before he returns to his stance.
 		if (OppClipKey == TEXT("strike") && Key.StartsWith(TEXT("idle")))
@@ -2237,7 +2265,7 @@ void AKSGameMode::DriveCharacters()
 		int32 PunchArm = -1;
 		for (int32 i = 0; i < 2; i++)
 		{
-			if (Clock - PunchStart[i] < PlayerPunchSeconds && (PunchArm < 0 || PunchStart[i] > PunchStart[PunchArm])) PunchArm = i;
+			if (Clock - PunchStart[i] < PlayerPunchSeconds + OnlinePunchLead(i) && (PunchArm < 0 || PunchStart[i] > PunchStart[PunchArm])) PunchArm = i;
 		}
 		// With the webcam, the fighter's arms copy the player's own arms, so punch and block clips are not needed:
 		// the body keeps its stance and the arms do whatever the player does, as it happens.
@@ -2280,7 +2308,11 @@ void AKSGameMode::DriveCharacters()
 			{
 				// The hit lands 0.09 s after the input, so the clip starts just before its impact frame.
 				const FPunchClip& Punch = PunchClips[(int32)PunchType[PunchArm]][PunchArm];
-				PlayerDummy->PlayClip(Punch.Name, false, 1.25f, FMath::Max(0.f, Punch.Impact - 0.11f));
+				// Online the punch is in the air for a while (the other player must be able to answer it), so the clip is
+				// played from its start and stretched to have the fist out when the punch arrives over there.
+				const float Lead = OnlinePunchLead(PunchArm);
+				if (Lead > 0.f) PlayerDummy->PlayClip(Punch.Name, false, Punch.Impact / (Lead + 0.05f));
+				else PlayerDummy->PlayClip(Punch.Name, false, 1.25f, FMath::Max(0.f, Punch.Impact - 0.11f));
 			}
 			else if (Key == TEXT("block")) PlayerDummy->PlayClip(TEXT("Block1"), true, 1.f, 0.6f);
 			else if (Key.StartsWith(TEXT("idle own")))
@@ -2291,10 +2323,10 @@ void AKSGameMode::DriveCharacters()
 			else PlayerDummy->PlayClip(TEXT("Combat_Stance"), true);
 		}
 		// Aim the punch at the opponent's face when he is open, or at his guard when he is not.
-		if (PunchArm >= 0 && Clock - PunchStart[PunchArm] < 0.24f && !bLost && OppState != EKSOppState::KO)
+		if (PunchArm >= 0 && Clock - PunchStart[PunchArm] < 0.24f + OnlinePunchLead(PunchArm) && !bLost && OppState != EKSOppState::KO)
 		{
 			const FVector Away = (PlayerDummy->GetActorLocation() - OppDummy->GetActorLocation()).GetSafeNormal2D();
-			const bool bOpen = OppState == EKSOppState::Open || OppState == EKSOppState::KO || Clock < OppHurtUntil;
+			const bool bOpen = OppState == EKSOppState::Open || OppState == EKSOppState::KO || Clock < OppHurtUntil || (bOnline && RemoteDefense != EKSDefense::Block);
 			PlayerDummy->AimPunch(PunchClips[(int32)PunchType[PunchArm]][PunchArm].Name, OppDummy->FaceWorld(true) + Away * (bOpen ? 9.f : 28.f) - FVector(0, 0, 6.f), 1.f);
 		}
 		else PlayerDummy->StopAim();
@@ -2805,12 +2837,12 @@ void AKSGameMode::OppIdle(float Seconds)
 	if (Phase == EKSPhase::Fight) { CueMain.Reset(); CueHint.Reset(); }
 }
 
-void AKSGameMode::StartWindup(EKSPunch Type, float QuickSeconds)
+void AKSGameMode::StartWindup(EKSPunch Type, float QuickSeconds, int32 Side)
 {
 	const FKSFighterDef& F = Fighter();
 	const int32 T = (int32)Type;
 	Attack.Type = Type;
-	Attack.Side = FMath::RandBool() ? EKSArm::Left : EKSArm::Right;
+	Attack.Side = Side >= 0 ? (EKSArm)Side : FMath::RandBool() ? EKSArm::Left : EKSArm::Right;   // online the other player chose the hand
 	Attack.Damage = AttackDamage[T] * F.DamageScale;
 	Attack.Duration = QuickSeconds > 0.f ? QuickSeconds : WindupSeconds[T] * F.WindupScale * (1.f - 0.2f * Rage());
 	Attack.bFeint = QuickSeconds <= 0.f && Rage() > 0.5f && FMath::FRand() < F.FeintChance;
@@ -2833,6 +2865,7 @@ void AKSGameMode::OppAI()
 	const FKSFighterDef& F = Fighter();
 	if (OppState == EKSOppState::Idle && Clock >= OppUntil)
 	{
+		if (bOnline) return;   // another player decides when he punches (OnlineIncoming); the rest of his turn runs as below
 		const EKSDefense D = Defense();
 		// He waits for you to come out of a dodge, so holding one does not win the fight.
 		if ((D == EKSDefense::Duck || D == EKSDefense::EvadeLeft || D == EKSDefense::EvadeRight) && Clock < OppWaitUntil) { OppUntil = Clock + 0.15f; return; }
@@ -2867,6 +2900,7 @@ void AKSGameMode::ResolveStrike()
 	// Take the better of the defence held when the punch arrived and the one held now (camera delay).
 	const EKSDefense D1 = Def0, D2 = Defense();
 	const EOutcome O = FMath::Max(Outcome(Attack.Type, Attack.Side, D1), Outcome(Attack.Type, Attack.Side, D2));
+	if (bOnline) { OnlineStruck((int32)O, D1 == EKSDefense::Block || D2 == EKSDefense::Block); return; }
 	if (O == EOutcome::Dodged) { Stats.Dodges++; PlayerMeter = FMath::Min(1.f, PlayerMeter + 0.12f); Sfx(EKSSfx::Dodge); Popup(TEXT("DODGE!"), KSColors::Green, 0.38f, 0.45f); OpenUp(1.2f); return; }
 	if (O == EOutcome::Blocked)
 	{
@@ -2924,9 +2958,11 @@ void AKSGameMode::PlayerHurt(float Damage, bool bLight)
 
 void AKSGameMode::PlayerPunch(EKSArm Arm, EKSPunch Type)
 {
+	if (bOnline && Phase == EKSPhase::Fight && !OnlineCanPunch()) return;   // still recovering from the last one
 	PunchStart[(int32)Arm] = Clock;
 	PunchType[(int32)Arm] = Type;
 	if (Phase != EKSPhase::Fight) return;
+	if (bOnline) { OnlinePunch(Arm, Type); return; }
 	float Mult = 0.f;
 	bool bCounter = false;
 	if (OppState == EKSOppState::Open && OpenHits < Fighter().MaxHitsOpen) { Mult = 1.f; OpenHits++; }
@@ -2942,7 +2978,7 @@ void AKSGameMode::PlayerPunch(EKSArm Arm, EKSPunch Type)
 	}
 }
 
-void AKSGameMode::LandHit(const FPendingHit& Hit)
+void AKSGameMode::LandHit(const FPendingHit& Hit, float FixedDamage)
 {
 	if (Phase != EKSPhase::Fight) return;
 	if (Hit.Mult == 0.f)
@@ -2955,11 +2991,13 @@ void AKSGameMode::LandHit(const FPendingHit& Hit)
 		Popup(TEXT("BLOCKED"), KSColors::Muted, 0.56f, 0.34f);
 		return;
 	}
-	OppHP = FMath::Max(0.f, OppHP - PunchDamage[(int32)Hit.Type] * Hit.Mult);
+	// Online the other player's game works the damage out and reports it (OnlineResult).
+	const float Damage = FixedDamage >= 0.f ? FixedDamage : PunchDamage[(int32)Hit.Type] * Hit.Mult;
+	OppHP = FMath::Max(0.f, OppHP - Damage);
 	// The comic side of a hit: the damage on a burst by his head, and a sound-effect word on the other side.
 	{
 		const float Side = Hit.Arm == EKSArm::Left ? 1.f : -1.f;
-		Popups.Add({ FString::FromInt(FMath::RoundToInt(PunchDamage[(int32)Hit.Type] * Hit.Mult * 10.f)), KSColors::Yellow, FVector2D(Side * FMath::FRandRange(0.11f, 0.16f), FMath::FRandRange(-0.14f, -0.04f)), Clock, 0.9f, Hit.bCounter, 1 });
+		Popups.Add({ FString::FromInt(FMath::RoundToInt(Damage * 10.f)), KSColors::Yellow, FVector2D(Side * FMath::FRandRange(0.11f, 0.16f), FMath::FRandRange(-0.14f, -0.04f)), Clock, 0.9f, Hit.bCounter, 1 });
 		static const TCHAR* Words[] = { TEXT("POW!"), TEXT("BAM!"), TEXT("WHAM!"), TEXT("KRAK!") };
 		if (!Hit.bCounter) Popups.Add({ Words[FMath::RandRange(0, 3)], KSColors::Yellow, FVector2D(-Side * FMath::FRandRange(0.12f, 0.17f), FMath::FRandRange(-0.02f, 0.08f)), Clock, 0.7f, false, 3 });
 		Sfx(Hit.bCounter ? EKSSfx::Score : EKSSfx::Pop, Hit.bCounter ? 0.5f : 0.45f);
@@ -2988,6 +3026,7 @@ void AKSGameMode::EndFight(bool bWin, bool bDecision)
 	// The winner's celebration is a dance: on the floor, and where he stands (one that wandered off was partly out of
 	// the picture in 25 of 284 frames, and walks through the loser and the ropes).
 	if (AKSDummy* Winner = bWin ? PlayerDummy.Get() : OppDummy.Get()) { Winner->KeepOnFloor(true); Winner->StayOnSpot(Winner->BodyMiddle()); }
+	if (bOnline) OnlineBoutLog(bWin, bDecision);
 	bSpecialOn = false;
 	// One line per bout for tools/check.sh. "travel" is how far the drawn hand moved: near zero means a frozen body.
 	UE_LOG(LogTemp, Display, TEXT("KSTEST bout=%d opponent=%s result=%s opp_hand_travel=%.0f player_hand_travel=%.0f landed=%d taken=%d spectators=%d"), FighterIndex, Fighter().Name,
@@ -3030,7 +3069,7 @@ void AKSGameMode::TickFight(float Dt)
 		{
 			// Test bot: defends correctly and punches every opening.
 			AutoDefense = EKSDefense::None;
-			if (!bAutoNoGuard && (OppState == EKSOppState::Windup || OppState == EKSOppState::Strike))
+			if (!bAutoNoGuard && (!bOnline || bOnlineBotGuard) && (OppState == EKSOppState::Windup || OppState == EKSOppState::Strike))
 			{
 				AutoDefense = Attack.Type == EKSPunch::Straight ? EKSDefense::Block
 					: Attack.Type == EKSPunch::Hook ? (Attack.Side == EKSArm::Left ? EKSDefense::EvadeLeft : EKSDefense::EvadeRight) : EKSDefense::EvadeLeft;
@@ -3038,6 +3077,12 @@ void AKSGameMode::TickFight(float Dt)
 			if (OppState == EKSOppState::Open && Clock >= AutoNextPunch && !bGiveUp)
 			{
 				AutoNextPunch = Clock + 0.3f;
+				FramePunches.Add({ FMath::RandBool() ? EKSArm::Left : EKSArm::Right, (EKSPunch)FMath::RandRange(0, 2) });
+			}
+			// Against another player nobody hands out openings: the bot also leads off.
+			else if (bOnline && OppState == EKSOppState::Idle && Clock >= AutoNextPunch)
+			{
+				AutoNextPunch = Clock + FMath::FRandRange(0.8f, 1.8f);
 				FramePunches.Add({ FMath::RandBool() ? EKSArm::Left : EKSArm::Right, (EKSPunch)FMath::RandRange(0, 2) });
 			}
 		}
@@ -3057,6 +3102,9 @@ void AKSGameMode::TickFight(float Dt)
 				else if (SpecialsStarted >= 2 && Clock > SpecialEnd + 3.f && PC) { bTestSpecials = false; PC->ConsoleCommand(TEXT("quit")); }
 				PlayerHP = 100.f; OppHP = OppMaxHP;
 			}
+			// No specials against another player yet: each game judges only its own health (KSGameModeOnline.cpp), and a
+			// special takes health off the other side here. The meters stay empty and the HUD does not draw them.
+			if (bOnline) PlayerMeter = OppMeter = 0.f;
 			if (PlayerMeter >= 1.f && !bMeterFullSaid) { bMeterFullSaid = true; Sfx(EKSSfx::Score, 0.7f); }
 			if (Phase == EKSPhase::Fight && PlayerMeter >= 1.f && (Pressed(EKeys::S) || bShoutNow || bTestSpecials || (bAuto && !bGiveUp))) StartSpecial(true);
 			else if (Phase == EKSPhase::Fight && OppMeter >= 1.f && OppState == EKSOppState::Idle && PhaseTime > 4.f) StartSpecial(false);
@@ -3068,7 +3116,7 @@ void AKSGameMode::TickFight(float Dt)
 		if (Phase == EKSPhase::Fight)
 		{
 			TimeLeft -= Dt;
-			if (TimeLeft <= 0.f) EndFight(PlayerHP > OppHP / OppMaxHP * 100.f, true);
+			if (TimeLeft <= 0.f) { if (bOnline) OnlineTimeUp(); else EndFight(PlayerHP > OppHP / OppMaxHP * 100.f, true); }
 		}
 		PlayerTrail = FMath::Max(PlayerHP, PlayerTrail - 25.f * Dt);
 		OppTrail = FMath::Max(OppHP, OppTrail - 25.f * Dt);
@@ -3094,6 +3142,7 @@ void AKSGameMode::TickResult(float Dt)
 {
 	UpdateFighterPoses(Dt);
 	UpdateFightCamera(Dt);
+	if (bOnline) { OnlineAfterBout(); return; }
 	const bool bLast = FighterIndex + 1 >= NumFights();
 	// The whole ladder is won: once the fighters have had their say, the announcer crowns the player.
 	const bool bQuiet = Clock >= AnnouncerUntil && !LaterVoices.Num() && !(OppDummy && OppDummy->IsTalking()) && !(PlayerDummy && PlayerDummy->IsTalking());
@@ -3110,6 +3159,7 @@ void AKSGameMode::TickContinue(float Dt)
 {
 	UpdateFighterPoses(Dt);
 	UpdateFightCamera(Dt);
+	if (bOnline) { OnlineAfterBout(); return; }
 	ContinueLeft -= Dt;
 	BlackFade = FMath::Clamp(1.f - ContinueLeft / 10.f, 0.f, 0.85f);
 	if ((PhaseTime > 1.0f && ConfirmPressed()) || (bAuto && !bGiveUp && PhaseTime > 2.f)) { StartCard(FighterIndex); return; }

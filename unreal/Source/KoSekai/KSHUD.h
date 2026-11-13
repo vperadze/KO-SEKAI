@@ -65,7 +65,9 @@ private:
 
 	/* ---- the screens ---- */
 	void HealthBar(float X, float W, float Fraction, float Trail, const FLinearColor& Color, bool bRightToLeft, float Jolt);
+	void Backdrop();                          // the title painting, cropped to cover the screen
 	void DrawMenu(const AKSGameMode& G);
+	void DrawOnline(const AKSGameMode& G);    // the online lobby: host, join, type an address, wait
 	void DrawSelect(const AKSGameMode& G);    // choosing a fighter: name and tagline on the left, the seven portraits below
 	void DrawIntro(const AKSGameMode& G);     // the opening film, shown frame by frame from sheets (KSCineData.h)
 	void DrawStreet(const AKSGameMode& G);
@@ -100,6 +102,8 @@ private:
 	FString BubbleLine, AnnounceText;
 	float BubbleStart = 0.f, AnnounceStart = 0.f, AnnounceEnd = 0.f;
 	float SeenPlayerHP = -1.f, SeenOppHP = -1.f, PlayerJoltAt = -10.f, OppJoltAt = -10.f;
+	int32 SeenLobby = -1;
+	bool bLoggedLobby = false;
 	int32 SeenCombo = 0, SeenMenu = -1, SeenCount = -1;
 	float ComboAt = -10.f, MenuAt = -10.f, CountAt = -10.f;
 };

@@ -244,6 +244,16 @@ Updated 2026-11-13. Deadline 2026-11-16 02:59 CET.
   clean). Seen in stills: both fighters in every bout frame; the winner after the bell is whole but small.
   **Not judged**: whether the correction is felt as a jerk in motion.
 
+- Merged 2026-11-13 night: the colleague's online play (main) with the particle effects, the moving fighters, the
+  model-built arenas and the calmer webcam controls (real-fighters). `tools/check.sh` passes on Linux with both
+  (122 ok, the two online matches included). What the merge leaves open:
+  - **Online and the moving fighters**: each game moves its own two fighters (a dodge is a step, hits push); the
+    places are not sent to the other game, so the two players do not see exactly the same ring. Nobody has looked.
+  - **Online and the camera checks**: those cover the single-player path only.
+  - The lobby takes the webcam as the menus do now (a swept hand moves, left jab then right jab chooses).
+  - **Windows**: not built since the merge (it needs the Windows PC). The effect packs must be added there from
+    Fab as well (`docs/VFX.md`); they are not in the repository.
+
 ## Built but not verified with a person
 
 - Early punch call (punch starts while the arm is still extending).
@@ -255,6 +265,21 @@ Updated 2026-11-13. Deadline 2026-11-16 02:59 CET.
   Its text no longer blinks when a reading sits on a limit (debounced; checked with `-KSCalJitter`); with a
   real camera and person this is still unconfirmed.
 - Retry after a loss (goes through the same fresh-opponent path as the next bout).
+- **Online play** (2026-11-13; `KSNet`, `KSGameModeOnline.cpp`, `tools/ko_relay.py`): PLAY ONLINE on the start menu,
+  then host, or join a host or the relay server by address. A bout between two players uses the cabinet's own rules
+  with the other player throwing the opponent's punches; each game is the judge of its own health. `tools/check.sh`
+  plays two copies against each other on one machine, directly and through the relay, and checks that both tell the
+  same story (winner, health, punches landed and taken), and that a rematch starts. **Not verified**: two people,
+  two machines, a real network (only 127.0.0.1 was used, so delay and a firewall were never in play); whether half
+  a second in the air is the right time for a person to answer a person; the damage numbers (two bots finish a
+  bout in about 25 s); the lobby's address box and its three-line menu were never used by hand (only the waiting
+  and fight screens were seen in stills); a webcam player online. The team has no relay server running anywhere
+  yet, and `OnlineServer` in `DefaultGame.ini` is not set.
+  Since the merge with the select screen and the specials (2026-11-13): PLAY ONLINE goes through the fighter select,
+  so each player fights as the fighter they picked, and the host draws the arena. **Special abilities are switched off
+  online** (a special takes health off the other side locally, and online each game judges only its own health); the
+  meters are not drawn there. A packaged Windows build was made on the Windows PC and two copies of it played an
+  online bout on that one machine.
 
 ## Next
 
