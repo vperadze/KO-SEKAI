@@ -13,5 +13,9 @@ public class KoSekai : ModuleRules
 		PrivateDependencyModuleNames.AddRange(new string[] { "NNE", "OpenCV", "OpenCVHelper" });
 		// The HUD draws its text with two imported fonts (KSHUD).
 		PrivateDependencyModuleNames.AddRange(new string[] { "SlateCore" });
+		// The microphone (KSMic): a shout sets off a special ability.
+		PrivateDependencyModuleNames.AddRange(new string[] { "AudioCaptureCore" });
+		// Its back end is loaded by name in KSMic.cpp; named here so a packaged build carries it.
+		DynamicallyLoadedModuleNames.Add(Target.Platform == UnrealTargetPlatform.Win64 ? "AudioCaptureWasapi" : "AudioCaptureRtAudio");
 	}
 }

@@ -240,7 +240,10 @@ bool AKSDummy::UseCharacter(const FString& InFolder)
 	static const TCHAR* ClipNames[] = { TEXT("Combat_Stance"), TEXT("Left_Jab_from_Guard"), TEXT("Right_Jab_from_Guard"),
 		TEXT("Left_Hook_from_Guard"), TEXT("Right_Upper_Hook_from_Guard"), TEXT("Left_Uppercut_from_Guard"), TEXT("Right_Uppercut_from_Guard"),
 		TEXT("Block1"), TEXT("Stand_Dodge"), TEXT("Stand_Dodge_1"), TEXT("Face_Punch_Reaction"), TEXT("Face_Punch_Reaction_1"),
-		TEXT("Hit_Reaction_to_Waist"), TEXT("Knock_Down"), TEXT("victory"), TEXT("Chest_Pound_Taunt"), TEXT("Punch_Combo") };
+		TEXT("Hit_Reaction_to_Waist"), TEXT("Knock_Down"), TEXT("victory"), TEXT("Chest_Pound_Taunt"), TEXT("Punch_Combo"),
+		// The extra moves (art/tools/add_moves.py): two fun idles and a "picked" move for the select screen, the special
+		// ability, the win celebration, and the stagger of an attacker whose punch was blocked.
+		TEXT("Fun_A"), TEXT("Fun_B"), TEXT("Picked"), TEXT("Special"), TEXT("Win"), TEXT("Stagger") };
 	static const TCHAR* FaceNames[] = { TEXT("hurt"), TEXT("ko"), TEXT("dizzy"), TEXT("hit"), TEXT("smug"), TEXT("happy"), TEXT("love"), TEXT("neutral"),
 		TEXT("calm"), TEXT("talk"), TEXT("angry"), TEXT("blink") };
 
@@ -291,7 +294,9 @@ bool AKSDummy::UseCharacter(const FString& InFolder)
 		const FString Asset = FString::Printf(TEXT("V_%s_%s"), Line.Fighter, Line.Key);
 		if (LoadObject<USoundBase>(nullptr, *FString::Printf(TEXT("/Game/KS/Voice/%s.%s"), *Asset, *Asset), nullptr, LOAD_NoWarn | LOAD_Quiet)) Sounds++;
 	}
-	UE_LOG(LogTemp, Display, TEXT("KSTEST fighter=%s faces=%d voice_lines=%d"), *Folder, Faces.Num(), Sounds);
+	int32 Moves = 0;
+	for (const TCHAR* Name : { TEXT("Fun_A"), TEXT("Fun_B"), TEXT("Picked"), TEXT("Special"), TEXT("Win"), TEXT("Stagger") }) Moves += Clips.Contains(Name) ? 1 : 0;
+	UE_LOG(LogTemp, Display, TEXT("KSTEST fighter=%s faces=%d voice_lines=%d moves=%d"), *Folder, Faces.Num(), Sounds, Moves);
 	ImpactGlove.Reset();
 	for (const FKSImpact& Row : KSImpacts) if (Folder == Row.Fighter) ImpactGlove.Add(Row.Clip, Row.Glove);
 	ShiftNow = ShiftTarget = 0.f; SquashNow = SquashTarget = 1.f;
@@ -313,11 +318,18 @@ void AKSDummy::PlayClip(const FString& Clip, bool bLoop, float Rate, float Start
 	if (Clip == TEXT("Knock_Down")) { FTimerHandle Handle; GetWorldTimerManager().SetTimer(Handle, [this]() { KSAudio::Play(this, EKSSfx::Fall, 0.9f); }, 0.55f, false); }
 	BlendPrev = PrevShownPose;
 	BlendDt = ShownDt;
-	BlendTime = Clip.Contains(TEXT("Reaction")) ? 0.06f : (Clip == TEXT("Combat_Stance") ? 0.18f : 0.11f);
+	// Into one of his own idle moves slowly, so it grows out of the stance; out of it at the usual speed of a punch.
+	BlendTime = Clip.Contains(TEXT("Reaction")) ? 0.06f : Clip.StartsWith(TEXT("Fun_")) ? 0.32f : (Clip == TEXT("Combat_Stance") ? 0.18f : 0.11f);
 	BlendLeft = BlendTime;
 	Skel->PlayAnimation(*Found, bLoop);
 	Skel->SetPlayRate(Rate);
 	if (StartSeconds > 0.f) Skel->SetPosition(FMath::Min(StartSeconds, (*Found)->GetPlayLength() - 0.01f), false);
+}
+
+float AKSDummy::ClipSeconds(const FString& Clip) const
+{
+	const TObjectPtr<UAnimSequence>* Found = Clips.Find(Clip);
+	return Found && *Found ? (*Found)->GetPlayLength() : 0.f;
 }
 
 void AKSDummy::SetClipRate(float Rate)
@@ -503,7 +515,9 @@ void AKSDummy::SolveLeg(bool bLeft, const FVector& FootAt, const FQuat& FootRota
 void AKSDummy::Footwork(float DeltaSeconds)
 {
 	// Not while falling or celebrating: those clips move the legs themselves.
-	const bool bWanted = !(CurrentClip == TEXT("Knock_Down") || CurrentClip == TEXT("victory") || CurrentClip == TEXT("Chest_Pound_Taunt"));
+	static const TCHAR* OwnLegs[] = { TEXT("Knock_Down"), TEXT("victory"), TEXT("Chest_Pound_Taunt"), TEXT("Fun_A"), TEXT("Fun_B"), TEXT("Picked"), TEXT("Special"), TEXT("Win"), TEXT("Stagger") };
+	bool bWanted = true;
+	for (const TCHAR* Name : OwnLegs) bWanted &= CurrentClip != Name;
 	LegWeight = FMath::FInterpTo(LegWeight, bWanted ? 1.f : 0.f, DeltaSeconds, 6.f);
 	if (LegWeight < 0.02f) { Feet[0].bPlaced = Feet[1].bPlaced = false; return; }
 	FootClock += DeltaSeconds;

@@ -138,6 +138,29 @@ One entry per bug that cost time: what happened, the cause, the rule. Add to it 
   two"), as the fighters' short lines had. Rule, again: give Chatterbox five words ("Round number one! Fight!").
   The recogniser also writes "Round 1" for "round one" and "Laser Corn" for "Lasercorn": compare letters, not words.
 
+- **New Meshy clips do not need the staging editor.** Every Meshy rig has the same 26 bones, so one bought clip is
+  copied onto all seven fighters (`transplant_anim.py`), and Interchange imports animations alone onto a fighter's
+  existing skeleton from a headless script (`import_only_animations` + `skeleton` on an override pipeline). With one
+  clip in the file the asset is named after the file, with several after the clip (`extraFun_A`).
+- **`unreal.log` from a headless script does not reach the terminal.** Three import runs looked as if they had done
+  nothing. Rule: an import script also writes its lines to a file in `unreal/Saved`.
+- **Unreal cannot hear a microphone on Linux.** `AudioCaptureCore` says "No Audio Capture implementations found":
+  the RtAudio back end is built without RtAudio there, and on any platform the back end module has to be loaded by
+  name first. Windows has `AudioCaptureWasapi`; on Linux `KSMic` reads `arecord` through a pipe.
+- **An effect aimed from one fighter at the other is hidden from the fight camera**, which sits behind the player:
+  his own body covers it. And a glow of 20 or more burns every colour to white. Rule: specials are shown from the
+  side, and coloured pieces glow at 3 to 7.
+
+- **Moving fighters looked "pixelated, bad texture"** (player report, 2026-11-13). Not the textures: the engine's
+  default anti-aliasing (TSR) blends each frame with the last and needs motion vectors, and the fighters' drawn
+  bodies are poseable meshes that give none. Still fighters were sharp, dancing ones dissolved into noise (seen in a
+  side-by-side of the same moments). Rule: the game sets `r.AntiAliasingMethod` to 1 (FXAA) in `BeginPlay`; judge
+  picture quality from stills of something moving, not of the stance.
+- **Meshy's dances walk.** The hips travel a metre and more, so fighters left the picture on the select screen, and
+  the Stagger clip backed off 1.6 m and snapped home. Rule: `add_moves.py` takes the slow travel out of the hips
+  (moving average over 1.2 s) and keeps a quarter of the stagger's step.
+- **Alternating idle clips with the stance in between read as "stopping and starting".** Rule: one clip, looped.
+
 ## Interface art
 
 - **Badges and speech bubbles landed on the fighters, and calibration text ran out of its panel.** Both were placed at
@@ -180,3 +203,34 @@ One entry per bug that cost time: what happened, the cause, the rule. Add to it 
   `-KSCalDemo -KSCalJitter`). Rule: nothing a person has to read is driven straight by a per-frame camera reading;
   it goes through `Steady()` in `TickCalibrate` (a third of a second to change, with a margin on the limit).
 
+- **A reference picture carries its style with it.** Asked to redraw the pixel spectators "realistic, like the
+  fighters" with each old sprite as the reference, Dreamina returned the same pixel dolls with shading (4 credits).
+  From the written description alone the style was right at once. Rule: a reference is for what must stay the
+  same; when the look is what must change, describe the character in words and leave the picture out.
+- **"Whole body" needs the room to be asked for.** Eight tall people on a 16:9 sheet came back cut off at the knee;
+  on 4:3 (taller cells) with "the camera stands far enough back, empty space above the head and below the feet" they
+  fit. Saying "each figure is small" instead made them cute and big-headed: size words are style words too.
+- **A camera that leaves the player's back changes what "left" means.** The cameraman may go behind the opponent
+  only while the player has nothing to dodge (opponent open or down, bout over); when a punch is wound up and he is
+  out at the side he runs back behind a shoulder. The check counts the frames in which he lost the opponent's head.
+- **Flat spectators and a moving camera.** Pictures fixed towards the ring centre turn into lines when seen from
+  the side. They now turn on their feet to face the camera every frame (`TickCrowd`).
+- **The webcam's light stayed on after quitting** (player report, 2026-11-13). The microphone's `arecord` was started
+  straight from the game and inherited every file the game had open: the webcam, and the reading end of its own
+  pipe, so it never got the broken-pipe signal and outlived the game (two were found, one 37 minutes old, ignoring
+  SIGTERM). The only test had ended the game politely. Rule: a helper process is started through a shell that
+  closes every file above the three standard streams first (`KSMic.cpp`), and is tested by killing the game with
+  -9 and looking at what the helper still holds (`tools/check.sh`, "microphone recorder", flag `-KSMic`).
+- **Unreal's `CreateProc` splits its argument string on double quotes only.** A `bash -c '...'` script in single
+  quotes arrived as loose words and the recorder never started, while the game still reported the microphone open.
+  Rule: wrap the script in double quotes and keep quotes and backslashes out of it (`exec {n}>&-` closes the file
+  whose number is in `n` without `eval`).
+- **The film's skip hint read "jab, enter, jab, enter"** (player report, 2026-11-13). It blinked on a timer and chose
+  its words by whether the tracker saw a body that frame. The same rule as for calibration: nothing to be read is
+  driven by a per-frame camera reading. It is steady now and worded by whether a camera is connected.
+- **A description can add up to somebody else's character.** "A plumber in dungarees and a cap with a big moustache"
+  came back as a famous game mascot, "a home-made superhero costume with a cape" as a famous hero, and a baseball
+  player in stripes wore a real team's letters. Rule: look at every generated character for likenesses and logos
+  before it goes in; reword with what sets it apart (bald, red beard, grey overalls; "no letters, no logo").
+- **A figure taller than its cell cannot be sliced.** "An extremely tall" basketball player twice ran his legs
+  through the row below. Rule: giants are drawn at normal proportions and made big by the game (`EKSBuild::Giant`).

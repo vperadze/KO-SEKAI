@@ -4,16 +4,57 @@
 	"Category": "",
 	"Description": "KO-SEKAI - 2026 Epic AI MegaJam entry",
 	"Modules": [
-		{ "Name": "KoSekai", "Type": "Runtime", "LoadingPhase": "Default" }
+		{
+			"Name": "KoSekai",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		}
 	],
 	"Plugins": [
-		{ "Name": "ModelingToolsEditorMode", "Enabled": true, "TargetAllowList": [ "Editor" ] },
-		{ "Name": "GameFeatures", "Enabled": true },
-		{ "Name": "Fab", "Enabled": true },
-		{ "Name": "Bridge", "Enabled": true },
-		{ "Name": "ModelContextProtocol", "Enabled": true, "TargetAllowList": [ "Editor" ] },
-		{ "Name": "AllToolsets", "Enabled": true, "TargetAllowList": [ "Editor" ] },
-		{ "Name": "OpenCV", "Enabled": true },
-		{ "Name": "NNERuntimeORT", "Enabled": true }
+		{
+			"Name": "ModelingToolsEditorMode",
+			"Enabled": true,
+			"TargetAllowList": [
+				"Editor"
+			]
+		},
+		{
+			"Name": "GameFeatures",
+			"Enabled": true
+		},
+		{
+			"Name": "Fab",
+			"Enabled": true
+		},
+		{
+			"Name": "Bridge",
+			"Enabled": true
+		},
+		{
+			"Name": "ModelContextProtocol",
+			"Enabled": true,
+			"TargetAllowList": [
+				"Editor"
+			]
+		},
+		{
+			"Name": "AllToolsets",
+			"Enabled": true,
+			"TargetAllowList": [
+				"Editor"
+			]
+		},
+		{
+			"Name": "OpenCV",
+			"Enabled": true
+		},
+		{
+			"Name": "NNERuntimeORT",
+			"Enabled": true
+		},
+		{
+			"Name": "AudioCapture",
+			"Enabled": true
+		}
 	]
 }

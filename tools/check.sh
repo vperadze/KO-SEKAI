@@ -61,19 +61,34 @@ while read -r line; do
 	bout=$(field "$line" bout); name=$(echo "$line" | sed -n 's/.*opponent=\(.*\) result=.*/\1/p')
 	[ "$(field "$line" opp_hand_travel)" -ge 20 ] && pass "bout $bout: the opponent ($name) moves" || fail "bout $bout: the opponent ($name) is frozen in one pose"
 	[ "$(field "$line" player_hand_travel)" -ge 20 ] && pass "bout $bout: the player's fighter moves" || fail "bout $bout: the player's fighter is frozen in one pose"
-	[ "$(field "$line" spectators)" -ge 55 ] && pass "bout $bout: $(field "$line" spectators) spectators at ringside" || fail "bout $bout: $(field "$line" spectators) spectators, expected 55 or more"
+	[ "$(field "$line" spectators)" -ge 150 ] && pass "bout $bout: $(field "$line" spectators) spectators at ringside" || fail "bout $bout: $(field "$line" spectators) spectators, expected 150 or more"
 done <<< "$(grep "KSTEST bout=" "$LOG" 2> /dev/null)"
 # The crowd. The bugs this guards: a sheet that did not import leaves a hole in the stands, and a crowd that only
 # ever shows one pose or one movement is the old stiff crowd again.
 line=$(grep "KSTEST crowd seated=" "$LOG" 2> /dev/null | head -1)
-[ "$(field "$line" characters)" -ge 45 ] && pass "$(field "$line" characters) different spectators to draw from" || fail "only $(field "$line" characters) spectator characters (${line:-no KSTEST crowd line}); run art/arena/slice_crowd.py, then art/tools/import_crowd.py"
+[ "$(field "$line" characters)" -ge 165 ] && pass "$(field "$line" characters) different spectators to draw from" || fail "only $(field "$line" characters) spectator characters (${line:-no KSTEST crowd line}); run art/arena/slice_crowd.py, then art/tools/import_crowd.py"
+# The player asked for a house that goes all the way round and for nobody to be in it twice (2026-11-13).
+[ "$(field "$line" twice)" = 0 ] && pass "no spectator is in the hall twice" || fail "a spectator was dealt twice (${line:-no KSTEST crowd line})"
+for side in far near left right; do
+	[ "$(field "$line" $side)" -ge 25 ] 2> /dev/null && pass "$(field "$line" $side) spectators on the $side side of the ring" || fail "only $(field "$line" $side) spectators on the $side side of the ring"
+done
 [ "$(field "$line" seated)" -ge 55 ] && pass "$(field "$line" seated) seats filled, giants and flyers included" || fail "only $(field "$line" seated) seats filled: a spectator picture is missing from /Game/KS/Arena"
 while read -r line; do
 	[ -z "$line" ] && continue
 	bout=$(field "$line" bout)
-	[ "$(field "$line" poses)" -ge 6 ] && pass "bout $bout: the crowd showed all $(field "$line" poses) poses" || fail "bout $bout: the crowd showed only $(field "$line" poses) of 6 poses"
+	[ "$(field "$line" poses)" -ge 8 ] && pass "bout $bout: the crowd showed all $(field "$line" poses) poses" || fail "bout $bout: the crowd showed only $(field "$line" poses) of 8 poses"
 	[ "$(field "$line" moves)" -ge 7 ] && pass "bout $bout: the crowd moved in $(field "$line" moves) different ways" || fail "bout $bout: the crowd moved in only $(field "$line" moves) ways"
 done <<< "$(grep "KSTEST crowd bout=" "$LOG" 2> /dev/null)"
+# The cameraman. He walks round the ring and picks his own shots; the two ways that goes wrong are that he stands
+# still after all (the old fixed shoulder view) or that he wanders off and loses the opponent.
+while read -r line; do
+	[ -z "$line" ] && { fail "no KSTEST camera line: the cameraman reported nothing"; continue; }
+	bout=$(field "$line" bout); frames=$(field "$line" frames); lost=$(field "$line" opp_lost); hidden=$(field "$line" opp_hidden)
+	[ "$(field "$line" shots)" -ge 3 ] && [ "$(field "$line" span)" -ge 60 ] && pass "bout $bout: the cameraman took $(field "$line" shots) shots across $(field "$line" span) degrees of the ring" || fail "bout $bout: the cameraman hardly moved ($line)"
+	[ "${frames:-0}" -gt 0 ] && [ $((lost * 100 / frames)) -le 7 ] && pass "bout $bout: the opponent's head stayed in the picture ($lost of $frames frames out)" || fail "bout $bout: the cameraman lost the opponent in $lost of ${frames:-0} frames"
+	# Seen in stills of the first version: he stood straight behind the player, whose back covered the opponent.
+	[ "${frames:-0}" -gt 0 ] && [ $((hidden * 100 / frames)) -le 6 ] && pass "bout $bout: the player's head was in front of the opponent's in $hidden of $frames frames" || fail "bout $bout: the player's own head hid the opponent in ${hidden:-?} of ${frames:-0} frames (cameraman straight behind his back)"
+done <<< "$(grep "KSTEST camera bout=" "$LOG" 2> /dev/null)"
 for snd in Cheer Gasp Shout; do
 	n=$(grep "KSTEST sound=$snd " "$LOG" 2> /dev/null | head -1 | tr -d "\r" | sed -n 's/.*recorded_variants=\([0-9]*\).*/\1/p')
 	# These have no synthesised fallback: without the recordings the crowd is silent.
@@ -115,6 +130,8 @@ while read -r line; do
 	who=$(field "$line" fighter)
 	[ "$(field "$line" faces)" -ge 4 ] && pass "$who: $(field "$line" faces) face expressions loaded" || fail "$who: only $(field "$line" faces) face expressions loaded"
 	[ "$(field "$line" voice_lines)" -ge 8 ] && pass "$who: $(field "$line" voice_lines) voice lines loaded" || fail "$who: only $(field "$line" voice_lines) voice lines loaded"
+	# The extra moves: without them the fighter stands in his stance on the select screen and pounds his chest for a special.
+	[ "$(field "$line" moves)" -ge 6 ] && pass "$who: all $(field "$line" moves) extra moves loaded (idles, picked, special, win, stagger)" || fail "$who: only $(field "$line" moves) of 6 extra moves loaded; run art/tools/add_moves.py build, then art/tools/import_moves.py"
 done <<< "$(grep "KSTEST fighter=" "$LOG" 2> /dev/null | sed 's/.*KSTEST/KSTEST/' | sort -u)"
 while read -r line; do
 	[ -z "$line" ] && continue
@@ -122,6 +139,17 @@ while read -r line; do
 	[ "$(field "$line" shown)" -ge 3 ] && pass "bout $bout: the opponent's face changed ($(field "$line" shown) expressions shown)" || fail "bout $bout: the opponent showed only $(field "$line" shown) expression(s)"
 	[ "$(field "$line" mouth_opens)" -ge 1 ] && pass "bout $bout: the opponent's mouth moved while speaking ($(field "$line" mouth_opens) times)" || fail "bout $bout: the opponent's mouth never moved"
 done <<< "$(grep "KSTEST faces bout=" "$LOG" 2> /dev/null)"
+# Special abilities: the bot sets its special off as soon as the meter is full. The bugs this guards: a special that
+# never starts, one played with the stand-in chest pound, and one whose effect has no pieces.
+line=$(grep "KSTEST special by=player" "$LOG" 2> /dev/null | head -1 | tr -d "\r")
+[ -n "$line" ] && [ "$(field "$line" own_clip)" = 1 ] && pass "the player's special ability went off with its own move ($(field "$line" fighter))" || fail "no special ability with its own move (${line:-the meter never filled or it never started})"
+pieces=$(field "$(grep "KSTEST special landed" "$LOG" 2> /dev/null | head -1)" pieces)
+[ "${pieces:-0}" -ge 40 ] && pass "the special's effect was drawn ($pieces pieces by the time it landed)" || fail "the special's effect is missing (${pieces:-0} pieces)"
+# A blocked punch throws the attacker back and ends his attack.
+n=$(grep -c "KSTEST stagger" "$LOG" 2> /dev/null); n=${n:-0}; bad=$(grep "KSTEST stagger" "$LOG" 2> /dev/null | grep -c "clip=0")
+if [ "$n" = 0 ]; then echo "  --    block stagger: no punch was blocked in this run"
+elif [ "$bad" = 0 ]; then pass "a blocked punch made the attacker stagger ($n times, with the stagger move)"
+else fail "the attacker staggered $bad time(s) without his stagger move"; fi
 n=$(grep -c "KSTEST voice .*line=intro sound=1" "$LOG" 2> /dev/null); n=${n:-0}
 [ "$n" -ge 2 ] && pass "each opponent introduced himself aloud" || fail "only $n spoken introduction(s) in two bouts"
 if grep -qE "Fatal error|Assertion failed|Ensure condition failed|Unhandled Exception" "$LOG" 2> /dev/null; then
@@ -159,6 +187,7 @@ line=$(grep "KSTEST ui select shown " "$LOG" 2> /dev/null | head -1 | tr -d "\r"
 picked=$(field "$(grep "KSTEST select chosen=" "$LOG" 2> /dev/null | head -1)" fighter)
 played=$(field "$(grep "KSTEST player fighter=" "$LOG" 2> /dev/null | tail -1)" fighter)
 [ -n "$picked" ] && [ "$picked" = "$played" ] && pass "the fighter chosen ($picked) is the one the player fights as" || fail "chose '${picked:-nobody}' but the ladder started as '${played:-nobody}'"
+grep -q "KSTEST select idle fighter=.* clip=" "$LOG" 2> /dev/null && pass "the fighter on the select screen dances instead of holding his stance" || fail "the fighter on the select screen only holds his stance (no dance played)"
 # The ring announcer: every line he is asked for must be in the table and have its recording.
 asked=$(grep -c "KSTEST announcer line=" "$LOG" 2> /dev/null); asked=${asked:-0}
 silent=$(grep "KSTEST announcer line=" "$LOG" 2> /dev/null | grep -c "sound=0")
@@ -183,6 +212,30 @@ run_until 1 "KSTEST ui menu shown" 240 "$LOG" -KSStart=fight -KSAuto -KSGiveUp -
 grep -q "KSTEST to_menu from_phase=6" "$LOG" 2> /dev/null && grep -q "KSTEST ui menu shown" "$LOG" 2> /dev/null && pass "game over (count run out) shows the start menu" || fail "game over did not reach the start menu ($(grep -c "KSTEST bout=" "$LOG" 2> /dev/null) bout(s) ended)"
 calls=$(grep -c "EnterStreet(" "$ROOT/unreal/Source/KoSekai/KSGameMode.cpp")
 [ "$calls" -le 2 ] && pass "nothing in the game leads back to the street (only -KSStart=street)" || fail "$((calls - 2)) place(s) in KSGameMode.cpp still send the player to the street: $(grep -n "EnterStreet(" "$ROOT/unreal/Source/KoSekai/KSGameMode.cpp" | cut -d: -f1 | tr "\n" " ")"
+
+echo "== microphone recorder (opened without sound; the game is then killed)"
+# The bug this guards (player report, 2026-11-13): the webcam's light stayed on after quitting. The recorder the game
+# starts for the microphone inherited the game's open files, the webcam among them, and outlived the game.
+if [ -x /usr/bin/arecord ]; then
+	LOG="$OUT/mic.log"; rm -f "$LOG"; before=$(pgrep -x arecord | sort)
+	"$EDITOR" "$PROJECT" -game -windowed -ResX=1280 -ResY=720 -nosound -unattended -abslog="$LOG" -KSStart=menu -KSMic -KSNoCamera > /dev/null 2>&1 &
+	pid=$!; waited=0
+	while kill -0 "$pid" 2> /dev/null && [ "$waited" -lt 90 ] && ! grep -q "KSTEST mic open=" "$LOG" 2> /dev/null; do sleep 2; waited=$((waited + 2)); done
+	sleep 3
+	rec=$(comm -13 <(echo "$before") <(pgrep -x arecord | sort) | head -1)
+	if grep -q "KSTEST mic open=1" "$LOG" 2> /dev/null && [ -n "$rec" ]; then
+		# The game has its own log open; a recorder that inherited the game's files has it too.
+		files=$(ls -l /proc/"$rec"/fd 2> /dev/null | grep -c "mic.log\|/dev/video")
+		[ "$files" = 0 ] && pass "the recorder holds none of the game's open files" || fail "the recorder inherited the game's open files: a webcam among them stays on after quitting"
+		kill -9 "$pid" 2> /dev/null; wait "$pid" 2> /dev/null; sleep 3
+		kill -0 "$rec" 2> /dev/null && { fail "the recorder outlived the game (pid $rec)"; kill "$rec"; } || pass "the recorder stopped when the game was killed"
+	else
+		if grep -q "KSTEST mic open=1" "$LOG" 2> /dev/null; then fail "the game says the microphone is open but no recorder is running"
+		else echo "  --    microphone did not open here ($(grep -o "KSTEST mic open=.*" "$LOG" 2> /dev/null | head -1)): recorder not checked"; fi
+		kill "$pid" 2> /dev/null; wait "$pid" 2> /dev/null
+	fi
+	restore
+else echo "  --    no arecord on this machine: recorder not checked"; fi
 
 echo "== calibration screen (stepped through automatically, no camera)"
 LOG="$OUT/calibration.log"

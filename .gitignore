@@ -28,3 +28,11 @@ art/audio/M_*.wav
 
 # The speech models' Python environment (2 GB): art/tools/voices.py says how to make it
 art/voice-model/
+
+# Raw downloads from Dreamina that the game does not use: rejected crowd tries (some resemble existing characters or
+# carry real logos, never publish them), the uncut crowd sheets (772 MB; fetch again with art/arena/real_nodes.json)
+# and the uncut portraits (art/ui/avatar_nodes.json).
+art/arena/raw/
+art/arena/real_*.jpg
+art/arena/*.log
+art/ui/raw/av_*

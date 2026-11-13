@@ -15,18 +15,31 @@ Updated 2026-11-13. Deadline 2026-11-16 02:59 CET.
   (`KSWorld::BuildArena`, `AKSGameMode::TickArenaFx`). Seen in stills: stands, shadows, haze, beams and lasers all
   read. **Not seen**: anything in motion (sweep, strobe, confetti falling), and the cost in frame rate with the
   webcam tracker running.
-- Crowd: about 60 old-arcade sprite spectators drawn from 50 characters (people of the 80s, monsters, a T-rex, a
-  dragon, a UFO...), six poses each (idle, cheer, wince, shout, fist pump, boo). Seated by size: tiny ones in
-  front, giants in a row at the back, five kinds hover above the stands. Sizes, places, pace and habits are random
-  per run; nine kinds of movement (jump, hop, shake, sway, pulse, cower, dance, loop, idle styles), a wave that goes
-  round the stands, 18% root for the opponent. Pictures: `art/arena/gen_crowd.py` -> `slice_crowd.py` ->
-  `art/tools/import_crowd.py`; the list the game seats is the generated `KSCrowdData.h`.
+- Crowd, redone 2026-11-13 at the player's request ("too cartoonish"): about 60 spectators drawn from 50 characters,
+  now rendered 3D people in the fighters' look instead of arcade pixels (same cast: people of the 80s, monsters, a
+  T-rex, a dragon, a UFO...), eight poses each (idle, cheer, wince, shout, fist pump, boo, clap, dance). Seated by
+  size, people-sized (a normal one 190-215 cm). They move smoothly now (jumps with a squat on landing, sways,
+  breathing, clapping, a dance), each picture turns to face the camera, a knockout is celebrated for 3-7 s, a wave
+  goes round the stands, 18% root for the opponent. Pictures: `art/arena/gen_crowd_real.py` (120 credits spent, tests and six redone creature sheets included) ->
+  `slice_crowd.py` -> `art/tools/import_crowd.py`; the list the game seats is the generated `KSCrowdData.h`.
+  Seen in stills: they read as people in the stands, in every arena tried. The slime's sheet has a man's face in
+  some poses and the unicorn's body changes between poses (no credits were left in the approved 120 to redo them).
+  **Not seen in motion**: whether swapping whole poses on a realistic picture reads as acting or as a slide show.
 - Crowd sound, cut from Dreamina video soundtracks (`art/arena/gen_crowd_sound.py` -> `art/tools/prep_crowd.py`):
   cheers on the player's hits, gasps and boos when he is hit, a roar on a KO, hecklers shouting, beast roars, and a
   looping murmur under the music. Loading is checked. **Nobody has listened to them**: what the shouted words
   are, how they sit against music and voices, and whether the murmur's loop point is audible are all unjudged.
-- Fight camera on springs: drives in behind the player's punches, lurches and tips when the player is hit, leans
-  in when the opponent is open, slides and sinks with the player's dodges, drifts round the ring.
+- Fight camera, redone 2026-11-13 at the player's request: a Steadicam operator who walks the whole ring
+  (`UpdateFightCamera`, "the cameraman"). He picks a new shot every 2-4 s (over either shoulder, three-quarter,
+  side-on, low on one knee, high and wide), dives in close when the opponent is open and may then go right round
+  behind him, runs back behind a shoulder when a punch is wound up, circles the ring after the bell. Footstep bob,
+  lean into the run, a frame that trails him; the old springs (lurch when hit, drive-in on punches, slide with
+  dodges) still act on top. The check counts his shots, the arc he covered and frames with the opponent out of
+  the picture, and frames with the player's head in front of the opponent's (the first version stood straight
+  behind the player's back; he now crosses there high, looking over the head, and comes close only from the side).
+  Seen in stills: both fighters in nearly every frame; the opponent's head is out of the picture in up to 3.5% of a
+  bout's frames (the check allows 7%). **Not judged by a person**: whether it is exciting or seasick, and whether defending still reads
+  from the side views.
 - Footwork: boxer's bounce, planted feet that take real steps when the body moves, idle shuffles
   (`AKSDummy::Footwork`, two-bone leg IK on the drawn body). Seen in stills only; the feel in motion is unjudged.
 - Built-in webcam tracker: camera opens, body is found, 30 frames/s when the machine is otherwise idle.
@@ -109,6 +122,46 @@ Updated 2026-11-13. Deadline 2026-11-16 02:59 CET.
   wait for him; the music dips under him. Checked: every line asked for has its recording.
   **Nobody has listened to him yet**: the voice, the pathos, the loudness and whether he talks too much are unjudged.
 
+- Added 2026-11-13 (second request of the day), all checked by `tools/check.sh` and seen in stills only:
+  - **Moves**: 36 Meshy library clips (108 credits), six per fighter: two fun idles and a "picked" move on the select
+    screen (the fighter no longer stands in his stance), his special, a win celebration (a dance, replacing the one
+    shared victory clip) and a stagger. `art/tools/add_moves.py` -> `import_moves.py`.
+  - **Portraits**: painted by Dreamina from the photographs (14 credits), `art/ui/gen_avatars.py`.
+  - **Block breaks his attack**: a blocked punch throws the opponent back (`Stagger` clip, knock-back, camera jolt)
+    and leaves him open for a second (it was half a second and a face-punch loop).
+  - **Special abilities**: a meter each under the names, filled by hits, counters, blocks and dodges. The player's
+    goes off on a shout into the microphone or the S key; the opponent's by itself (duck or lean away; a block
+    halves it). Each fighter has his own move, battle cry and effect, built in code from glowing engine shapes
+    (`FxAdd`/`FxBeam`/`FxBurst`): ground slam, static, rainbow laser, fire ring, lightning, fireball, hairspray cloud
+    with bats. 24 damage and the opponent left open; a side-on camera shot for the charge and the hit.
+  - **Microphone** (`KSMic`): a shout is "much louder than the room for a fifth of a second"; it cannot tell words
+    apart. Windows uses Unreal's capture; Unreal has none on Linux, so there it reads `arecord`. Opens here.
+  - **Idle in a fight** (third request of the day): between attacks the opponent plays one of his own two fun moves
+    (every third time the plain stance), picked up at a random place; the player's fighter does the same after 1.3 s
+    without input. A slow blend in (0.32 s), the usual quick one out into a punch. Seen in one still: the two stand
+    differently; with arms out at 150 cm apart their gloves can overlap.
+  - Later the same day: the select screen loops one dance (the fighter's win dance) instead of alternating clips;
+    the clips no longer travel (hips kept on the spot); the game uses FXAA, which stopped moving fighters dissolving
+    into noise. Seen in six stills over ten seconds: sharp and in place. Thin lines (ropes, lasers) will be a little
+    more jagged than before; not compared.
+  **Not verified**: none of the 42 clips has been watched in motion (they were chosen by name from Meshy's list, so
+  some may look wrong for the fighter or slide across the floor); six of the seven effects have not been seen even in
+  a still (only the fireball); nobody has shouted at it (the threshold, and whether the game's own sound from the
+  loudspeakers sets it off, are untested: headphones avoid that); the Windows microphone path is untested; the
+  balance of the specials (meter speed, 24 and 22 damage) is a guess.
+
+- Fixed 2026-11-13 (player reports), both checked: the webcam stays free after quitting (the microphone recorder no
+  longer inherits the game's open files or outlives it), and the film's skip hint is steady.
+- Three times the crowd, all round the ring, nobody twice (player request, 2026-11-13; 272 more credits, 392 for
+  the realistic crowd in all): 179 characters (`crowd_roster.py`: `NEW`, `OLD`, `MORE`), 187 places on all four
+  sides (three rows at each end, two rows and a platform row down each side, a stepped block in every corner, giants
+  at the back, flyers above; `SeatCrowd`, stands in `KSWorld::BuildArena`). Every character is dealt once; an
+  arena's own people get the front rows. The near end keeps an aisle for the wide shot that opens a bout. Checked:
+  179 seated, none twice, 40 or more on each side. Seen in stills: the house is full from every camera angle.
+  **Not measured**: the frame rate with 179 spectators and the webcam running; a "Preparing Textures (220)" notice
+  showed on the first frame of a run, so the first bout may hitch while they load. The painted wall still covers
+  only the far 230 degrees: behind the near stands it is dark. Crowd textures are now 126 MB before cooking.
+
 ## Built but not verified with a person
 
 - Early punch call (punch starts while the arm is still extending).
@@ -138,4 +191,4 @@ Updated 2026-11-13. Deadline 2026-11-16 02:59 CET.
 - No duck or get-up clips.
 - Fab assets: none in the project; Fab cannot be driven from here.
 - `Content/KS/Tracker/pose_lite.uasset` (5 MB) is an accidental editor import the game does not use.
-- Spectators are flat sprites turned towards the ring centre; seen edge-on they are thin.
+- Spectators are flat pictures that turn to face the camera; they have no side or back view.

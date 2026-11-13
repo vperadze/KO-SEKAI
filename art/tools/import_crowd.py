@@ -34,8 +34,8 @@ for png in sorted(glob.glob(os.path.join(ROOT, 'art', 'arena', 'T_KS_Crowd_*.png
     if not stale(png, 'KS/Arena'): continue
     tex = bring(png, '/Game/KS/Arena')
     if not tex: unreal.log_error('KSIMPORT failed picture %s' % png); continue
-    # Chunky pixels stay chunky: no smoothing between them. The sheets are small, so they need not stream.
-    tex.set_editor_property('filter', unreal.TextureFilter.TF_NEAREST)
+    # Rendered people, not pixels: smooth filtering (the pixel crowd used TF_NEAREST). The sheets are small, so they need not stream.
+    tex.set_editor_property('filter', unreal.TextureFilter.TF_DEFAULT)
     tex.set_editor_property('never_stream', True)
     tex.set_editor_property('srgb', True)
     EAL.save_loaded_asset(tex)

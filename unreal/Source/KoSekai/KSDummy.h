@@ -73,6 +73,9 @@ public:
 	/** Plays one of the fighter's clips by name ("Combat_Stance", "Left_Jab_from_Guard", ...). */
 	void PlayClip(const FString& Clip, bool bLoop, float Rate = 1.f, float StartSeconds = 0.f);
 	void SetClipRate(float Rate);
+	bool HasClip(const FString& Clip) const { return Clips.Contains(Clip); }
+	/** The length of a clip in seconds at normal speed; 0 if the fighter does not have it. */
+	float ClipSeconds(const FString& Clip) const;
 	/** The fighter's mood: the first of these faces that the fighter has ("hurt", "ko", "dizzy", ...); an empty list is
 	 *  no mood. The face on screen is worked out every frame from the mood, speech, attacking and blinking (UpdateFace). */
 	void SetFace(const TArray<FString>& Candidates);
