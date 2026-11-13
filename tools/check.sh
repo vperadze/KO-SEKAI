@@ -1,19 +1,47 @@
 #!/usr/bin/env bash
 # KO-SEKAI self-check. Builds the game, lets it play itself, and fails on the bugs that have already bitten us.
 #
-#   tools/check.sh              build + self-playing ladder + recorded-move replays
+#   tools/check.sh              build + self-playing ladder + online match + recorded-move replays
 #   tools/check.sh --no-build   skip the build (the binaries are already current)
 #   tools/check.sh --camera     also open the webcam for a few seconds and check frame rate and brightness
 #
 # It will not start while the game or the KoSekai editor is open: a second copy halves the tracker's frame
 # rate for whoever is playing, and the build replaces the library the running game has loaded.
+#
+# Runs on Linux and on Windows (in Git Bash). Set UE_ROOT if the engine is not where the script looks for it.
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-PROJECT="$ROOT/unreal/KoSekai.uproject"
-UE="${UE_ROOT:-$HOME/UnrealEngine}"
-EDITOR="$UE/Engine/Binaries/Linux/UnrealEditor"
 OUT="$ROOT/unreal/Saved/Check"
-SETTINGS="$ROOT/unreal/Saved/Config/LinuxEditor/GameUserSettings.ini"
+# What differs between the two systems: where the engine is and what its programs are called, how to ask whether
+# the game is open, and how a path handed to the game is spelled.
+case "$(uname -s)" in
+MINGW*|MSYS*|CYGWIN*)
+	UE="${UE_ROOT:-}"
+	if [ -z "$UE" ]; then
+		# The Epic launcher writes down where it installed each engine.
+		while read -r dir; do
+			[ -n "$dir" ] || continue
+			dir="$(cygpath -u "$dir")"
+			[ -x "$dir/Engine/Binaries/Win64/UnrealEditor.exe" ] && { UE="$dir"; break; }
+		done <<< "$(sed -n 's/.*"InstallLocation": *"\(.*\)".*/\1/p' "/c/ProgramData/Epic/UnrealEngineLauncher/LauncherInstalled.dat" 2> /dev/null | sed 's/\\\\/\\/g')"
+	fi
+	EDITOR="$UE/Engine/Binaries/Win64/UnrealEditor.exe"
+	SETTINGS="$ROOT/unreal/Saved/Config/WindowsEditor/GameUserSettings.ini"
+	native() { cygpath -w "$1"; }
+	game_open() { tasklist //FI "IMAGENAME eq UnrealEditor.exe" 2> /dev/null | grep -qi "UnrealEditor.exe"; }
+	build() { "$UE/Engine/Build/BatchFiles/Build.bat" KoSekaiEditor Win64 Development "-project=$PROJECT" -NoHotReloadFromIDE; }
+	;;
+*)
+	UE="${UE_ROOT:-$HOME/UnrealEngine}"
+	EDITOR="$UE/Engine/Binaries/Linux/UnrealEditor"
+	SETTINGS="$ROOT/unreal/Saved/Config/LinuxEditor/GameUserSettings.ini"
+	native() { echo "$1"; }
+	game_open() { pgrep -x UnrealEditor > /dev/null; }
+	build() { "$UE/Engine/Build/BatchFiles/Linux/Build.sh" KoSekaiEditor Linux Development -project="$PROJECT" -NoHotReloadFromIDE; }
+	;;
+esac
+PROJECT="$(native "$ROOT/unreal/KoSekai.uproject")"
+[ -x "$EDITOR" ] || { echo "No Unreal editor at '$EDITOR'. Set UE_ROOT to the engine's folder."; exit 2; }
 BUILD=1; CAMERA=0
 for a in "$@"; do case "$a" in --no-build) BUILD=0;; --camera) CAMERA=1;; *) echo "unknown option $a"; exit 2;; esac; done
 
@@ -21,7 +49,7 @@ FAILS=0
 pass() { echo "  ok    $1"; }
 fail() { echo "  FAIL  $1"; FAILS=$((FAILS + 1)); }
 
-if pgrep -x UnrealEditor > /dev/null; then
+if game_open; then
 	echo "The game or the KoSekai editor is running. Close it first, then run the check again."; exit 2
 fi
 mkdir -p "$OUT"
@@ -34,7 +62,7 @@ trap restore EXIT
 run_until() {
 	local want="$1" pattern="$2" limit="$3" log="$4"; shift 4
 	rm -f "$log"
-	"$EDITOR" "$PROJECT" -game -windowed -ResX=1280 -ResY=720 -nosound -unattended -abslog="$log" "$@" > /dev/null 2>&1 &
+	"$EDITOR" "$PROJECT" -game -windowed -ResX=1280 -ResY=720 -nosound -unattended -abslog="$(native "$log")" "$@" > /dev/null 2>&1 &
 	local pid=$! waited=0
 	while kill -0 "$pid" 2> /dev/null && [ "$waited" -lt "$limit" ]; do
 		sleep 2; waited=$((waited + 2))
@@ -43,9 +71,61 @@ run_until() {
 	kill "$pid" 2> /dev/null; wait "$pid" 2> /dev/null
 }
 
+# Two copies of the game on this machine, playing themselves against each other, until both logs show $1 online
+# bouts or $2 seconds pass. $3 and $4 are the two logs, $5 and $6 each copy's own flags; the second copy starts
+# when the first one's log shows $7 (the first has to be listening, or on the relay, before the second dials).
+run_pair() {
+	local want="$1" limit="$2" log_a="$3" log_b="$4" flags_a="$5" flags_b="$6" ready="$7" waited=0
+	rm -f "$log_a" "$log_b"
+	local common="-game -windowed -ResX=1280 -ResY=720 -nosound -unattended -KSAuto -KSNoCamera"
+	"$EDITOR" "$PROJECT" $common -abslog="$(native "$log_a")" $flags_a > /dev/null 2>&1 &
+	local pid_a=$!
+	while kill -0 "$pid_a" 2> /dev/null && [ "$waited" -lt 180 ] && ! grep -q "$ready" "$log_a" 2> /dev/null; do sleep 2; waited=$((waited + 2)); done
+	"$EDITOR" "$PROJECT" $common -abslog="$(native "$log_b")" $flags_b > /dev/null 2>&1 &
+	local pid_b=$!
+	waited=0
+	while kill -0 "$pid_a" 2> /dev/null && kill -0 "$pid_b" 2> /dev/null && [ "$waited" -lt "$limit" ]; do
+		sleep 2; waited=$((waited + 2))
+		[ "$(grep -c "KSTEST online bout=" "$log_a" 2> /dev/null)" -ge "$want" ] && [ "$(grep -c "KSTEST online bout=" "$log_b" 2> /dev/null)" -ge "$want" ] && break
+	done
+	sleep 6   # long enough for both to ask for a rematch and for it to start, so the logs show it
+	kill "$pid_a" "$pid_b" 2> /dev/null; wait "$pid_a" "$pid_b" 2> /dev/null
+}
+
+# What two logs of the same online bouts must agree on. $1 is a name for the messages, $2 the host's log, $3 the guest's.
+check_pair() {
+	local what="$1" host="$2" guest="$3" n a b ra rb i
+	grep -q "KSTEST online linked role=host" "$host" 2> /dev/null && grep -q "KSTEST online linked role=guest" "$guest" 2> /dev/null \
+		&& pass "$what: the two games found each other, one as host and one as guest" || fail "$what: the two games did not link up"
+	n=$(grep -c "KSTEST online bout=" "$host" 2> /dev/null); n=${n:-0}
+	[ "$n" -ge 1 ] && pass "$what: $n bout(s) fought to the end" || fail "$what: no bout finished"
+	for i in $(seq 1 "$n"); do
+		a=$(grep "KSTEST online bout=$i " "$host" | head -1); b=$(grep "KSTEST online bout=$i " "$guest" | head -1)
+		ra=$(field "$a" result); rb=$(field "$b" result)
+		# The bug this guards: two games that each think they won, or that disagree about how much health is left.
+		case "$ra/$rb" in
+			win/loss|loss/win|time_win/time_loss|time_loss/time_win) pass "$what bout $i: both games agree on the winner (host $ra, guest $rb)";;
+			loss/loss) pass "$what bout $i: a double knockout";;
+			*) fail "$what bout $i: the games disagree (host says '$ra', guest says '$rb')";;
+		esac
+		if [ "$ra/$rb" = win/loss ]; then
+			[ "$(field "$a" opp_hp)" = 0 ] && [ "$(field "$b" my_hp)" = 0 ] && pass "$what bout $i: both show the loser at zero health" || fail "$what bout $i: health differs between the two games"
+		elif [ "$ra/$rb" = loss/win ]; then
+			[ "$(field "$b" opp_hp)" = 0 ] && [ "$(field "$a" my_hp)" = 0 ] && pass "$what bout $i: both show the loser at zero health" || fail "$what bout $i: health differs between the two games"
+		fi
+		if [ "$(field "$a" landed)" = "$(field "$b" taken)" ] && [ "$(field "$b" landed)" = "$(field "$a" taken)" ]; then
+			pass "$what bout $i: every punch one game landed, the other took ($(field "$a" landed) and $(field "$b" landed))"
+		else
+			fail "$what bout $i: punches do not match (host landed $(field "$a" landed) took $(field "$a" taken); guest landed $(field "$b" landed) took $(field "$b" taken))"
+		fi
+	done
+	if grep -qE "Fatal error|Assertion failed|Ensure condition failed|Unhandled Exception" "$host" "$guest" 2> /dev/null; then fail "$what: a game crashed or failed an engine check"
+	else pass "$what: no crash in either game"; fi
+}
+
 echo "== build"
 if [ "$BUILD" = 1 ]; then
-	if "$UE/Engine/Build/BatchFiles/Linux/Build.sh" KoSekaiEditor Linux Development -project="$PROJECT" -NoHotReloadFromIDE > "$OUT/build.log" 2>&1 \
+	if build > "$OUT/build.log" 2>&1 \
 		&& grep -q "Result: Succeeded" "$OUT/build.log"; then pass "the game compiles"
 	else fail "the game does not compile (see $OUT/build.log)"; grep -E "error" "$OUT/build.log" | head -5; exit 1; fi
 else echo "  skipped"; fi
@@ -194,13 +274,36 @@ n=$(grep "KSTEST calibration hint_changes=" "$LOG" 2> /dev/null | head -1 | tr -
 grep -q "KSTEST ui calibration text_outside_box=0" "$LOG" 2> /dev/null && pass "calibration writing stays inside its panels" || fail "calibration writing runs out of its panel ($(grep "KSTEST ui calibration" "$LOG" 2> /dev/null | head -1 | sed 's/.*KSTEST/KSTEST/'))"
 grep -q "KSTEST calibration done completed=1" "$LOG" 2> /dev/null && pass "all nine calibration steps run and hand over to the first bout" || fail "calibration did not reach its end"
 
+echo "== online match (two copies on this machine, one hosting and one joining)"
+run_pair 2 300 "$OUT/online_host.log" "$OUT/online_guest.log" "-KSHost -KSPort=17777" "-KSJoin=127.0.0.1:17777" "Hosting on port"
+check_pair "direct" "$OUT/online_host.log" "$OUT/online_guest.log"
+grep -q "KSTEST online match=2 " "$OUT/online_host.log" 2> /dev/null && grep -q "KSTEST online match=2 " "$OUT/online_guest.log" 2> /dev/null \
+	&& pass "direct: both asked for a rematch and it started" || fail "direct: the rematch did not start"
+
+echo "== online match through the relay server (tools/ko_relay.py; both copies join it)"
+PY=""
+for c in python3 python "$HOME"/AppData/Local/Programs/Python/Python3*/python.exe; do
+	"$c" -c "import asyncio" > /dev/null 2>&1 && { PY="$c"; break; }
+done
+if [ -z "$PY" ]; then echo "  --    no Python 3 here: the relay was not tested"
+else
+	"$PY" "$(native "$ROOT/tools/ko_relay.py")" --port 17778 > "$OUT/relay.log" 2>&1 &
+	RELAY=$!
+	sleep 2
+	# Whoever reaches the relay first is made the host.
+	run_pair 1 240 "$OUT/relay_first.log" "$OUT/relay_second.log" "-KSJoin=127.0.0.1:17778#check" "-KSJoin=127.0.0.1:17778#check" "waiting to be given a role"
+	kill "$RELAY" 2> /dev/null; wait "$RELAY" 2> /dev/null
+	grep -q "meets" "$OUT/relay.log" 2> /dev/null && pass "relay: it put the two players in one room" || fail "relay: it never paired the two players (see $OUT/relay.log)"
+	check_pair "relay" "$OUT/relay_first.log" "$OUT/relay_second.log"
+fi
+
 echo "== recorded moves (tests/tracking/*.csv with a .expect file)"
 CASES=0
 for rec in "$ROOT"/tests/tracking/*.csv; do
 	[ -f "$rec" ] || continue
 	exp="${rec%.csv}.expect"; [ -f "$exp" ] || continue
 	CASES=$((CASES + 1)); name="$(basename "$rec" .csv)"; LOG="$OUT/replay_$name.log"
-	run_until 1 "REPLAY done" 90 "$LOG" -KSStart=fight -KSReplay="$rec" -KSReplayExit
+	run_until 1 "REPLAY done" 90 "$LOG" -KSStart=fight -KSReplay="$(native "$rec")" -KSReplayExit
 	if ! grep -q "REPLAY done" "$LOG" 2> /dev/null; then fail "$name: the replay did not finish"; continue; fi
 	# .expect lines:  <what> <min> <max>   where <what> is: punches | straight | hook | uppercut | left | right | block
 	while read -r what min max; do

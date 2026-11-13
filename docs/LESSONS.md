@@ -72,6 +72,11 @@ One entry per bug that cost time: what happened, the cause, the rule. Add to it 
   Rule: check `git status` against the start of the session before editing, message the other session
   (ListAgents / SendMessage), and commit only your own hunks.
 
+- **`tools/check.sh` could not run on the Windows PC.** Git for Windows checked every text file out with CRLF line
+  endings, which bash refuses in a script, and the check itself knew only Linux paths and `pgrep`. Rule:
+  `.gitattributes` keeps `*.sh` on LF; the check picks its engine path, build script and "is the game open" test by
+  system, and hands the game paths through `native()`.
+
 - **The first voices were "too robotic" and the lines "too much text".** Ring modulation, bit crushing and 15%
   pitch shifts on a speech model sound like a machine, and a 15-word taunt does not fit between punches. Rule:
   natural voices, pitch within 6%, lines of six words or fewer; the player wants hard swearing, not mild.

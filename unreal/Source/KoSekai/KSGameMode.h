@@ -13,8 +13,11 @@
 class AKSDummy;
 class AKSPawn;
 class UKSTrackingSubsystem;
+class FKSNet;
 
-enum class EKSPhase : uint8 { Street, PullIn, Card, Fight, FightEnd, Result, Continue, Ending, Calibrate, Menu, Intro, Select };
+enum class EKSPhase : uint8 { Street, PullIn, Card, Fight, FightEnd, Result, Continue, Ending, Calibrate, Menu, Intro, Select, Online };
+/** The screens of the online lobby (EKSPhase::Online): the three choices, waiting as host, typing an address, dialling. */
+enum class EKSLobby : uint8 { Choose, Hosting, Typing, Joining };
 enum class EKSOppState : uint8 { Idle, Windup, Strike, Open, KO };
 
 struct FKSPopup
@@ -78,7 +81,16 @@ public:
 	int32 SelectIndex = 0;
 	float SelectMovedAt = -10.f, SelectChosenAt = -1.f;   // game clock; SelectChosenAt < 0 until the player has chosen
 	bool bPortraits = false;                  // -KSPortraits: photographs every fighter's head for the portraits and quits
-	int32 MenuIndex = 0;                      // the chosen line of the start menu: fight, camera calibration, watch the intro, quit
+	int32 MenuIndex = 0;                      // the chosen line of the start menu: fight, camera calibration, watch the intro, play online, quit
+	/* Online play (KSGameModeOnline.cpp): a bout against another player over the network. */
+	bool bOnline = false;                     // the opponent in the ring is another player
+	bool bOnlineReady = false, bOnlineOppReady = false;   // after a bout: who has asked for another
+	float OnlinePingMs = -1.f;                // there and back, in milliseconds; below zero when not measured yet
+	bool bSelectForOnline = false;            // the select screen was opened by PLAY ONLINE: it leads to the lobby, not the ladder
+	EKSLobby Lobby = EKSLobby::Choose;
+	int32 LobbyIndex = 0, HostPort = 7777;    // the chosen line of the lobby: host, join, back
+	FString JoinAddress, LobbyNote, LobbyStatus;   // what is being typed, what went wrong last time, what is happening now
+	TArray<FString> HostAddresses;            // this machine's addresses, for the host to read out to a friend
 	bool bSpokenByOpp = false;                // who the speech bubble belongs to
 	FVector OppHead = FVector::ZeroVector, PlayerHead = FVector::ZeroVector;   // world space, for speech bubbles and damage badges
 	TArray<FVector> OppBody, PlayerBody;      // points all over each fighter, world space: the HUD keeps its badges off them
@@ -129,17 +141,46 @@ private:
 	struct FAttack { EKSPunch Type = EKSPunch::Straight; EKSArm Side = EKSArm::Left; float Damage = 0.f, Duration = 0.f; bool bFeint = false; };
 	struct FPendingHit { float At; EKSArm Arm; EKSPunch Type; float Mult; bool bCounter; };
 	void OppIdle(float Seconds);
-	void StartWindup(EKSPunch Type, float QuickSeconds = 0.f);
+	void StartWindup(EKSPunch Type, float QuickSeconds = 0.f, int32 Side = -1);
 	void OpenUp(float Seconds);
 	void OppAI();
 	void ResolveStrike();
 	void PlayerHurt(float Damage, bool bLight);
 	void PlayerPunch(EKSArm Arm, EKSPunch Type);
-	void LandHit(const FPendingHit& Hit);
+	void LandHit(const FPendingHit& Hit, float FixedDamage = -1.f);
 	void EndFight(bool bWin, bool bDecision);
 	float Rage() const { return 1.f - OppHP / OppMaxHP; }
 	EKSDefense Defense() const;
 	bool Stance(EKSDefense D) const;
+
+	/* ---- online (KSGameModeOnline.cpp) ---- */
+	void EnterLobby(const FString& Note = FString());
+	void TickLobby(float Dt);
+	void LobbyHost();
+	void LobbyJoin();
+	void TickOnline();                                   // every frame while there is a link: reads what the other side sent
+	void OnlineLine(const FString& Line);
+	void OnlinePickMatch();                              // the host settles the two fighters and the arena and tells the guest
+	void OnlineBeginMatch(int32 Mine, int32 Theirs, int32 Where);
+	void OnlineHangUp();                                 // drops the link and forgets the match; changes no screen
+	void OnlineLeave(const FString& Note);               // hangs up and shows the lobby with a word about why
+	bool OnlineCanPunch() const;
+	void OnlinePunch(EKSArm Arm, EKSPunch Type);         // this player throws: the other side decides what it did
+	void OnlineIncoming(EKSPunch Type, EKSArm Arm, bool bCounter);
+	void OnlineStruck(int32 Outcome, bool bBlockHeld);   // the other player's punch arrives here: settle it and report back
+	void OnlineResult(int32 Outcome, float Damage, float HealthLeft, EKSPunch Type, EKSArm Arm, bool bCounter);
+	void OnlineTimeUp();
+	void OnlineAfterBout();
+	void OnlineBoutLog(bool bWin, bool bDecision);
+	/** Online, a punch takes this long to arrive (0 offline): the other player has to be able to see it coming. */
+	float OnlinePunchLead(int32 Arm) const;
+	TSharedPtr<FKSNet> Net;
+	bool bLinked = false, bRemoteCounter = false, bOnlineBotGuard = true;
+	int32 OnlineMine = 0, OnlineTheirs = 1, OnlineArena = 0, OnlineBout = 0;
+	int32 RemoteChoice = -2;                             // the fighter the other player picked: -1 none, -2 not heard yet
+	EKSDefense RemoteDefense = EKSDefense::None, SentDefense = EKSDefense::None;   // the stance each side last reported
+	float OnlineReadyAt = 0.f, OnlineLockedUntil = 0.f, OnlineGuardDownUntil = 0.f, OnlineCueUntil = 0.f;
+	double OnlinePingAt = 0.0;
 
 	/* ---- helpers ---- */
 	float Speak(class AKSDummy* Who, const TCHAR* Prefix, bool bMust = false);

@@ -120,6 +120,16 @@ Updated 2026-11-13. Deadline 2026-11-16 02:59 CET.
   Its text no longer blinks when a reading sits on a limit (debounced; checked with `-KSCalJitter`); with a
   real camera and person this is still unconfirmed.
 - Retry after a loss (goes through the same fresh-opponent path as the next bout).
+- **Online play** (2026-11-13; `KSNet`, `KSGameModeOnline.cpp`, `tools/ko_relay.py`): PLAY ONLINE on the start menu,
+  then host, or join a host or the relay server by address. A bout between two players uses the cabinet's own rules
+  with the other player throwing the opponent's punches; each game is the judge of its own health. `tools/check.sh`
+  plays two copies against each other on one machine, directly and through the relay, and checks that both tell the
+  same story (winner, health, punches landed and taken), and that a rematch starts. **Not verified**: two people,
+  two machines, a real network (only 127.0.0.1 was used, so delay and a firewall were never in play); whether half
+  a second in the air is the right time for a person to answer a person; the damage numbers (two bots finish a
+  bout in about 25 s); the lobby's address box and its three-line menu were never used by hand (only the waiting
+  and fight screens were seen in stills); a webcam player online. The team has no relay server running anywhere
+  yet, and `OnlineServer` in `DefaultGame.ini` is not set.
 
 ## Next
 

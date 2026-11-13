@@ -44,7 +44,9 @@ Packaged build under 1 GB, plus a 30–60 s gameplay video. Windows packaging ne
 | `unreal/Content/KS/UI/` | Interface pictures `T_UI_<name>` and the two fonts (`F_RussoOne`, `F_Bangers`); `KSHUD` falls back to plain boxes without them. |
 | `unreal/Content/KS/Voice/` | Spoken lines `V_<Fighter>_<line>`; text and mouth timing are in the generated `KSVoiceData.h`. The ring announcer is `V_Announcer_<line>` (`KSAnnouncerData.h`). |
 | `art/` | Source art and the tools that make it (`art/tools`, `art/arena`, `art/tracker-model`). Mostly untracked. |
-| `tools/check.sh` | The self-check. |
+| `unreal/Source/KoSekai/KSNet.*`, `KSGameModeOnline.cpp` | Online play: the link between two players, the lobby, and the rules of a bout against a person (read the comment at the top of `KSGameModeOnline.cpp` first). |
+| `tools/ko_relay.py` | The relay server two players can both join when neither can host (plain Python 3). |
+| `tools/check.sh` | The self-check. Runs on Linux and on Windows (Git Bash); it finds the engine itself or takes `UE_ROOT`. |
 | `tests/tracking/` | Recorded move sessions with expectations. |
 | `tracking-test/` | The older browser tracker. The game no longer needs it. |
 
@@ -78,6 +80,8 @@ Test flags (all optional):
 | `-KSCalJitter` | With `-KSCalDemo`: one framing reading flips every frame, to test that the text stays steady. |
 | `-KSMirrorArms` | Experimental: fighter's arms copy the webcam arms directly. Off by default, it looks bad. |
 | `-KSFakeArms` | Feed a fixed arm pose into the arm copying, to test it without a person. |
+| `-KSHost` `-KSPort=N` | Online: skip the menus and wait for another player (port 7777 unless given). |
+| `-KSJoin=<address>` | Online: skip the menus and join a host or a relay server (`name`, `name:port`, `name:port#room`). With `-KSAuto` on both copies, two bots fight each other. |
 
 Always pass `-ResX=1280 -ResY=720` in test runs and restore the window size afterwards: Unreal remembers the
 last size and opens the next real session with it.
