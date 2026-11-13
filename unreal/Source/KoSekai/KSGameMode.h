@@ -14,7 +14,7 @@ class AKSDummy;
 class AKSPawn;
 class UKSTrackingSubsystem;
 
-enum class EKSPhase : uint8 { Street, PullIn, Card, Fight, FightEnd, Result, Continue, Ending, Calibrate, Menu };
+enum class EKSPhase : uint8 { Street, PullIn, Card, Fight, FightEnd, Result, Continue, Ending, Calibrate, Menu, Intro };
 enum class EKSOppState : uint8 { Idle, Windup, Strike, Open, KO };
 
 struct FKSPopup
@@ -74,9 +74,10 @@ public:
 	float RedFlash = 0.f, WhiteFade = 0.f, BlackFade = 0.f;
 	FString Subtitle, Prompt;
 	bool bLastResultWin = false, bLastResultDecision = false;
-	int32 MenuIndex = 0;                      // the chosen line of the start menu: start, straight to the ring, quit
+	int32 MenuIndex = 0;                      // the chosen line of the start menu: fight, camera calibration, watch the intro, quit
 	bool bSpokenByOpp = false;                // who the speech bubble belongs to
 	FVector OppHead = FVector::ZeroVector, PlayerHead = FVector::ZeroVector;   // world space, for speech bubbles and damage badges
+	TArray<FVector> OppBody, PlayerBody;      // points all over each fighter, world space: the HUD keeps its badges off them
 	float ContinueLeft = 0.f;
 	/** The opponent of the current fight: one of the roster, with the difficulty of its place on the ladder. */
 	const FKSFighterDef& Fighter() const { return CurrentDef; }
@@ -95,6 +96,7 @@ private:
 	void StartFight();
 	void ClearWorld();
 	void TickMenu(float Dt);
+	void TickIntro(float Dt);                 // the opening film (KSCineData.h); any confirm key skips it to the menu
 	void TickStreet(float Dt);
 	void TickPullIn(float Dt);
 	void TickCard(float Dt);
@@ -138,6 +140,20 @@ private:
 	float VoiceQuietUntil = 0.f;
 	float MusicLevel = 0.f;        // the music's level for this phase, before the dip under a spoken line
 	bool bMusicDucked = false;
+	void PlayMusic(float FadeSeconds = 0.8f);          // the current arena's track at the current level
+
+	// Arenas (KSArenaData.h): which one stands, which one each bout of the ladder is fought in, and what is in its air.
+	int32 ArenaIndex = -1, ForcedArena = -1;           // -KSArena=N fights every bout in arena N
+	bool bArenaTour = false;                           // -KSArenaTour builds every arena once (tools/check.sh)
+	bool bLookDirty = true;                            // the camera's colour cast must follow the place
+	TArray<int32> ArenaLadder;
+	struct FMote { TWeakObjectPtr<AActor> Actor; FVector Pos = FVector::ZeroVector, Vel = FVector::ZeroVector; float Phase = 0.f, Life = 0.f; };
+	TArray<FMote> Motes;                               // stars, embers, rain, petals, sparks
+	float NextBoltAt = 0.f, BoltUntil = 0.f;           // lightning
+	void RaiseArena(int32 Index);                      // builds an arena into the cleared world
+	void UseArena(int32 Index);                        // swaps the arena between bouts; the two fighters stay
+	void ResetMote(FMote& M, bool bAnywhere);
+	void TickMotes(float Now, float Dt);
 	bool bIntroSaid = false;
 	void Announce(const FString& Text, float Seconds) { Announcement = Text; AnnounceUntil = Clock + Seconds; }
 	void Cue(const FString& Main, const FString& Hint, bool bGood = false) { CueMain = Main; CueHint = Hint; bCueGood = bGood; }
@@ -211,6 +227,7 @@ private:
 	float CamRoll = 0.f, CamRollVel = 0.f, CamFovKick = 0.f, CamDolly = 0.f, CamSide = 0.f, CamDrop = 0.f;
 	void CamPunch(const FVector& Impulse, float RollImpulse, float FovKick) { CamVel += Impulse; CamRollVel += RollImpulse; CamFovKick += FovKick; }
 	TArray<FSpectator> Spectators;
+	bool bCalFromMenu = false;                // calibration was chosen in the menu: go back there when it is done
 	bool bCalibrationDone = false, bCalDemo = false;   // -KSCalDemo: enter calibration without a camera and step through it, for the self-check
 	float CalHold = 0.f, CalPunchUntil = 0.f, CalDoneAt = -1.f;
 	bool bCalRepCounted = false;

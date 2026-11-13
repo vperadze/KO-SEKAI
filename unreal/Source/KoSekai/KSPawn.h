@@ -15,6 +15,8 @@ class AKSPawn : public APawn
 public:
 	AKSPawn();
 	void SetView(const FVector& Location, const FRotator& Rotation, float FieldOfView);
+	/** The picture's colour cast and how far colours split apart towards the edges (an old lens), per arena. */
+	void SetLook(const FLinearColor& Tint, float Fringe);
 
 private:
 	UPROPERTY() TObjectPtr<UCameraComponent> Camera;

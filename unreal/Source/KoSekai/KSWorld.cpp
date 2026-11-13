@@ -18,6 +18,9 @@
 #include "Components/ExponentialHeightFogComponent.h"
 #include "Materials/MaterialInstanceDynamic.h"
 
+/** For an asset cached in a static: tells the garbage collector it is in use for as long as the game runs. */
+static UStaticMesh* Keep(UStaticMesh* Mesh) { if (Mesh) Mesh->AddToRoot(); return Mesh; }
+
 UMaterialInstanceDynamic* FKSBuilder::Shape(UStaticMesh* Mesh, const FVector& Center, const FVector& Size, const FLinearColor& Color, float Glow, const FRotator& Rot, bool bShadow)
 {
 	AStaticMeshActor* Actor = World->SpawnActor<AStaticMeshActor>(Center, Rot);
@@ -41,7 +44,9 @@ UMaterialInstanceDynamic* FKSBuilder::Shape(UStaticMesh* Mesh, const FVector& Ce
 
 UMaterialInstanceDynamic* FKSBuilder::Image(const TCHAR* Texture, bool bLit, const FVector& Center, const FVector& Across, const FVector& Down, float Width, float Height, const FVector4& UV, float Glow, const TCHAR* Material)
 {
-	static UStaticMesh* Plane = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Plane.Plane"));
+	// Kept for the whole run (AddToRoot): a pointer held in a static is invisible to the garbage collector, so on the
+	// street, where nothing uses the mesh, it was freed and the second walk into the arena crashed in SetStaticMesh.
+	static UStaticMesh* Plane = Keep(LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Plane.Plane")));
 	UMaterialInterface* Base = Material ? LoadObject<UMaterialInterface>(nullptr, Material) : LoadObject<UMaterialInterface>(nullptr, bLit ? TEXT("/Game/KS/Arena/M_KS_ImageLit.M_KS_ImageLit") : TEXT("/Game/KS/Arena/M_KS_Image.M_KS_Image"));
 	UTexture* Tex = LoadObject<UTexture>(nullptr, Texture);
 	if (!Plane || !Base || !Tex) return nullptr;
@@ -99,7 +104,7 @@ ASpotLight* FKSBuilder::Spot(const FVector& Pos, const FVector& Aim, const FLine
 
 UMaterialInstanceDynamic* FKSBuilder::Beam(const FLinearColor& Color, float Glow)
 {
-	static UStaticMesh* Cone = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cone.Cone"));
+	static UStaticMesh* Cone = Keep(LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cone.Cone")));
 	UMaterialInterface* Base = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/KS/Arena/M_KS_Beam.M_KS_Beam"));
 	if (!Cone || !Base) return nullptr;
 	AStaticMeshActor* Actor = World->SpawnActor<AStaticMeshActor>(FVector::ZeroVector, FRotator::ZeroRotator);
@@ -253,11 +258,16 @@ void KSWorld::BuildStreet(FKSBuilder& B, FKSStreet& Street, bool bDead)
 	}
 }
 
-void KSWorld::BuildArena(FKSBuilder& B, FKSArena& Arena)
+void KSWorld::BuildArena(FKSBuilder& B, FKSArena& Arena, const FKSArenaDef& Def)
 {
-	using namespace KSColors;
-	B.Ambient(FLinearColor(0.5f, 0.3f, 0.9f), 0.8f, FLinearColor(0.035f, 0.005f, 0.075f), 0.010f, 1.f);
-	B.Box(FVector(0, 0, -10), FVector(6000, 6000, 20), FLinearColor(0.012f, 0.004f, 0.03f));
+	// Every arena is this one hall in other colours: the arena's three neon colours stand in for the hall's cyan,
+	// magenta and yellow in everything below, and its own pictures go on the canvas and on the wall.
+	const bool bHall = !Def.Key[0];
+	const FLinearColor Cyan = Def.A, Magenta = Def.B, Yellow = Def.C, Green = bHall ? KSColors::Green : Def.C;
+	const FString MatPath = bHall ? FString(TEXT("/Game/KS/Arena/T_KS_Mat.T_KS_Mat")) : FString::Printf(TEXT("/Game/KS/Arena/T_KS_Mat_%s.T_KS_Mat_%s"), Def.Key, Def.Key);
+	const FString WallPath = bHall ? FString(TEXT("/Game/KS/Arena/T_KS_Stands.T_KS_Stands")) : FString::Printf(TEXT("/Game/KS/Arena/T_KS_Bg_%s.T_KS_Bg_%s"), Def.Key, Def.Key);
+	B.Ambient(Def.Ambient, 0.8f, Def.Fog, Def.FogDensity, 1.f);
+	B.Box(FVector(0, 0, -10), FVector(6000, 6000, 20), Def.Floor);
 	// Neon floor grid, like the inside of a 1987 attract screen.
 	for (float P = -2500; P <= 2500; P += 250)
 	{
@@ -277,7 +287,7 @@ void KSWorld::BuildArena(FKSBuilder& B, FKSArena& Arena)
 		}
 	}
 	// The ring canvas, and the stands full of people around the far side (both painted with Dreamina).
-	B.Image(TEXT("/Game/KS/Arena/T_KS_Mat.T_KS_Mat"), true, FVector(0, 0, 2.f), FVector(0, 1, 0), FVector(-1, 0, 0), 700.f, 700.f);
+	B.Image(*MatPath, true, FVector(0, 0, 2.f), FVector(0, 1, 0), FVector(-1, 0, 0), 700.f, 700.f);
 	{
 		const int32 Panels = 16;
 		const float Radius = 1500.f, From = -115.f, To = 115.f, Step = (To - From) / Panels;
@@ -286,8 +296,18 @@ void KSWorld::BuildArena(FKSBuilder& B, FKSArena& Arena)
 		{
 			const float A = FMath::DegreesToRadians(From + (i + 0.5f) * Step);
 			const FVector Out(FMath::Cos(A), FMath::Sin(A), 0.f), Across(-FMath::Sin(A), FMath::Cos(A), 0.f);
-			B.Image(TEXT("/Game/KS/Arena/T_KS_Stands.T_KS_Stands"), false, Out * Radius + FVector(0, 0, WallHeight * 0.5f - 40.f), Across, FVector(0, 0, -1), PanelWidth + 2.f, WallHeight,
-				FVector4(1.f / Panels, 1.f, (float)i / Panels, 0.f), 0.55f);
+			// The hall's picture is spread once round the whole wall. An arena's backdrop is a 21:9 painting, which is
+			// the shape of the far wall alone (the middle half of the panels): it is shown whole there and runs on
+			// mirrored along the two side walls, so nothing is stretched and there is no seam.
+			FVector4 UV(1.f / Panels, 1.f, (float)i / Panels, 0.f);
+			const int32 Q = Panels / 4;
+			if (!bHall) UV = (i >= Q && i < Panels - Q) ? FVector4(2.f / Panels, 1.f, 2.f * (i - Q) / Panels, 0.f)
+				: FVector4(-2.f / Panels, 1.f, 2.f * ((i < Q ? Q : Panels + Q) - i) / Panels, 0.f);
+			Arena.WallGlow = bHall ? 0.55f : 0.8f;
+			// A backdrop's horizon is a third of the way up the painting: sunk until that is near the floor, so the sky and
+			// the landmarks stand above the crowd's heads and not out of the camera's sight.
+			if (UMaterialInstanceDynamic* Panel = B.Image(*WallPath, false, Out * Radius + FVector(0, 0, WallHeight * 0.5f - (bHall ? 40.f : 330.f)), Across, FVector(0, 0, -1), PanelWidth + 2.f, WallHeight, UV, Arena.WallGlow))
+				Arena.Wall.Add(Panel);
 		}
 	}
 	// Tall bars on the horizon, the edge of the screen.
@@ -305,7 +325,7 @@ void KSWorld::BuildArena(FKSBuilder& B, FKSArena& Arena)
 
 	// The stands: steps the crowd stands on (KSGameMode's SeatCrowd puts row N at height 40 N), each with a strip of
 	// neon along its edge, and a higher platform at the back for the giants.
-	const FLinearColor Step(0.022f, 0.014f, 0.045f);
+	const FLinearColor Step = bHall ? FLinearColor(0.022f, 0.014f, 0.045f) : FLinearColor(Def.Floor.R * 1.6f + 0.004f, Def.Floor.G * 1.6f + 0.004f, Def.Floor.B * 1.6f + 0.004f);
 	for (int32 Row = 1; Row <= 2; Row++)
 	{
 		const float Half = 520.f + 70.f * Row, X = 465.f + 118.f * Row;
@@ -380,7 +400,10 @@ void KSWorld::BuildArena(FKSBuilder& B, FKSArena& Arena)
 	}
 
 	Arena.NameSign = B.Text(FVector(1100, 0, 520), FRotator(0, 180, 0), TEXT(""), Yellow, 150.f);
-	B.Text(FVector(1100, 0, 690), FRotator(0, 180, 0), TEXT("K O - S E K A I   1 9 8 7   U N R E L E A S E D"), Magenta, 46.f);
+	B.Text(FVector(1100, 0, 690), FRotator(0, 180, 0), Def.Title, Magenta, bHall ? 46.f : 64.f);
+	// The place's own light: a storm overhead, or lava glowing up from behind the stands.
+	if (Def.Pulse == EKSPulse::Lightning) Arena.PulseLights.Add(B.Light(FVector(900, 0, 1000), FLinearColor(0.75f, 0.85f, 1.f), 0.f, 4200.f));
+	if (Def.Pulse == EKSPulse::Lava) for (float Y : { -520.f, 520.f }) Arena.PulseLights.Add(B.Light(FVector(1050, Y, 80), Def.B, 3000.f, 1600.f));
 
 	// The rest of the cut roster watches from outside the ring.
 	for (int32 i = 0; i < 9; i++)

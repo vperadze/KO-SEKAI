@@ -68,7 +68,8 @@ Test flags (all optional):
 | `-KSNoCamera` | Do not open the webcam. |
 | `-KSCamera=N` | Use camera index N. |
 | `-KSReplay=<file>` `-KSReplayExit` | Run the move detector over a recording and log its decisions. |
-| `-KSNoCal` | Skip the calibration screen (webcam players get it before the first bout). |
+| `-KSStart=menu` | Skip the opening film. No `-KSStart`: film, then menu. `-KSStart=street`: the old street walk. |
+| `-KSArena=N` `-KSArenaTour` | Fight every bout in arena N (0-10, `KSArenaData.h`) / build every arena once at the start. |
 | `-KSCalDemo` | Enter calibration without a camera and step through it automatically. |
 | `-KSCalJitter` | With `-KSCalDemo`: one framing reading flips every frame, to test that the text stays steady. |
 | `-KSMirrorArms` | Experimental: fighter's arms copy the webcam arms directly. Off by default, it looks bad. |
@@ -85,7 +86,8 @@ The KoSekai editor has no MCP. Import textures and create materials with a headl
 UnrealEditor-Cmd KoSekai.uproject -run=pythonscript -script=<file.py>
 ```
 
-New music: edit and run `python3 art/tools/music.py` (numpy only, 12 s), then `art/tools/import_voice_faces.py`
+New music: edit and run `python3 art/tools/music.py` (the fight loop; numpy only, 12 s) or
+`python3 art/tools/music_arenas.py` (the ten arena loops, planned in `docs/ARENAS.md`), then `art/tools/import_voice_faces.py`
 headless; no rebuild needed.
 
 New spectators or crowd sounds: `art/arena/gen_crowd.py` and `gen_crowd_sound.py` (Dreamina, credits), then

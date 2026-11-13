@@ -134,20 +134,23 @@ void KSAudio::Play(UObject* WorldContext, EKSSfx Sfx, float Volume)
 	World->GetTimerManager().SetTimer(Handle, [Weak]() { if (Weak.IsValid()) { Weak->Stop(); Weak->DestroyComponent(); } }, Seconds + 0.1f, false);
 }
 
-void KSAudio::Music(UObject* WorldContext, TObjectPtr<UAudioComponent>& Player, float Volume, float FadeSeconds)
+void KSAudio::Music(UObject* WorldContext, TObjectPtr<UAudioComponent>& Player, float Volume, float FadeSeconds, const TCHAR* TrackName)
 {
 	UWorld* World = WorldContext ? WorldContext->GetWorld() : nullptr;
 	if (!World || World->GetNetMode() == NM_DedicatedServer) return;
 
-	static USoundWave* Track = nullptr;
-	static bool bLooked = false;
-	if (!bLooked)
+	// Each arena has its own track; every one is loaded the first time it is asked for and kept.
+	static TMap<FString, USoundWave*> Tracks;
+	USoundWave* Track = nullptr;
+	if (USoundWave** Found = Tracks.Find(TrackName)) Track = *Found;
+	else
 	{
-		bLooked = true;
-		Track = LoadObject<USoundWave>(nullptr, TEXT("/Game/KS/Audio/M_Fight.M_Fight"), nullptr, LOAD_NoWarn | LOAD_Quiet);
+		const FString Path = FString::Printf(TEXT("/Game/KS/Audio/M_%s.M_%s"), TrackName, TrackName);
+		Track = LoadObject<USoundWave>(nullptr, *Path, nullptr, LOAD_NoWarn | LOAD_Quiet);
 		if (Track) Track->AddToRoot();
+		Tracks.Add(TrackName, Track);
 		// One line for tools/check.sh. A track that does not loop would fall silent 75 s into a bout.
-		UE_LOG(LogTemp, Display, TEXT("KSTEST music loaded=%d looping=%d seconds=%d"), Track ? 1 : 0, Track && Track->bLooping ? 1 : 0, Track ? FMath::RoundToInt(Track->Duration) : 0);
+		UE_LOG(LogTemp, Display, TEXT("KSTEST music track=%s loaded=%d looping=%d seconds=%d"), TrackName, Track ? 1 : 0, Track && Track->bLooping ? 1 : 0, Track ? FMath::RoundToInt(Track->Duration) : 0);
 	}
 	if (!Track) return;
 
@@ -161,11 +164,12 @@ void KSAudio::Music(UObject* WorldContext, TObjectPtr<UAudioComponent>& Player, 
 		Player = UGameplayStatics::CreateSound2D(World, Track, 1.f, 1.f, 0.f, nullptr, false, false);
 		if (!Player) return;   // no audio device (-nosound)
 	}
+	else if (Player->Sound != Track) { Player->Stop(); Player->SetSound(Track); }
 	if (Player->IsPlaying()) Player->AdjustVolume(FadeSeconds, Volume);
 	else
 	{
 		Player->FadeIn(0.6f, Volume);
-		UE_LOG(LogTemp, Display, TEXT("KSTEST music started volume=%.2f playing=%d"), Volume, Player->IsPlaying() ? 1 : 0);
+		UE_LOG(LogTemp, Display, TEXT("KSTEST music started track=%s volume=%.2f playing=%d"), TrackName, Volume, Player->IsPlaying() ? 1 : 0);
 	}
 }
 

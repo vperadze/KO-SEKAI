@@ -102,6 +102,8 @@ public:
 	FVector GloveWorld(EKSArm Arm) const;
 	/** Front of the face in world space. bHome ignores the fighter's own dodge and duck, so a dodged punch really misses. */
 	FVector FaceWorld(bool bHome) const;
+	/** Points all over the body in world space (every bone of a real fighter), for the HUD to know where on screen the fighter is. */
+	void BodyPoints(TArray<FVector>& Out) const;
 	/** Where the left hand is DRAWN, measured from the head. For the self-test: a body frozen in one pose gives a constant. */
 	FVector DrawnHandFromHead() const;
 	/** A shove backwards (cm) that springs back, used when a punch is blocked. */

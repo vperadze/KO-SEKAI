@@ -39,6 +39,26 @@ Updated 2026-11-13. Deadline 2026-11-16 02:59 CET.
   loops it; `SetPhase` sets the level (bout 0.32, fighter card and KO 0.2, result and continue 0.12, silent on
   the street and in calibration). Loading, the loop flag and that playback starts are checked.
   **Nobody has listened to it yet**: the tune, the mix and its loudness against punches and voices are unjudged.
+- Eleven arenas (`KSArenaData.h`, plan and table in `docs/ARENAS.md`): the original hall plus space, beach, bar,
+  rooftop, dojo, castle, gym, scrapyard, volcano and TV studio. Each has its own Dreamina backdrop and ring canvas
+  (`art/arena/gen_arenas.py`, 40 credits; `art/tools/import_arenas.py`), three neon colours, fog and camera tint,
+  a subset of the 50 spectators, its music loop (`art/tools/music_arenas.py`) and something in the air (stars,
+  fireflies, dust, rain, petals, wisps, sparks, embers, glitter); rooftop and castle have lightning, the volcano
+  glows. A bout is fought at the opponent's home, the last bout of the ladder somewhere that is nobody's.
+  `-KSArena=N` forces one. Each bout's intro opens with a wide shot of the place. The check builds all eleven.
+  Seen in stills: every arena reads as its place in the wide shot; in the fight view the crowd, canvas and
+  colours change but the painted wall is mostly out of frame. **Not seen**: anything moving (weather, lightning),
+  the frame rate with the webcam running, and the Scrapyard canvas looks washed out under the ring light.
+- Opening film (`art/cinematic`: `gen_cinematic.py`, 6 Dreamina shots, 28 s, 185 credits quoted including two
+  refused shots redone; `prep_cinematic.py` turns them into frame sheets, `KSHUD::DrawIntro` shows them at 12 a
+  second with captions and tape lines, the fight music under it). It plays at start-up, any confirm key skips it,
+  then the start menu: FIGHT, CAMERA CALIBRATION, WATCH THE INTRO, QUIT. The street walk is no longer on the
+  menu (`-KSStart=street` still reaches it); the ending returns to the menu. **Not seen in motion.**
+- Calibration is optional: only the menu line starts it, and it returns to the menu. Nothing forces it before the
+  first bout any more (`-KSNoCal` is now meaningless). Uncalibrated webcam play uses the detector's defaults;
+  **nobody has tried that with a person since the change**.
+- STEP BACK is now a small plate low in the middle, shown in the ring only and only after the hands have been out
+  of view for 0.6 s (it was 64-point letters over the fighters). **Not seen**: it needs a camera and a person.
 - Faces that change: every fighter rests on a calm face, snarls while punching, blinks, shows a hit or hurt face
   when struck, a smug one after winning (`AKSDummy::UpdateFace`). The five painted fighters got `calm`, `talk`,
   `angry`, `blink`, `smug` (Meshy edits, `art/tools/bake_faces.py`); TURBOTRON got LED `talk` and `blink`; Channel
@@ -61,6 +81,10 @@ Updated 2026-11-13. Deadline 2026-11-16 02:59 CET.
   the damage on a burst at the opponent's head with every hit (ten points to a point of health), the damage taken on a
   burst; spoken lines in a shouting speech bubble beside the speaker with one word in red, replacing the subtitle
   bar; FIGHT!, K.O.!, TIME!, DOWN!, YOU WIN, KNOCKED OUT, YOU LOSE, CONTINUE?, PAUSED as title art that slams in.
+  Badges, bubbles and the cue plate are placed beside the fighters, never on a face (the HUD projects both fighters'
+  bones each frame); all text is fitted to its box; the result and continue screens hide the health bars and show the
+  spoken line on a plate along the bottom. Seen in stills only: whether the placing looks calm in motion (a bubble
+  glides when the fighters move under it) is unjudged, and so is the calibration screen with a real camera picture.
   New sounds from the sound library: Pop (badges, bubbles), Menu, Select, Score (counter), Slam (titles).
   The check counts the pictures and fonts and sees a bubble, a damage badge and the menu drawn. Seen in stills only:
   **the animation (pops, slams, jolts), the new sounds and their loudness are unjudged**, and nobody has used the

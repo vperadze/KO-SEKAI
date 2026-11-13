@@ -25,3 +25,10 @@ void AKSPawn::SetView(const FVector& Location, const FRotator& Rotation, float F
 	SetActorLocationAndRotation(Location, Rotation);
 	Camera->SetFieldOfView(FieldOfView);
 }
+
+void AKSPawn::SetLook(const FLinearColor& Tint, float Fringe)
+{
+	FPostProcessSettings& P = Camera->PostProcessSettings;
+	P.bOverride_SceneColorTint = true; P.SceneColorTint = Tint;
+	P.bOverride_SceneFringeIntensity = true; P.SceneFringeIntensity = Fringe;
+}

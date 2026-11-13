@@ -1,4 +1,5 @@
 #include "KSGameMode.h"
+#include "KSCineData.h"
 #include "KSDummy.h"
 #include "KSPawn.h"
 #include "KSHUD.h"
@@ -127,6 +128,8 @@ void AKSGameMode::BeginPlay()
 	bMirrorArms = bFakeArms || FParse::Param(Cmd, TEXT("KSMirrorArms"));
 	bHitShots = FParse::Param(Cmd, TEXT("KSHitShots"));
 	FParse::Value(Cmd, TEXT("KSShots="), ShotEvery);
+	FParse::Value(Cmd, TEXT("KSArena="), ForcedArena);
+	bArenaTour = FParse::Param(Cmd, TEXT("KSArenaTour"));
 	FString Start;
 	FParse::Value(Cmd, TEXT("KSStart="), Start);
 	if (Start == TEXT("fight"))
@@ -139,8 +142,10 @@ void AKSGameMode::BeginPlay()
 	else
 	{
 		EnterStreet(Start == TEXT("ending"));
-		// The start menu comes first; -KSStart=street goes straight to the pavement.
-		if (Start.IsEmpty() || Start == TEXT("menu")) SetPhase(EKSPhase::Menu);
+		// The opening film comes first, then the start menu; -KSStart=menu skips the film, -KSStart=street goes
+		// straight to the pavement (the old way in, no longer on the menu).
+		if (Start.IsEmpty()) SetPhase(EKSPhase::Intro);
+		else if (Start == TEXT("menu")) SetPhase(EKSPhase::Menu);
 	}
 }
 
@@ -161,6 +166,7 @@ void AKSGameMode::ClearWorld()
 	Street = FKSStreet();
 	Arena = FKSArena();
 	Spectators.Reset(); Flashes.Reset(); FlashLights.Reset(); FlashesOwed = 0.f; Confetti.Reset(); bArenaFxLogged = false;
+	Motes.Reset(); ArenaIndex = -1; ArenaShowUntil = 0.f; bLookDirty = true;
 	PlayerDummy = nullptr; OppDummy = nullptr;
 }
 
@@ -174,11 +180,11 @@ void AKSGameMode::SetPhase(EKSPhase NewPhase)
 		: (Phase == EKSPhase::Card || Phase == EKSPhase::FightEnd) ? 0.2f
 		: (Phase == EKSPhase::Result || Phase == EKSPhase::Continue) ? 0.12f : 0.f;
 	MusicLevel = Level;
-	KSAudio::Music(this, MusicPlayer, MusicLevel * (bMusicDucked ? 0.4f : 1.f));
+	PlayMusic();
 	// The hall's murmur runs under every phase that happens in the ring.
 	KSAudio::Crowd(this, CrowdPlayer, Phase == EKSPhase::Fight ? 0.2f : Level > 0.f ? 0.14f : 0.f);
 	// The start menu plays the fight music too, without the crowd.
-	if (Phase == EKSPhase::Menu) { MusicLevel = 0.26f; KSAudio::Music(this, MusicPlayer, MusicLevel * (bMusicDucked ? 0.4f : 1.f)); }
+	if (Phase == EKSPhase::Menu || Phase == EKSPhase::Intro) { MusicLevel = Phase == EKSPhase::Intro ? 0.34f : 0.26f; PlayMusic(); }
 }
 
 bool AKSGameMode::Pressed(const FKey& Key) const { return PC && PC->WasInputKeyJustPressed(Key); }
@@ -236,8 +242,9 @@ void AKSGameMode::Tick(float Dt)
 	if (bTalking != bMusicDucked)
 	{
 		bMusicDucked = bTalking;
-		KSAudio::Music(this, MusicPlayer, MusicLevel * (bTalking ? 0.4f : 1.f), bTalking ? 0.12f : 0.5f);
+		PlayMusic(bTalking ? 0.12f : 0.5f);
 	}
+	if (bLookDirty) { bLookDirty = false; Pawn->SetLook(ArenaIndex >= 0 ? KSArenas[ArenaIndex].Tint : FLinearColor::White, ArenaIndex > 0 ? 0.6f : 0.f); }
 
 	// Collect this frame's punches: the webcam tracker always, the keyboard only while fighting (A and D walk in the street).
 	FramePunches.Reset();
@@ -273,6 +280,7 @@ void AKSGameMode::Tick(float Dt)
 	case EKSPhase::Ending: TickEnding(GameDt); break;
 	case EKSPhase::Calibrate: TickCalibrate(GameDt); break;
 	case EKSPhase::Menu: TickMenu(GameDt); break;
+	case EKSPhase::Intro: TickIntro(GameDt); break;
 	}
 
 	if (Phase != EKSPhase::PullIn) WhiteFade = FMath::Max(0.f, WhiteFade - Dt * 0.8f);
@@ -307,7 +315,7 @@ void AKSGameMode::TickMenu(float Dt)
 {
 	// The street is already built behind the menu picture; the view waits at its start.
 	Pawn->SetView(WalkPos + FVector(0, 0, 165.f), FRotator::ZeroRotator, 90.f);
-	const int32 Lines = 3;
+	const int32 Lines = 4;
 	// The webcam works here too, once it has found the player: a left punch moves down the list, a right punch chooses.
 	const bool bTracked = TrackingSubsystem && TrackingSubsystem->IsTracking() && PhaseTime > 1.5f;
 	bool bNext = Pressed(EKeys::Down) || Pressed(EKeys::S) || Pressed(EKeys::Gamepad_DPad_Down), bChoose = false;
@@ -319,9 +327,31 @@ void AKSGameMode::TickMenu(float Dt)
 	{
 		Sfx(EKSSfx::Select, 0.8f);
 		UE_LOG(LogTemp, Display, TEXT("KSTEST menu chosen=%d"), MenuIndex);   // for tools/check.sh
-		if (MenuIndex == 0) { WhiteFade = 0.7f; SetPhase(EKSPhase::Street); }
-		else if (MenuIndex == 1) { WhiteFade = 1.f; EnterArena(); BeginLadder(); }
+		if (MenuIndex == 0) { WhiteFade = 1.f; EnterArena(); BeginLadder(); }
+		else if (MenuIndex == 1)
+		{
+			// Calibration is the player's choice, here: it teaches the detector how hard this player punches.
+			WhiteFade = 1.f; EnterArena();
+			bCalFromMenu = true; CalPeaks.Reset();
+			SetPhase(EKSPhase::Calibrate); SetCalStep(0);
+		}
+		else if (MenuIndex == 2) { WhiteFade = 0.6f; SetPhase(EKSPhase::Intro); }
 		else PC->ConsoleCommand(TEXT("quit"));
+	}
+}
+
+void AKSGameMode::TickIntro(float Dt)
+{
+	Pawn->SetView(WalkPos + FVector(0, 0, 165.f), FRotator::ZeroRotator, 90.f);
+	float Total = 0.f;
+	for (const FKSCineShot& Shot : KSCineShots) Total += Shot.Frames / KSCineFps;
+	// Any confirm key, or a punch at the webcam, skips the film. The self-playing test watches two and a half seconds.
+	const bool bSkip = PhaseTime > 0.5f && (ConfirmPressed() || Pressed(EKeys::Escape));
+	if (bSkip || PhaseTime >= Total || (bAuto && PhaseTime > 2.5f))
+	{
+		UE_LOG(LogTemp, Display, TEXT("KSTEST intro ended seconds=%.1f of=%.1f skipped=%d"), PhaseTime, Total, PhaseTime < Total ? 1 : 0);
+		WhiteFade = 0.8f; MenuIndex = 0;
+		SetPhase(EKSPhase::Menu);
 	}
 }
 
@@ -428,8 +458,7 @@ void AKSGameMode::TickPullIn(float Dt)
 void AKSGameMode::EnterArena()
 {
 	ClearWorld();
-	FKSBuilder B = MakeBuilder();
-	KSWorld::BuildArena(B, Arena);
+	RaiseArena(0);
 	PickFighters();
 	PlayerDummy = GetWorld()->SpawnActor<AKSDummy>(FVector::ZeroVector, FRotator::ZeroRotator);
 	PlayerDummy->Setup(KSColors::Cyan, KSColors::Magenta, true);
@@ -438,6 +467,7 @@ void AKSGameMode::EnterArena()
 	WorldActors.Add(PlayerDummy);
 	WorldActors.Add(OppDummy);
 	Subtitle.Reset(); Prompt.Reset();
+	if (bArenaTour) { for (int32 i = 1; i < KSArenaCount; i++) UseArena(i); UseArena(0); }
 }
 
 void AKSGameMode::PickFighters()
@@ -456,11 +486,124 @@ void AKSGameMode::PickFighters()
 	}
 	Ladder.Reset();
 	for (int32 i = 0; i < LadderLength && i < Others.Num(); i++) Ladder.Add(Others[i]);
+	// Where each bout is fought: at the opponent's home, and the last bout somewhere that belongs to nobody.
+	TArray<int32> Nobodys;
+	for (int32 a = 1; a < KSArenaCount; a++) if (KSArenas[a].Home < 0) Nobodys.Add(a);
+	ArenaLadder.Reset();
+	for (int32 i = 0; i < Ladder.Num(); i++)
+	{
+		int32 Where = 0;
+		for (int32 a = 1; a < KSArenaCount; a++) if (KSArenas[a].Home == Ladder[i]) Where = a;
+		if (i == Ladder.Num() - 1 && Nobodys.Num()) Where = Nobodys[FMath::RandRange(0, Nobodys.Num() - 1)];
+		if (ForcedArena >= 0) Where = FMath::Clamp(ForcedArena, 0, KSArenaCount - 1);
+		ArenaLadder.Add(Where);
+	}
+}
+
+void AKSGameMode::RaiseArena(int32 Index)
+{
+	ArenaIndex = FMath::Clamp(Index, 0, KSArenaCount - 1);
+	const FKSArenaDef& Def = KSArenas[ArenaIndex];
+	FKSBuilder B = MakeBuilder();
+	KSWorld::BuildArena(B, Arena, Def);
+	// What is in the air here: stars, fireflies, dust, rain, petals, will-o'-the-wisps, sparks, embers, glitter.
+	Motes.Reset();
+	for (int32 i = 0; i < Def.Motes && Def.Mote != EKSMote::None; i++)
+	{
+		const bool bFlat = Def.Mote == EKSMote::Fall, bStreak = Def.Mote == EKSMote::Rain;
+		const FVector Size = bStreak ? FVector(1.4f, 1.4f, 60.f) : bFlat ? FVector(15.f, 9.f, 0.8f) : FVector(Def.Mote == EKSMote::Sparks ? 6.f : FMath::FRandRange(5.f, 10.f));
+		const float Shade = FMath::FRandRange(0.65f, 1.f);
+		UMaterialInstanceDynamic* MID = B.Shape(bFlat || bStreak ? B.Cube : B.Sphere, FVector(0, 0, -500), Size,
+			FLinearColor(Def.MoteColor.R * Shade, Def.MoteColor.G * Shade, Def.MoteColor.B * Shade), Def.MoteGlow);
+		FMote M; M.Actor = MID ? Cast<AActor>(MID->GetOuter()) : nullptr; M.Phase = FMath::FRandRange(0.f, 100.f);
+		ResetMote(M, true);
+		Motes.Add(M);
+	}
+	NextBoltAt = GetWorld()->GetTimeSeconds() + FMath::FRandRange(3.f, 7.f); BoltUntil = 0.f;
+	bLookDirty = true;
+	// One line per arena for tools/check.sh: an arena whose picture or music is missing shows a bare wall or falls silent.
+	auto Has = [](const FString& Path) { return LoadObject<UObject>(nullptr, *Path, nullptr, LOAD_NoWarn | LOAD_Quiet) != nullptr; };
+	const bool bHall = !Def.Key[0];
+	UE_LOG(LogTemp, Display, TEXT("KSTEST arena_built index=%d key=%s backdrop=%d mat=%d music=%d wall_panels=%d motes=%d"), ArenaIndex, bHall ? TEXT("Hall") : Def.Key,
+		Has(bHall ? FString(TEXT("/Game/KS/Arena/T_KS_Stands.T_KS_Stands")) : FString::Printf(TEXT("/Game/KS/Arena/T_KS_Bg_%s.T_KS_Bg_%s"), Def.Key, Def.Key)) ? 1 : 0,
+		Has(bHall ? FString(TEXT("/Game/KS/Arena/T_KS_Mat.T_KS_Mat")) : FString::Printf(TEXT("/Game/KS/Arena/T_KS_Mat_%s.T_KS_Mat_%s"), Def.Key, Def.Key)) ? 1 : 0,
+		Has(FString::Printf(TEXT("/Game/KS/Audio/M_%s.M_%s"), Def.Music, Def.Music)) ? 1 : 0, Arena.Wall.Num(), Motes.Num());
+}
+
+void AKSGameMode::UseArena(int32 Index)
+{
+	Index = FMath::Clamp(Index, 0, KSArenaCount - 1);
+	if (Index == ArenaIndex) return;
+	// Everything of the old arena goes (its crowd too: SeatCrowd seats the new one); the two fighters stay.
+	TObjectPtr<AKSDummy> Player = PlayerDummy, Opp = OppDummy;
+	WorldActors.Remove(Player); WorldActors.Remove(Opp);
+	ClearWorld();
+	PlayerDummy = Player; OppDummy = Opp;
+	if (Player) WorldActors.Add(Player);
+	if (Opp) WorldActors.Add(Opp);
+	RaiseArena(Index);
+	WhiteFade = FMath::Max(WhiteFade, 0.5f);
+	PlayMusic();
+}
+
+void AKSGameMode::PlayMusic(float FadeSeconds)
+{
+	const TCHAR* Track = (Phase == EKSPhase::Menu || Phase == EKSPhase::Intro || ArenaIndex < 0) ? TEXT("Fight") : KSArenas[ArenaIndex].Music;
+	KSAudio::Music(this, MusicPlayer, MusicLevel * (bMusicDucked ? 0.4f : 1.f), FadeSeconds, Track);
+}
+
+void AKSGameMode::ResetMote(FMote& M, bool bAnywhere)
+{
+	// The air the fight camera looks through: over the ring and the front of the stands, not the whole hall.
+	const FVector Lo(-150.f, -650.f, 0.f), Hi(800.f, 650.f, 520.f);
+	M.Pos = FVector(FMath::FRandRange(Lo.X, Hi.X), FMath::FRandRange(Lo.Y, Hi.Y), FMath::FRandRange(Lo.Z, Hi.Z));
+	auto Side = [](float Amount) { return FMath::FRandRange(-Amount, Amount); };
+	switch (KSArenas[FMath::Clamp(ArenaIndex, 0, KSArenaCount - 1)].Mote)
+	{
+	case EKSMote::Drift: M.Vel = FVector(Side(6.f), Side(6.f), Side(3.f)); M.Pos.Z = FMath::FRandRange(40.f, Hi.Z); break;
+	case EKSMote::Rise:  M.Vel = FVector(Side(10.f), Side(10.f), FMath::FRandRange(35.f, 110.f)); if (!bAnywhere) M.Pos.Z = 0.f; break;
+	case EKSMote::Fall:  M.Vel = FVector(Side(15.f), Side(15.f), -FMath::FRandRange(45.f, 95.f)); if (!bAnywhere) M.Pos.Z = Hi.Z; break;
+	case EKSMote::Rain:  M.Vel = FVector(-120.f, 60.f, -FMath::FRandRange(1700.f, 2100.f)); if (!bAnywhere) M.Pos.Z = Hi.Z; break;
+	case EKSMote::Sparks:
+	{
+		// Welding going on at five places round the ring: each spark flies up and out and falls back.
+		static const FVector From[] = { FVector(470, -380, 60), FVector(470, 380, 60), FVector(200, -470, 60), FVector(200, 470, 60), FVector(760, 0, 150) };
+		M.Pos = From[FMath::RandRange(0, 4)];
+		M.Vel = FVector(Side(260.f), Side(260.f), FMath::FRandRange(220.f, 620.f));
+		M.Life = FMath::FRandRange(0.4f, 1.1f) * (bAnywhere ? FMath::FRand() : 1.f);
+		break;
+	}
+	default: break;
+	}
+}
+
+void AKSGameMode::TickMotes(float Now, float Dt)
+{
+	if (!Motes.Num() || ArenaIndex < 0) return;
+	const EKSMote Kind = KSArenas[ArenaIndex].Mote;
+	for (FMote& M : Motes)
+	{
+		AActor* Actor = M.Actor.Get();
+		if (!Actor) continue;
+		const FVector Wobble(FMath::Sin(Now * 0.9f + M.Phase), FMath::Cos(Now * 0.7f + M.Phase * 1.3f), FMath::Sin(Now * 1.1f + M.Phase * 2.1f));
+		switch (Kind)
+		{
+		case EKSMote::Drift: M.Pos += (M.Vel + Wobble * 14.f) * Dt; if (M.Pos.Z < 20.f || M.Pos.Z > 560.f || FMath::Abs(M.Pos.Y) > 700.f || M.Pos.X < -200.f || M.Pos.X > 850.f) ResetMote(M, true); break;
+		case EKSMote::Rise:  M.Pos += (M.Vel + Wobble * FVector(28.f, 28.f, 0.f)) * Dt; if (M.Pos.Z > 520.f) ResetMote(M, false); break;
+		case EKSMote::Fall:  M.Pos += (M.Vel + Wobble * FVector(45.f, 45.f, 0.f)) * Dt; if (M.Pos.Z < 3.f) ResetMote(M, false); break;
+		case EKSMote::Rain:  M.Pos += M.Vel * Dt; if (M.Pos.Z < 0.f) ResetMote(M, false); break;
+		case EKSMote::Sparks: M.Life -= Dt; M.Vel.Z -= 900.f * Dt; M.Pos += M.Vel * Dt; if (M.Life <= 0.f || M.Pos.Z < 0.f) ResetMote(M, false); break;
+		default: break;
+		}
+		if (Kind == EKSMote::Fall) Actor->SetActorLocationAndRotation(M.Pos, FRotator(Now * 70.f + M.Phase * 40.f, M.Phase * 60.f, Now * 110.f + M.Phase * 25.f));
+		else Actor->SetActorLocation(M.Pos);
+	}
 }
 
 void AKSGameMode::StartCard(int32 Index)
 {
 	FighterIndex = FMath::Clamp(Index, 0, Ladder.Num() - 1);
+	UseArena(ArenaLadder.IsValidIndex(FighterIndex) ? ArenaLadder[FighterIndex] : 0);
 	CurrentDef = Roster()[Ladder[FighterIndex]];
 	const FLadderTier& Tier = LadderTiers[FMath::Min(FighterIndex, LadderLength - 1)];
 	CurrentDef.Health = Tier.Health; CurrentDef.WindupScale = Tier.WindupScale; CurrentDef.DamageScale = Tier.DamageScale;
@@ -536,6 +679,12 @@ void AKSGameMode::UpdateFightCamera(float Dt)
 		Pos = FMath::Lerp(Close, FightPos, U);
 		Aim = FMath::Lerp(FVector(OppDistance, 0, 118.f * Fighter().Height), FightAim, U);
 		Fov = FMath::Lerp(50.f, 62.f, U);
+		// Before that, a second and a half of the place itself: a wide look over the ring at the painted wall. The
+		// fight camera sits low over the player's shoulder and never shows more of an arena than its crowd.
+		const float Wide = 1.f - FMath::SmoothStep(1.5f, 2.3f, PhaseTime);
+		Pos = FMath::Lerp(Pos, FVector(-560.f + 60.f * PhaseTime, -90.f + 50.f * PhaseTime, 250.f), Wide);
+		Aim = FMath::Lerp(Aim, FVector(1200.f, 0.f, 430.f), Wide);
+		Fov = FMath::Lerp(Fov, 84.f, Wide);
 	}
 	else if (Phase == EKSPhase::FightEnd || Phase == EKSPhase::Result || Phase == EKSPhase::Continue)
 	{
@@ -675,10 +824,9 @@ void AKSGameMode::UpdateFighterPoses(float Dt)
 
 void AKSGameMode::BeginLadder()
 {
-	// Webcam players are first shown where to stand and taken through each move once. It also teaches the detector
-	// how hard this player punches. Keyboard players, the self-playing test and a second run skip it.
-	const bool bCamera = TrackingSubsystem && TrackingSubsystem->HasBuiltInTracker();
-	if (bCalDemo || (bCamera && !bAuto && !bCalibrationDone && !FParse::Param(FCommandLine::Get(), TEXT("KSNoCal"))))
+	// Calibration is no longer forced on webcam players before the first bout: it is a line on the start menu.
+	// Only the self-check's -KSCalDemo still enters it from here.
+	if (bCalDemo)
 	{
 		CalPeaks.Reset();
 		SetPhase(EKSPhase::Calibrate);
@@ -719,6 +867,7 @@ void AKSGameMode::FinishCalibration(bool bCompleted)
 	UE_LOG(LogTemp, Display, TEXT("KSTEST calibration hint_changes=%d"), CalHintChanges);
 	UE_LOG(LogTemp, Display, TEXT("KSTEST calibration done completed=%d"), bCompleted ? 1 : 0);
 	CalClipKey.Reset(); CalChecks.Reset(); CalTitle.Reset(); CalHint.Reset();
+	if (bCalFromMenu) { bCalFromMenu = false; WhiteFade = 0.8f; EnterStreet(false); SetPhase(EKSPhase::Menu); return; }
 	StartCard(0);
 }
 
@@ -928,6 +1077,9 @@ void AKSGameMode::SeatCrowd()
 	// Deal the characters out of a shuffled deck so that nobody turns up twice before everyone has turned up once,
 	// and skip any whose picture is missing.
 	TArray<int32> Deck;
+	// Each arena has its own people: only the sheets named in its definition are dealt (none named: everyone).
+	TArray<FString> Locals;
+	if (ArenaIndex >= 0) FString(KSArenas[ArenaIndex].Crowd).ParseIntoArray(Locals, TEXT(" "));
 	FKSBuilder B = MakeBuilder();
 	const float Now = GetWorld()->GetTimeSeconds();
 	for (const FPlace& Place : Places)
@@ -938,7 +1090,7 @@ void AKSGameMode::SeatCrowd()
 			for (int32 i = Deck.Num() - 1; i >= 0; i--) if (Fits(KSCrowdSheets[Deck[i]].Build, Place.Row)) { Pick = Deck[i]; Deck.RemoveAt(i); break; }
 			if (Pick != INDEX_NONE) break;
 			const int32 Old = Deck.Num();                // nobody left who fits: shuffle a fresh deck in under the old one
-			for (int32 i = 0; i < UE_ARRAY_COUNT(KSCrowdSheets); i++) Deck.Insert(i, 0);
+			for (int32 i = 0; i < UE_ARRAY_COUNT(KSCrowdSheets); i++) if (!Locals.Num() || Locals.Contains(KSCrowdSheets[i].Name)) Deck.Insert(i, 0);
 			for (int32 i = Deck.Num() - Old - 1; i > 0; i--) Deck.Swap(i, FMath::RandRange(0, i));
 		}
 		if (Pick == INDEX_NONE) continue;
@@ -1235,6 +1387,27 @@ void AKSGameMode::TickArenaFx()
 		if (C.Pos.Z < 3.f) { C.bLive = false; C.Pos.Z = 3.f; Actor->SetActorLocationAndRotation(C.Pos, FRotator(0.f, C.Phase * 60.f, 0.f)); continue; }   // lies where it landed
 		Actor->SetActorLocationAndRotation(C.Pos, Actor->GetActorRotation() + C.Spin * Dt);
 	}
+	TickMotes(Now, Dt);
+	// The place's own light show: lightning lights the painted wall and the hall in two strokes; lava breathes.
+	const EKSPulse Pulse = ArenaIndex >= 0 ? KSArenas[ArenaIndex].Pulse : EKSPulse::None;
+	if (Pulse != EKSPulse::None)
+	{
+		float Wall = 1.f, Candelas = 0.f;
+		if (Pulse == EKSPulse::Lightning)
+		{
+			if (Now >= NextBoltAt) { BoltUntil = Now + 0.34f; NextBoltAt = Now + FMath::FRandRange(5.f, 13.f); }
+			const float Left = BoltUntil - Now;
+			const float Level = Left <= 0.f ? 0.f : Left > 0.26f ? 1.f : Left > 0.18f ? 0.f : Left / 0.18f;
+			Wall = 1.f + 1.6f * Level; Candelas = 90000.f * Level;
+		}
+		else
+		{
+			const float Level = 0.5f + 0.35f * FMath::Sin(Now * 1.4f) + 0.15f * FMath::Sin(Now * 5.3f);
+			Wall = 0.85f + 0.35f * Level; Candelas = 2200.f + 2600.f * Level;
+		}
+		for (UMaterialInstanceDynamic* Panel : Arena.Wall) if (Panel) Panel->SetScalarParameterValue(TEXT("Glow"), Arena.WallGlow * Wall);
+		for (const TWeakObjectPtr<APointLight>& Light : Arena.PulseLights) if (APointLight* L = Light.Get()) L->PointLightComponent->SetIntensity(Candelas * 0.22f);
+	}
 }
 
 void AKSGameMode::DriveCharacters()
@@ -1380,8 +1553,8 @@ void AKSGameMode::DriveCharacters()
 	SpokenLine = Talker ? Talker->SpokenText() : FString();
 	if (Talker) { SpokenBy = Talker == OppDummy ? FString(Fighter().Name) : FString(PlayerFighter().Name); bSpokenByOpp = Talker == OppDummy; }
 	// Where the heads are, for the speech bubbles and the damage badges.
-	if (OppDummy) OppHead = OppDummy->FaceWorld(false);
-	if (PlayerDummy) PlayerHead = PlayerDummy->FaceWorld(false);
+	if (OppDummy) { OppHead = OppDummy->FaceWorld(false); OppDummy->BodyPoints(OppBody); } else OppBody.Reset();
+	if (PlayerDummy) { PlayerHead = PlayerDummy->FaceWorld(false); PlayerDummy->BodyPoints(PlayerBody); } else PlayerBody.Reset();
 }
 
 /** One voice at a time. A taunt is dropped if somebody is still speaking or has only just stopped; bMust (the
@@ -1671,6 +1844,6 @@ void AKSGameMode::TickEnding(float Dt)
 		: PhaseTime < 8.f ? TEXT("The fighters nobody was meant to see finally got their match.")
 		: PhaseTime < 12.f ? TEXT("The cabinet has what it waited thirty-nine years for: a player.")
 		: TEXT("KO-SEKAI   -   thank you for playing");
-	Prompt = PhaseTime > 6.f ? TEXT("Press ENTER to walk the street again") : TEXT("");
-	if ((PhaseTime > 6.f && ConfirmPressed()) || (bAuto && PhaseTime > 16.f)) EnterStreet(false);
+	Prompt = PhaseTime > 6.f ? TEXT("Press ENTER for the menu") : TEXT("");
+	if ((PhaseTime > 6.f && ConfirmPressed()) || (bAuto && PhaseTime > 16.f)) { EnterStreet(false); MenuIndex = 0; SetPhase(EKSPhase::Menu); }
 }

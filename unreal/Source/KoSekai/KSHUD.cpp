@@ -3,6 +3,7 @@
 #include "KSTracking.h"
 #include "KSAudio.h"
 #include "KSUIData.h"
+#include "KSCineData.h"
 #include "Engine/Canvas.h"
 #include "Engine/Engine.h"
 #include "Engine/Font.h"
@@ -100,9 +101,38 @@ FVector2D AKSHUD::TextSize(const FString& Str, float Px, EKSFont Which) const
 	return Item.GetTextSize(Canvas->Canvas->GetDPIScale());
 }
 
-void AKSHUD::Text(const FString& Str, float X, float Y, float Px, const FLinearColor& Color, int32 Align, EKSFont Which, float Edge, const FLinearColor& EdgeColor)
+float AKSHUD::Fit(const FString& Str, float Px, EKSFont Font, float MaxW) const
+{
+	const float Max = MaxW * SW;
+	float Wide = TextSize(Str, Px, Font).X;
+	if (Wide <= Max) return Px;
+	Px = FMath::Max(8.f, FMath::FloorToFloat(Px * Max / Wide));
+	// Font sizes are whole pixels, so the first guess can still be a hair too wide.
+	while (Px > 8.f && TextSize(Str, Px, Font).X > Max) Px -= 1.f;
+	return Px;
+}
+
+bool AKSHUD::Lines(const FString& Str, float X, float Y, float MaxW, int32 MaxLines, float Px, const FLinearColor& Color, EKSFont Font, float Edge, const FLinearColor& EdgeColor)
+{
+	if (Str.IsEmpty()) return true;
+	const float Max = MaxW * SW;
+	TArray<FString> Wrapped; bool bFits = false;
+	for (; Px >= 9.f; Px -= 1.f)
+	{
+		Wrapped = Wrap(Str, Px, Font, Max);
+		bFits = Wrapped.Num() <= MaxLines;
+		for (const FString& L : Wrapped) bFits &= TextSize(L, Px, Font).X <= Max;
+		if (bFits) break;
+	}
+	const float Step = Px * 1.22f / 720.f;
+	for (int32 i = 0; i < Wrapped.Num(); i++) Text(Wrapped[i], X, Y + (i - (Wrapped.Num() - 1) * 0.5f) * Step, Px, Color, 0, Font, Edge, EdgeColor);
+	return bFits;
+}
+
+void AKSHUD::Text(const FString& Str, float X, float Y, float Px, const FLinearColor& Color, int32 Align, EKSFont Which, float Edge, const FLinearColor& EdgeColor, float MaxW)
 {
 	if (Str.IsEmpty() || Color.A <= 0.004f) return;
+	if (MaxW > 0.f) Px = Fit(Str, Px, Which, MaxW);
 	const FVector2D Size = TextSize(Str, Px, Which);
 	const FVector2D At(X * SW - (Align == 0 ? Size.X * 0.5f : Align > 0 ? Size.X : 0.f), Y * SH - Size.Y * 0.5f);
 	const float E = Edge * Unit * FMath::Clamp(Px / 22.f, 0.7f, 2.2f);
@@ -206,6 +236,122 @@ void AKSHUD::PushSpin(float X, float Y, float Scale, float Degrees)
 
 void AKSHUD::PopSpin() { Canvas->Canvas->PopTransform(); }
 
+/* ================= where things go ================= */
+
+namespace
+{
+	/** How much two boxes overlap, as a fraction of the smaller one. */
+	float Cover(const FBox2D& A, const FBox2D& B)
+	{
+		const float W = FMath::Min(A.Max.X, B.Max.X) - FMath::Max(A.Min.X, B.Min.X), H = FMath::Min(A.Max.Y, B.Max.Y) - FMath::Max(A.Min.Y, B.Min.Y);
+		if (W <= 0.f || H <= 0.f) return 0.f;
+		return W * H / FMath::Max(1.f, FMath::Min(A.GetArea(), B.GetArea()));
+	}
+	FBox2D BoxAt(const FVector2D& Centre, const FVector2D& Size) { return FBox2D(Centre - Size * 0.5f, Centre + Size * 0.5f); }
+}
+
+void AKSHUD::BeginLayout(const AKSGameMode& G)
+{
+	Bodies.Reset(); Heads.Reset(); Taken.Reset();
+	// Below the health bars and above the bottom edge; on the VS card only the strip the fighters are seen through.
+	Region = G.Phase == EKSPhase::Card ? FBox2D(FVector2D(0.01f * SW, 0.16f * SH), FVector2D(0.99f * SW, 0.59f * SH))
+		: FBox2D(FVector2D(0.01f * SW, 0.185f * SH), FVector2D(0.99f * SW, 0.93f * SH));
+	const TPair<const TArray<FVector>*, FVector> Fighters[] = { { &G.OppBody, G.OppHead }, { &G.PlayerBody, G.PlayerHead } };
+	for (const TPair<const TArray<FVector>*, FVector>& F : Fighters)
+	{
+		FBox2D Body(ForceInit);
+		for (const FVector& Point : *F.Key)
+		{
+			const FVector S = Project(Point);
+			if (S.Z > 0.f) Body += FVector2D(FMath::Clamp(S.X, 0.f, SW), FMath::Clamp(S.Y, 0.f, SH));
+		}
+		if (!Body.bIsValid || Body.GetArea() < 16.f) continue;
+		// The points are bones: flesh, hair and gloves reach a little further.
+		Bodies.Add(Body.ExpandBy(0.035f * Body.GetSize().Y));
+		const FVector Head = Project(F.Value);
+		if (Head.Z > 0.f)
+		{
+			const float R = FMath::Max(0.05f * SH, 0.12f * Body.GetSize().Y);
+			Heads.Add(BoxAt(FVector2D(Head.X, Head.Y), FVector2D(2.f * R, 2.4f * R)));
+		}
+	}
+	// A badge keeps the place it was given for as long as it is up; the ones that are gone free theirs.
+	Placed.RemoveAll([&G](const FPlacedBadge& B) { return !G.Popups.ContainsByPredicate([&B](const FKSPopup& P) { return P.Start == B.Start && P.Text == B.Text; }); });
+
+	// A new line pops its bubble out afresh.
+	if (G.SpokenLine.IsEmpty()) { BubbleLine.Reset(); bBubbleSet = false; }
+	else if (G.SpokenLine != BubbleLine)
+	{
+		BubbleLine = G.SpokenLine; BubbleStart = Now; bBubbleSet = false;
+		KSAudio::Play(this, EKSSfx::Pop, 0.6f);
+		if (!bLoggedBubble) { bLoggedBubble = true; UE_LOG(LogTemp, Display, TEXT("KSTEST ui speech bubble shown picture=%d"), Tex(TEXT("bubble")) ? 1 : 0); }
+	}
+}
+
+void AKSHUD::Reserve(float X, float Y, float W, float H)
+{
+	Taken.Add(FBox2D(FVector2D(X * SW, Y * SH), FVector2D((X + W) * SW, (Y + H) * SH)));
+}
+
+float AKSHUD::SpotCost(const FBox2D& Box, int32 Self) const
+{
+	// A face is never to be covered, a fixed piece or another badge hardly ever, a body only when there is no room beside it.
+	float Cost = 0.f;
+	for (const FBox2D& B : Heads) Cost += 20.f * Cover(Box, B);
+	for (const FBox2D& B : Taken) Cost += 10.f * Cover(Box, B);
+	for (int32 i = 0; i < Placed.Num(); i++) if (i != Self) Cost += 8.f * Cover(Box, BoxAt(Placed[i].At, Placed[i].Size));
+	for (const FBox2D& B : Bodies) Cost += 5.f * Cover(Box, B);
+	return Cost;
+}
+
+FVector2D AKSHUD::FindSpot(const FVector2D& Want, const FVector2D& Size, int32 Self, float* OutCost) const
+{
+	// Where the centre may be so that the whole thing stays inside the region.
+	FVector2D Lo = Region.Min + Size * 0.5f, Hi = Region.Max - Size * 0.5f;
+	if (Hi.X < Lo.X) Lo.X = Hi.X = (Region.Min.X + Region.Max.X) * 0.5f;
+	if (Hi.Y < Lo.Y) Lo.Y = Hi.Y = (Region.Min.Y + Region.Max.Y) * 0.5f;
+	FVector2D Best = Want; float BestCost = BIG_NUMBER;
+	auto Try = [&](FVector2D C)
+	{
+		C.X = FMath::Clamp(C.X, Lo.X, Hi.X); C.Y = FMath::Clamp(C.Y, Lo.Y, Hi.Y);
+		// Staying near where it belongs matters, but less than not covering anyone.
+		const float Cost = SpotCost(BoxAt(C, Size), Self) + 1.2f * FVector2D::Distance(C, Want) / SH;
+		if (Cost < BestCost) { BestCost = Cost; Best = C; }
+	};
+	Try(Want);
+	const float Step = 0.03f * SH;
+	for (float Y = Lo.Y; Y <= Hi.Y + 0.5f; Y += Step) for (float X = Lo.X; X <= Hi.X + 0.5f; X += Step) Try(FVector2D(X, Y));
+	if (OutCost) *OutCost = BestCost;
+	return Best;
+}
+
+void AKSHUD::PlaceBubble(const AKSGameMode& G)
+{
+	if (G.SpokenLine.IsEmpty()) return;
+	UTexture2D* B = Tex(TEXT("bubble"));
+	const float H = 0.26f * SH;
+	BubbleSize = FVector2D(H * (B ? (float)B->GetSizeX() / B->GetSizeY() : 1.6f), H);
+	const bool bOpp = G.bSpokenByOpp;
+	const FVector Head = Project(bOpp ? G.OppHead : G.PlayerHead);
+	BubbleHead = Head.Z > 0.f ? FVector2D(Head.X, Head.Y) : FVector2D(0.5f * SW, (bOpp ? 0.40f : 0.70f) * SH);
+	// Beside the head and a little above it, so the tail points at the mouth: on the right, or on the left, whichever has room.
+	// The opponent's bubble would rather be on the right, the player's on the left.
+	const FVector2D Right = BubbleHead + FVector2D(0.60f * BubbleSize.X, -0.34f * BubbleSize.Y), Left = BubbleHead + FVector2D(-0.60f * BubbleSize.X, -0.34f * BubbleSize.Y);
+	float CostR = 0.f, CostL = 0.f;
+	const FVector2D SpotR = FindSpot(Right, BubbleSize, INDEX_NONE, &CostR), SpotL = FindSpot(Left, BubbleSize, INDEX_NONE, &CostL);
+	(bOpp ? CostL : CostR) += 0.15f;
+	const FVector2D Spot = CostR <= CostL ? SpotR : SpotL;
+	if (!bBubbleSet) { bBubbleSet = true; BubbleGoal = BubbleAt = Spot; }
+	else
+	{
+		// It stays put while its place is still fair, and glides over when the fighters have moved under it.
+		const float Keep = SpotCost(BoxAt(BubbleGoal, BubbleSize), INDEX_NONE) + 1.2f * FMath::Min(FVector2D::Distance(BubbleGoal, Right), FVector2D::Distance(BubbleGoal, Left)) / SH;
+		if (FMath::Min(CostR, CostL) + 0.6f < Keep) BubbleGoal = Spot;
+		BubbleAt = FMath::Vector2DInterpTo(BubbleAt, BubbleGoal, GetWorld()->GetDeltaSeconds(), 7.f);
+	}
+	Taken.Add(BoxAt(BubbleGoal, BubbleSize));
+}
+
 /* ================= pieces ================= */
 
 void AKSHUD::HealthBar(float X, float W, float Fraction, float Trail, const FLinearColor& Color, bool bRightToLeft, float Jolt)
@@ -245,12 +391,49 @@ void AKSHUD::Subtitles(const AKSGameMode& G)
 		Fill(0.f, 0.775f, 1.f, 0.09f, FLinearColor(0.02f, 0.f, 0.06f, 0.62f));
 		Fill(0.f, 0.775f, 1.f, 0.004f, Faded(Magenta, 0.8f));
 		Fill(0.f, 0.861f, 1.f, 0.004f, Faded(Cyan, 0.8f));
-		Label(G.Subtitle, 0.5f, 0.82f, 1.2f, Lilac);
+		Lines(G.Subtitle, 0.5f, 0.82f, 0.94f, 2, 24.f, Lilac);
 	}
 	if (!G.Prompt.IsEmpty())
 	{
 		const float Pulse = 0.65f + 0.35f * FMath::Sin(Now * 5.f);
-		Label(G.Prompt, 0.5f, 0.915f, 1.0f, Faded(Yellow, Pulse));
+		Label(G.Prompt, 0.5f, 0.915f, 1.0f, Faded(Yellow, Pulse), 0, 0.94f);
+	}
+}
+
+void AKSHUD::DrawIntro(const AKSGameMode& G)
+{
+	Fill(0.f, 0.f, 1.f, 1.f, FLinearColor::Black);
+	const int32 Count = UE_ARRAY_COUNT(KSCineShots);
+	if (CineSheets.Num() == 0)
+	{
+		for (const FKSCineShot& Shot : KSCineShots) CineSheets.Add(LoadObject<UTexture2D>(nullptr, *FString::Printf(TEXT("/Game/KS/Cine/%s.%s"), Shot.Texture, Shot.Texture), nullptr, LOAD_NoWarn | LOAD_Quiet));
+	}
+	// Which shot, and how far into it.
+	float T = G.PhaseTime; int32 Index = 0;
+	while (Index < Count - 1 && T >= KSCineShots[Index].Frames / KSCineFps) { T -= KSCineShots[Index].Frames / KSCineFps; Index++; }
+	const FKSCineShot& Shot = KSCineShots[Index];
+	if (UTexture2D* Sheet = CineSheets[Index])
+	{
+		const int32 Frame = FMath::Clamp(FMath::FloorToInt(T * KSCineFps), 0, FMath::Max(0, Shot.Frames - 1));
+		const float U = (Frame % KSCineCols) * KSCineCellU, V = (Frame / KSCineCols) * KSCineCellV, In = 0.5f / 4096.f;
+		Part(Sheet, 0.f, 0.f, SW, SH, U + In, V + In, U + KSCineCellU - In, V + KSCineCellV - In, FLinearColor::White);
+	}
+	// Every cut lands with a white flash, like a splice in the tape.
+	if (T < 0.14f) Fill(0.f, 0.f, 1.f, 1.f, FLinearColor(1.f, 1.f, 1.f, 0.85f * (1.f - T / 0.14f)));
+	// Cinema bars, the words of the story, and how to get out.
+	Fill(0.f, 0.f, 1.f, 0.085f, FLinearColor::Black);
+	Fill(0.f, 0.915f, 1.f, 0.085f, FLinearColor::Black);
+	const float Rise = FMath::Clamp((T - 0.25f) / 0.2f, 0.f, 1.f);
+	Text(Shot.Caption, 0.5f, 0.815f + 0.02f * (1.f - Rise), 40.f, FLinearColor(1.f, 0.9f, 0.3f, Rise), 0, EKSFont::Comic, 3.f, FLinearColor(0.04f, 0.f, 0.10f, 0.95f * Rise), 0.92f);
+	if (FMath::Frac(Now * 0.8f) < 0.7f) Label(TEXT("ENTER  skip"), 0.985f, 0.957f, 0.7f, Lilac, 1);
+	// The tape itself: scan lines and a band of noise that wanders up the picture.
+	for (float Y = 0.f; Y < SH; Y += 4.f * Unit) DrawRect(FLinearColor(0.f, 0.f, 0.f, 0.16f), 0.f, Y, SW, 1.5f * Unit);
+	Fill(0.f, 1.f - FMath::Frac(Now * 0.11f), 1.f, 0.014f, FLinearColor(1.f, 1.f, 1.f, 0.06f));
+	if (!bLoggedIntro)
+	{
+		bLoggedIntro = true; int32 Loaded = 0;
+		for (UTexture2D* Sheet : CineSheets) Loaded += Sheet ? 1 : 0;
+		UE_LOG(LogTemp, Display, TEXT("KSTEST intro shown shots=%d loaded=%d"), Count, Loaded);   // for tools/check.sh
 	}
 }
 
@@ -266,10 +449,18 @@ void AKSHUD::DrawTracker(const AKSGameMode& G, bool bWithSkeleton)
 	else { Status = TEXT("WEBCAM TRACKING"); Color = Green; }
 	Label(Status, 0.985f, 0.975f, 0.7f, Color, 1);
 	// Too close to the camera is the commonest reason punches are missed, so say it where it cannot be overlooked.
-	if (T->AreHandsOutOfView())
+	// It used to be 64-point letters across the middle of the screen, over the fighters, the callouts and the speech
+	// bubbles, and it flashed on for every frame the hands slipped out. Now: a small plate low in the middle, only in
+	// the ring (the menu and the calibration screen say it their own way), and only once it has lasted over half a second.
+	if (!T->AreHandsOutOfView()) HandsOutSince = -1.f;
+	else if (HandsOutSince < 0.f) HandsOutSince = Now;
+	const bool bRing = G.Phase != EKSPhase::Menu && G.Phase != EKSPhase::Calibrate && G.Phase != EKSPhase::Intro;
+	if (bRing && HandsOutSince >= 0.f && Now - HandsOutSince > 0.6f)
 	{
-		Text(TEXT("STEP BACK"), 0.5f, 0.30f, 64.f, Yellow, 0, EKSFont::Comic, 3.f);
-		Label(TEXT("the camera must see your elbows and fists"), 0.5f, 0.37f, 0.9f, Yellow, 0);
+		const float Pulse = 0.8f + 0.2f * FMath::Sin(Now * 6.f);
+		Plate(0.5f - 0.15f, 0.842f, 0.30f, 0.084f, 0.9f);
+		Text(TEXT("STEP BACK"), 0.5f, 0.872f, 24.f, FLinearColor(1.f, 0.9f, 0.3f, Pulse), 0, EKSFont::Hud, 2.f, FLinearColor(0.04f, 0.f, 0.10f, 0.95f), 0.26f);
+		Label(TEXT("the camera must see your elbows and fists"), 0.5f, 0.902f, 0.58f, Lilac, 0, 0.27f);
 	}
 
 	if (!bWithSkeleton || !T->HasLandmarks()) return;
@@ -291,34 +482,57 @@ void AKSHUD::DrawPopup(const AKSGameMode& G, const FKSPopup& P)
 {
 	const float T = G.Clock - P.Start, U = FMath::Clamp(T / P.Life, 0.f, 1.f);
 	const float Alpha = U < 0.7f ? 1.f : 1.f - (U - 0.7f) / 0.3f;
-	float X = P.Pos.X, Y = P.Pos.Y;
-	if (P.Kind == 1 || P.Kind == 3)
+	const bool bNumber = P.Kind == 1 || P.Kind == 2;
+	const TCHAR* Art = bNumber ? (P.Kind == 1 ? TEXT("burst_hit") : TEXT("burst_hurt")) : ArtFor(P.Text);
+	UTexture2D* Picture = Art ? Tex(Art) : nullptr;
+	const float Big = P.bBig ? 1.25f : 1.f, High = 0.15f, WordPx = P.bBig ? 60.f : 40.f;
+
+	// Where it goes is decided once, when it appears: as near to where it belongs as it can be without covering a fighter.
+	int32 Slot = Placed.IndexOfByPredicate([&P](const FPlacedBadge& B) { return B.Start == P.Start && B.Text == P.Text; });
+	if (Slot == INDEX_NONE)
 	{
-		// Pinned to the opponent's head; Pos is how far off it sits.
-		const FVector Head = Project(G.OppHead);
-		if (Head.Z > 0.f) { X = FMath::Clamp(Head.X / SW + P.Pos.X, 0.1f, 0.9f); Y = FMath::Clamp(Head.Y / SH + P.Pos.Y, 0.2f, 0.85f); }
-		else { X = 0.6f + P.Pos.X; Y = 0.38f + P.Pos.Y; }
+		const FVector2D Size = Picture ? FVector2D(High * SH * Picture->GetSizeX() / FMath::Max(1, Picture->GetSizeY()), High * SH) * Big
+			: TextSize(P.Text, WordPx, EKSFont::Comic) + FVector2D(16.f, 8.f) * Unit;
+		FVector2D Want(P.Pos.X * SW, P.Pos.Y * SH);
+		if (P.Kind == 1 || P.Kind == 3)
+		{
+			// Dealt to the opponent: beside the opponent's head; Pos is how far off.
+			const FVector Head = Project(G.OppHead);
+			Want = Head.Z > 0.f ? FVector2D(Head.X + P.Pos.X * SW, Head.Y + P.Pos.Y * SH) : FVector2D((0.6f + P.Pos.X) * SW, (0.38f + P.Pos.Y) * SH);
+		}
+		else if (P.Kind == 2)
+		{
+			// Taken by the player: beside the player's fighter, on the outer side.
+			const FVector Head = Project(G.PlayerHead);
+			if (Head.Z > 0.f) Want = FVector2D(Head.X + (Head.X < 0.5f * SW ? -0.13f : 0.13f) * SW, Head.Y + (P.Pos.Y - 0.63f) * SH);
+		}
+		const FVector2D At = FindSpot(Want, Size, INDEX_NONE);
+		Slot = Placed.Add({ P.Start, P.Text, At, Size });
+		// For tools/check.sh: how well the badges keep off the fighters.
+		const FBox2D Box = BoxAt(At, Size);
+		bool bOnHead = false;
+		for (const FBox2D& B : Heads) bOnHead |= Cover(Box, B) > 0.2f;
+		for (const FBox2D& B : Bodies) WorstCover = FMath::Max(WorstCover, Cover(Box, B));
+		BadgesPlaced++; BadgesOnHeads += bOnHead ? 1 : 0;
+		if (BadgesPlaced == 10 && !bLoggedLayout)
+		{
+			bLoggedLayout = true;
+			UE_LOG(LogTemp, Display, TEXT("KSTEST ui layout badges=%d on_heads=%d worst_body_cover=%.2f"), BadgesPlaced, BadgesOnHeads, WorstCover);
+		}
 	}
-	Y -= 0.04f * U;
-	const float Tilt = (Hash(P.Start * 7.3f + P.Pos.X) - 0.5f) * 26.f;
-	PushSpin(X, Y, PopScale(T) * (P.bBig ? 1.3f : 1.f) * (1.f + 0.03f * FMath::Sin(T * 40.f)), Tilt);
-	const TCHAR* Art = ArtFor(P.Text);
-	if (P.Kind == 1 || P.Kind == 2)
+	const float X = Placed[Slot].At.X / SW, Y = Placed[Slot].At.Y / SH - 0.025f * U;
+	const float Tilt = (Hash(P.Start * 7.3f + P.Pos.X) - 0.5f) * 22.f;
+	PushSpin(X, Y, PopScale(T) * Big * (1.f + 0.03f * FMath::Sin(T * 40.f)), Tilt);
+	if (bNumber)
 	{
 		// A damage number on its burst.
 		const bool bDealt = P.Kind == 1;
-		Pic(bDealt ? TEXT("burst_hit") : TEXT("burst_hurt"), X, Y, 0.19f, Alpha);
-		Text(P.Text, X, Y - 0.004f, 56.f, Faded(bDealt ? FLinearColor(0.95f, 0.08f, 0.05f) : FLinearColor(0.75f, 0.f, 0.3f), Alpha), 0, EKSFont::Comic, 2.6f, FLinearColor(0.f, 0.f, 0.f, 1.f));
+		Pic(Art, X, Y, High, Alpha);
+		Text(P.Text, X, Y - 0.003f, 44.f, Faded(bDealt ? FLinearColor(0.95f, 0.08f, 0.05f) : FLinearColor(0.75f, 0.f, 0.3f), Alpha), 0, EKSFont::Comic, 2.4f, FLinearColor(0.f, 0.f, 0.f, 1.f), High * 0.62f * SH / SW);
 		if (!bLoggedDamage) { bLoggedDamage = true; UE_LOG(LogTemp, Display, TEXT("KSTEST ui damage badge shown text=%s"), *P.Text); }
 	}
-	else if (Art && Pic(Art, X, Y, 0.20f, Alpha)) {}
-	else if (P.Text.EndsWith(TEXT(" HITS")))
-	{
-		Pic(TEXT("burst_hit"), X, Y, 0.20f, Alpha);
-		Text(P.Text.LeftChop(5), X, Y - 0.018f, 52.f, Faded(FLinearColor(0.95f, 0.08f, 0.05f), Alpha), 0, EKSFont::Comic, 2.6f, FLinearColor::Black);
-		Text(TEXT("HITS"), X, Y + 0.034f, 24.f, Faded(FLinearColor::Black, Alpha), 0, EKSFont::Comic, 0.f);
-	}
-	else Text(P.Text, X, Y, P.bBig ? 60.f : 40.f, Faded(P.Color, Alpha), 0, EKSFont::Comic, 3.f, FLinearColor::Black);
+	else if (Art && Pic(Art, X, Y, High, Alpha)) {}
+	else Text(P.Text, X, Y, WordPx / Big, Faded(P.Color, Alpha), 0, EKSFont::Comic, 3.f, FLinearColor::Black);
 	PopSpin();
 }
 
@@ -337,7 +551,7 @@ void AKSHUD::DrawAnnouncement(const AKSGameMode& G)
 	const float X = 0.5f + FMath::Sin(Now * 95.f) * Shiver, Y = 0.40f + FMath::Cos(Now * 80.f) * Shiver;
 	PushSpin(X, Y, SlamScale(T) * (1.f + 0.015f * FMath::Sin(Now * 7.f)), -3.f);
 	const TCHAR* Art = ArtFor(G.Announcement);
-	if (!Art || !Pic(Art, X, Y, 0.36f, Alpha))
+	if (!Art || !Pic(Art, X, Y, 0.30f, Alpha))
 	{
 		const float W = TextSize(G.Announcement, 72.f, EKSFont::Comic).X / SW + 0.16f;
 		Plate(X - W * 0.5f, Y - 0.075f, W, 0.15f, Alpha);
@@ -348,25 +562,13 @@ void AKSHUD::DrawAnnouncement(const AKSGameMode& G)
 
 void AKSHUD::SpeechBubble(const AKSGameMode& G)
 {
-	if (G.SpokenLine.IsEmpty()) { BubbleLine.Reset(); return; }
-	if (G.SpokenLine != BubbleLine)
-	{
-		BubbleLine = G.SpokenLine; BubbleStart = Now;
-		KSAudio::Play(this, EKSSfx::Pop, 0.6f);
-		if (!bLoggedBubble) { bLoggedBubble = true; UE_LOG(LogTemp, Display, TEXT("KSTEST ui speech bubble shown picture=%d"), Tex(TEXT("bubble")) ? 1 : 0); }
-	}
+	// PlaceBubble has found it a place beside the speaker, clear of both fighters.
+	if (G.SpokenLine.IsEmpty() || !bBubbleSet) return;
 	const float T = Now - BubbleStart;
 	UTexture2D* B = Tex(TEXT("bubble"));
-	const float H = 0.33f, W = H * SH * (B ? (float)B->GetSizeX() / B->GetSizeY() : 1.6f) / SW;
-
-	// The bubble hangs beside the speaker's head with its tail towards it: up and right of the opponent, left of the player's fighter.
+	const float H = BubbleSize.Y / SH, W = BubbleSize.X / SW, X = BubbleAt.X / SW, Y = BubbleAt.Y / SH;
 	const bool bOpp = G.bSpokenByOpp;
-	const FVector Head = Project(bOpp ? G.OppHead : G.PlayerHead);
-	FVector2D At = Head.Z > 0.f ? FVector2D(Head.X / SW, Head.Y / SH) : bOpp ? FVector2D(0.5f, 0.40f) : FVector2D(0.5f, 0.78f);
-	const bool bFlip = !bOpp;      // the picture's tail points down and left
-	// It keeps out from under the health bars and the cue plate (down to 0.37 of the screen) and off the fighters in the middle.
-	const float X = FMath::Clamp(At.X + (bFlip ? -0.58f : 0.58f) * W, W * 0.5f + 0.01f, 1.f - W * 0.5f - 0.01f);
-	const float Y = FMath::Clamp(At.Y - H * 0.30f, (G.Phase == EKSPhase::Fight ? 0.37f : 0.17f) + H * 0.5f, 0.99f - H * 0.5f);
+	const bool bFlip = BubbleAt.X < BubbleHead.X;      // the picture's tail points down and left; turned over when the speaker is on the right
 
 	PushSpin(X, Y, PopScale(T) * (1.f + 0.018f * FMath::Sin(T * 17.f)), (bFlip ? 3.f : -3.f) + 1.6f * FMath::Sin(T * 8.f));
 	if (!Pic(TEXT("bubble"), X, Y, H, 1.f, bFlip))
@@ -378,15 +580,16 @@ void AKSHUD::SpeechBubble(const AKSGameMode& G)
 	if (bFlip) { const float Keep = I0; I0 = 1.f - I1; I1 = 1.f - Keep; }
 	const float V0 = B ? KSUI::BubbleInside[1] : 0.25f, V1 = B ? KSUI::BubbleInside[3] : 0.75f;
 	const float CX = X + ((I0 + I1) * 0.5f - 0.5f) * W, CY = Y + ((V0 + V1) * 0.5f - 0.5f) * H;
-	const float RoomW = (I1 - I0) * W * SW * 1.16f, RoomH = (V1 - V0) * H * SH * 1.25f;
+	// The white of the bubble is a little larger than the measured box, but only in the middle rows.
+	const float RoomW = (I1 - I0) * W * SW * 1.08f, RoomH = (V1 - V0) * H * SH * 1.15f;
 
 	const FString Line = G.SpokenLine.ToUpper();
-	float Px = 46.f; TArray<FString> Lines;
-	for (; Px >= 18.f; Px -= 3.f)
+	float Px = 40.f; TArray<FString> Wrapped;
+	for (; Px >= 12.f; Px -= 2.f)
 	{
-		Lines = Wrap(Line, Px, EKSFont::Comic, RoomW);
-		bool bFits = Lines.Num() * Px * Unit * 1.02f <= RoomH;
-		for (const FString& L : Lines) bFits &= TextSize(L, Px, EKSFont::Comic).X <= RoomW;
+		Wrapped = Wrap(Line, Px, EKSFont::Comic, RoomW);
+		bool bFits = Wrapped.Num() * Px * Unit * 1.02f <= RoomH;
+		for (const FString& L : Wrapped) bFits &= TextSize(L, Px, EKSFont::Comic).X <= RoomW;
 		if (bFits) break;
 	}
 	// The longest word is the one that gets shouted in red.
@@ -394,22 +597,38 @@ void AKSHUD::SpeechBubble(const AKSGameMode& G)
 	FString Shout;
 	for (const FString& Word : Words) if (Word.Len() > Shout.Len()) Shout = Word;
 	const float Step = Px * 1.02f / 720.f;
-	for (int32 i = 0; i < Lines.Num(); i++)
+	for (int32 i = 0; i < Wrapped.Num(); i++)
 	{
-		const float LY = CY + (i - (Lines.Num() - 1) * 0.5f) * Step;
-		Text(Lines[i], CX, LY, Px, FLinearColor(0.04f, 0.02f, 0.06f), 0, EKSFont::Comic, 0.f);
-		const int32 Found = Shout.Len() >= 4 ? Lines[i].Find(Shout, ESearchCase::CaseSensitive) : INDEX_NONE;
+		const float LY = CY + (i - (Wrapped.Num() - 1) * 0.5f) * Step;
+		Text(Wrapped[i], CX, LY, Px, FLinearColor(0.04f, 0.02f, 0.06f), 0, EKSFont::Comic, 0.f);
+		const int32 Found = Shout.Len() >= 4 ? Wrapped[i].Find(Shout, ESearchCase::CaseSensitive) : INDEX_NONE;
 		if (Found != INDEX_NONE)
 		{
-			const float Whole = TextSize(Lines[i], Px, EKSFont::Comic).X, Before = Found > 0 ? TextSize(Lines[i].Left(Found), Px, EKSFont::Comic).X : 0.f;
+			const float Whole = TextSize(Wrapped[i], Px, EKSFont::Comic).X, Before = Found > 0 ? TextSize(Wrapped[i].Left(Found), Px, EKSFont::Comic).X : 0.f;
 			Text(Shout, CX + (Before - Whole * 0.5f) / SW, LY, Px, FLinearColor(0.9f, 0.03f, 0.08f), -1, EKSFont::Comic, 0.f);
 			Shout.Reset();
 		}
 	}
 	// Who is talking, on a name tag at the bubble's top corner.
-	const float TagW = TextSize(G.SpokenBy, 17.f, EKSFont::Hud).X / SW + 0.05f, TagX = X + (bFlip ? 0.16f : -0.16f) * W;
-	Plate(TagX - TagW * 0.5f, Y - H * 0.47f, TagW, 0.046f, 1.f, bOpp ? FLinearColor::White : FLinearColor(0.45f, 0.9f, 1.f));
-	Text(G.SpokenBy, TagX, Y - H * 0.47f + 0.022f, 17.f, FLinearColor::White);
+	const float TagW = FMath::Min(W * 0.8f, TextSize(G.SpokenBy, 16.f, EKSFont::Hud).X / SW + 0.05f), TagX = X + (bFlip ? 0.14f : -0.14f) * W;
+	Plate(TagX - TagW * 0.5f, Y - H * 0.47f, TagW, 0.044f, 1.f, bOpp ? FLinearColor::White : FLinearColor(0.45f, 0.9f, 1.f));
+	Text(G.SpokenBy, TagX, Y - H * 0.47f + 0.021f, 16.f, FLinearColor::White, 0, EKSFont::Hud, 2.f, FLinearColor(0.04f, 0.f, 0.10f, 0.95f), TagW - 0.04f);
+	PopSpin();
+}
+
+void AKSHUD::SpeechCaption(const AKSGameMode& G)
+{
+	// On the result and continue screens the middle belongs to the panel: the line goes on a plate along the bottom.
+	if (G.SpokenLine.IsEmpty()) return;
+	const float Grow = PopScale(Now - BubbleStart);
+	const FString Line = G.SpokenLine.ToUpper();
+	const float W = FMath::Clamp(TextSize(Line, 24.f, EKSFont::Comic).X / SW + 0.12f, 0.30f, 0.64f);
+	PushSpin(0.5f, 0.895f, Grow, 0.f);
+	Plate(0.5f - W * 0.5f, 0.855f, W, 0.08f, 0.96f, G.bSpokenByOpp ? FLinearColor::White : FLinearColor(0.45f, 0.9f, 1.f));
+	Lines(Line, 0.5f, 0.894f, W - 0.10f, 2, 24.f, FLinearColor::White, EKSFont::Comic, 2.f, FLinearColor::Black);
+	const float TagW = TextSize(G.SpokenBy, 15.f, EKSFont::Hud).X / SW + 0.03f;
+	Fill(0.5f - TagW * 0.5f, 0.826f, TagW, 0.032f, FLinearColor(0.04f, 0.f, 0.10f, 0.9f));
+	Text(G.SpokenBy, 0.5f, 0.842f, 15.f, G.bSpokenByOpp ? Magenta : Cyan);
 	PopSpin();
 }
 
@@ -440,20 +659,20 @@ void AKSHUD::DrawMenu(const AKSGameMode& G)
 	}
 	PopSpin();
 	const float In = FMath::Clamp((T - 0.35f) / 0.4f, 0.f, 1.f);
-	Label(TEXT("T H E   G A M E   T H A T   W A S   N E V E R   R E L E A S E D"), 0.5f, 0.435f, 0.95f, Faded(Lilac, In));
+	Label(TEXT("T H E   G A M E   T H A T   W A S   N E V E R   R E L E A S E D"), 0.5f, 0.435f, 0.95f, Faded(Lilac, In), 0, 0.94f);
 
 	if (G.MenuIndex != SeenMenu) { SeenMenu = G.MenuIndex; MenuAt = Now; }
-	static const TCHAR* Items[] = { TEXT("START GAME"), TEXT("STRAIGHT TO THE RING"), TEXT("QUIT") };
+	static const TCHAR* Items[] = { TEXT("FIGHT"), TEXT("CAMERA CALIBRATION"), TEXT("WATCH THE INTRO"), TEXT("QUIT") };
 	for (int32 i = 0; i < UE_ARRAY_COUNT(Items); i++)
 	{
 		const bool bOn = i == G.MenuIndex;
 		// Each plate slides in from the side a moment after the one above it.
 		const float Slide = 1.f - FMath::Clamp((T - 0.45f - 0.09f * i) / 0.25f, 0.f, 1.f);
-		const float Y = 0.555f + 0.105f * i, X = 0.5f + Slide * Slide * (i % 2 ? 0.7f : -0.7f);
+		const float Y = 0.535f + 0.089f * i, X = 0.5f + Slide * Slide * (i % 2 ? 0.7f : -0.7f);
 		const float Bump = bOn ? PopScale(Now - MenuAt) * (1.06f + 0.012f * FMath::Sin(Now * 6.f)) : 0.92f;
 		PushSpin(X, Y, Bump, 0.f);
-		Plate(X - 0.21f, Y - 0.043f, 0.42f, 0.086f, bOn ? 1.f : 0.8f, bOn ? FLinearColor::White : FLinearColor(0.42f, 0.36f, 0.6f));
-		Text(Items[i], X, Y - 0.002f, 30.f, bOn ? FLinearColor(1.f, 0.95f, 0.45f) : Lilac, 0, EKSFont::Hud, 2.2f);
+		Plate(X - 0.21f, Y - 0.038f, 0.42f, 0.076f, bOn ? 1.f : 0.8f, bOn ? FLinearColor::White : FLinearColor(0.42f, 0.36f, 0.6f));
+		Text(Items[i], X, Y - 0.002f, 30.f, bOn ? FLinearColor(1.f, 0.95f, 0.45f) : Lilac, 0, EKSFont::Hud, 2.2f, FLinearColor(0.04f, 0.f, 0.10f, 0.95f), 0.33f);
 		if (bOn)
 		{
 			// The glove punches at the chosen line.
@@ -466,7 +685,7 @@ void AKSHUD::DrawMenu(const AKSGameMode& G)
 	const UKSTrackingSubsystem* Tr = G.Tracking();
 	const bool bPunches = Tr && Tr->IsTracking();
 	Label(bPunches ? TEXT("UP / DOWN  or  LEFT PUNCH  choose          ENTER  or  RIGHT PUNCH  select")
-		: TEXT("UP / DOWN  choose          ENTER  select"), 0.5f, 0.905f, 0.8f, Faded(Lilac, In));
+		: TEXT("UP / DOWN  choose          ENTER  select"), 0.5f, 0.905f, 0.8f, Faded(Lilac, In), 0, 0.94f);
 	if (FMath::Frac(Now * 0.8f) < 0.62f) Label(TEXT("INSERT YOURSELF"), 0.5f, 0.955f, 0.95f, Faded(Yellow, In));
 	Label(TEXT("(C) 1987   CANCELLED BEFORE LAUNCH"), 0.015f, 0.975f, 0.6f, Faded(Muted, In), -1);
 
@@ -495,27 +714,31 @@ void AKSHUD::DrawStreet(const AKSGameMode& G)
 void AKSHUD::DrawFight(const AKSGameMode& G)
 {
 	const FKSFighterDef& F = G.Fighter();
+	BeginLayout(G);
+	const bool bPanels = G.Phase == EKSPhase::Result || G.Phase == EKSPhase::Continue;
 
 	if (G.Phase == EKSPhase::Card && G.PhaseTime < 2.6f)
 	{
+		PlaceBubble(G);
 		const float T = G.PhaseTime, A = FMath::Clamp(FMath::Min(T / 0.3f, (2.6f - T) / 0.3f), 0.f, 1.f);
 		Fill(0.f, 0.f, 1.f, 0.15f, FLinearColor(0.02f, 0.f, 0.06f, 0.85f * A));
 		Fill(0.f, 0.146f, 1.f, 0.005f, Faded(Magenta, A));
 		Fill(0.f, 0.60f, 1.f, 0.40f, FLinearColor(0.02f, 0.f, 0.06f, 0.85f * A));
 		Fill(0.f, 0.598f, 1.f, 0.005f, Faded(Cyan, A));
 		Plate(0.33f, 0.035f, 0.34f, 0.085f, A);
-		Label(FString::Printf(TEXT("CUT FIGHTER %d OF %d"), G.FighterIndex + 1, G.NumFights()), 0.5f, 0.076f, 1.15f, Faded(FLinearColor::White, A));
+		Label(FString::Printf(TEXT("CUT FIGHTER %d OF %d"), G.FighterIndex + 1, G.NumFights()), 0.5f, 0.076f, 1.15f, Faded(FLinearColor::White, A), 0, 0.25f);
 		// The name slides in from the right, the VS badge bangs in on the left.
 		const float Slide = 1.f - FMath::Clamp(T / 0.28f, 0.f, 1.f);
-		Text(F.Name, 0.56f + Slide * Slide * 0.8f, 0.705f, 92.f, Faded(Yellow, A), 0, EKSFont::Comic, 3.f, FLinearColor::Black);
+		// Everything on the card's lower band stays right of the VS badge.
+		Text(F.Name, 0.60f + Slide * Slide * 0.8f, 0.705f, 92.f, Faded(Yellow, A), 0, EKSFont::Comic, 3.f, FLinearColor::Black, 0.72f);
 		PushSpin(0.115f, 0.71f, SlamScale(FMath::Max(0.f, T - 0.15f)) * (1.f + 0.03f * FMath::Sin(Now * 9.f)), -8.f);
 		if (T > 0.15f) Pic(TEXT("vs"), 0.115f, 0.71f, 0.24f, A);
 		PopSpin();
-		Label(F.Tagline, 0.56f, 0.805f, 1.15f, Faded(Lilac, A));
-		Label(FString::Printf(TEXT("YOU FIGHT AS %s"), G.PlayerFighter().Name), 0.56f, 0.862f, 1.05f, Faded(Cyan, A));
+		Label(F.Tagline, 0.60f, 0.805f, 1.15f, Faded(Lilac, A), 0, 0.72f);
+		Label(FString::Printf(TEXT("YOU FIGHT AS %s"), G.PlayerFighter().Name), 0.60f, 0.862f, 1.05f, Faded(Cyan, A), 0, 0.72f);
 		const bool bTracked = G.Tracking() && G.Tracking()->IsConnected();
 		Label(bTracked ? TEXT("PUNCH, BLOCK, LEAN AND DUCK FOR REAL - THE CABINET IS WATCHING")
-			: TEXT("A/Q/Z left straight/hook/uppercut   D/E/C right   SPACE block   ARROWS evade + duck   P pause"), 0.5f, 0.915f, 0.78f, Faded(Muted, A));
+			: TEXT("A/Q/Z left straight/hook/uppercut   D/E/C right   SPACE block   ARROWS evade + duck   P pause"), 0.5f, 0.94f, 0.78f, Faded(Muted, A), 0, 0.80f);
 		DrawTracker(G, true);
 		return;
 	}
@@ -525,40 +748,54 @@ void AKSHUD::DrawFight(const AKSGameMode& G)
 	if (SeenOppHP >= 0.f && G.OppHP < SeenOppHP - 0.01f) OppJoltAt = Now;
 	SeenPlayerHP = G.PlayerHP; SeenOppHP = G.OppHP;
 	auto Jolt = [this](float At) { return FMath::Clamp(1.f - (Now - At) / 0.28f, 0.f, 1.f); };
-	HealthBar(0.025f, 0.405f, G.PlayerHP / 100.f, G.PlayerTrail / 100.f, Cyan, false, Jolt(PlayerJoltAt));
-	HealthBar(0.57f, 0.405f, G.OppHP / G.OppMaxHP, G.OppTrail / G.OppMaxHP, Magenta, true, Jolt(OppJoltAt));
-	Text(FString::Printf(TEXT("YOU  -  %s"), G.PlayerFighter().Name), 0.07f, 0.150f, 19.f, Cyan, -1);
-	Text(F.Name, 0.93f, 0.150f, 19.f, Magenta, 1);
-	const int32 Secs = FMath::CeilToInt(FMath::Max(0.f, G.TimeLeft));
-	const bool bLate = Secs <= 10 && G.Phase == EKSPhase::Fight;
-	PushSpin(0.5f, 0.088f, bLate ? 1.f + 0.08f * FMath::Abs(FMath::Sin(Now * PI)) : 1.f, 0.f);
-	Pic(TEXT("timer"), 0.5f, 0.088f, 0.165f);
-	Text(FString::Printf(TEXT("%d:%02d"), Secs / 60, Secs % 60), 0.5f, 0.086f, 34.f, bLate ? Red : FLinearColor(1.f, 0.95f, 0.6f));
-	PopSpin();
+	// The result and continue screens are panels of their own: the bars would only sit under their titles.
+	if (!bPanels)
+	{
+		const FLinearColor Edge(0.04f, 0.f, 0.10f, 0.95f);
+		HealthBar(0.025f, 0.405f, G.PlayerHP / 100.f, G.PlayerTrail / 100.f, Cyan, false, Jolt(PlayerJoltAt));
+		HealthBar(0.57f, 0.405f, G.OppHP / G.OppMaxHP, G.OppTrail / G.OppMaxHP, Magenta, true, Jolt(OppJoltAt));
+		Text(FString::Printf(TEXT("YOU  -  %s"), G.PlayerFighter().Name), 0.07f, 0.150f, 19.f, Cyan, -1, EKSFont::Hud, 2.f, Edge, 0.36f);
+		Text(F.Name, 0.93f, 0.150f, 19.f, Magenta, 1, EKSFont::Hud, 2.f, Edge, 0.36f);
+		const int32 Secs = FMath::CeilToInt(FMath::Max(0.f, G.TimeLeft));
+		const bool bLate = Secs <= 10 && G.Phase == EKSPhase::Fight;
+		PushSpin(0.5f, 0.088f, bLate ? 1.f + 0.08f * FMath::Abs(FMath::Sin(Now * PI)) : 1.f, 0.f);
+		Pic(TEXT("timer"), 0.5f, 0.088f, 0.165f);
+		Text(FString::Printf(TEXT("%d:%02d"), Secs / 60, Secs % 60), 0.5f, 0.086f, 34.f, bLate ? Red : FLinearColor(1.f, 0.95f, 0.6f), 0, EKSFont::Hud, 2.f, Edge, 0.07f);
+		PopSpin();
+	}
 
 	if (G.Phase == EKSPhase::Fight)
 	{
 		if (!G.CueMain.IsEmpty())
 		{
-			// What is coming at you, on a plate; an opening flashes.
+			// What is coming at you and what to do about it, together on one plate close under the clock, so that it
+			// stays above the opponent's head; an opening flashes.
 			const float Beat = G.bCueGood ? 1.f + 0.06f * FMath::Sin(Now * 16.f) : 1.f;
-			const float W = TextSize(G.CueMain, 50.f, EKSFont::Comic).X / SW + 0.13f;
-			PushSpin(0.5f, 0.255f, Beat, 0.f);
-			Plate(0.5f - W * 0.5f, 0.255f - 0.052f, W, 0.104f, 0.95f, G.bCueGood ? FLinearColor(0.5f, 1.f, 0.6f) : FLinearColor::White);
-			Text(G.CueMain, 0.5f, 0.252f, 50.f, G.bCueGood ? FLinearColor(0.75f, 1.f, 0.4f) : Yellow, 0, EKSFont::Comic, 2.6f, FLinearColor::Black);
+			const float CY = 0.240f, CH = 0.118f;
+			const float W = FMath::Min(0.9f, FMath::Max(TextSize(G.CueMain, 34.f, EKSFont::Comic).X, TextSize(G.CueHint, 14.f, EKSFont::Hud).X) / SW + 0.13f);
+			PushSpin(0.5f, CY, Beat, 0.f);
+			Plate(0.5f - W * 0.5f, CY - CH * 0.5f, W, CH, 0.95f, G.bCueGood ? FLinearColor(0.5f, 1.f, 0.6f) : FLinearColor::White);
+			Text(G.CueMain, 0.5f, CY - 0.022f, 34.f, G.bCueGood ? FLinearColor(0.75f, 1.f, 0.4f) : Yellow, 0, EKSFont::Comic, 2.4f, FLinearColor::Black, W - 0.11f);
+			Text(G.CueHint, 0.5f, CY + 0.015f, 14.f, FLinearColor::White, 0, EKSFont::Hud, 1.6f, FLinearColor(0.04f, 0.f, 0.10f, 0.95f), W - 0.10f);
 			PopSpin();
-			Label(G.CueHint, 0.5f, 0.335f, 1.0f, Lilac);
+			Reserve(0.5f - W * 0.5f, CY - CH * 0.5f, W, CH);
 		}
 		if (G.Combo != SeenCombo) { SeenCombo = G.Combo; ComboAt = Now; }
 		if (G.Combo > 1)
 		{
-			PushSpin(0.905f, 0.285f, PopScale(Now - ComboAt), 9.f);
-			Pic(TEXT("burst_hit"), 0.905f, 0.285f, 0.19f);
-			Text(FString::Printf(TEXT("x%d"), G.Combo), 0.905f, 0.270f, 46.f, FLinearColor(0.95f, 0.08f, 0.05f), 0, EKSFont::Comic, 2.4f, FLinearColor::Black);
-			Text(TEXT("COMBO"), 0.905f, 0.318f, 19.f, FLinearColor::Black, 0, EKSFont::Comic, 0.f);
+			// The combo count has a corner of its own, under the opponent's name.
+			const float X = 0.925f, Y = 0.265f, High = 0.15f;
+			PushSpin(X, Y, PopScale(Now - ComboAt), 9.f);
+			Pic(TEXT("burst_hit"), X, Y, High);
+			Text(FString::Printf(TEXT("x%d"), G.Combo), X, Y - 0.012f, 38.f, FLinearColor(0.95f, 0.08f, 0.05f), 0, EKSFont::Comic, 2.2f, FLinearColor::Black, 0.06f);
+			Text(TEXT("COMBO"), X, Y + 0.027f, 15.f, FLinearColor::Black, 0, EKSFont::Comic, 0.f);
 			PopSpin();
+			Reserve(X - 0.065f, Y - High * 0.5f, 0.13f, High);
 		}
 	}
+	// The little mirror of the tracker in the bottom corner is not for covering either.
+	if (G.Tracking() && G.Tracking()->HasLandmarks()) Reserve(0.015f, 0.70f, 0.15f, 0.27f);
+	if (!bPanels) PlaceBubble(G);
 	for (const FKSPopup& P : G.Popups) DrawPopup(G, P);
 	DrawAnnouncement(G);
 
@@ -567,11 +804,11 @@ void AKSHUD::DrawFight(const AKSGameMode& G)
 		const float T = G.PhaseTime;
 		Fill(0.f, 0.f, 1.f, 1.f, FLinearColor(0.02f, 0.f, 0.06f, 0.45f));
 		Panel(0.16f, 0.27f, 0.68f, 0.55f);
-		PushSpin(0.5f, 0.24f, SlamScale(T), -2.f);
-		if (!Pic(TEXT("t_youwin"), 0.5f, 0.24f, 0.30f)) Text(TEXT("YOU WIN"), 0.5f, 0.24f, 90.f, Green, 0, EKSFont::Comic, 3.f);
+		PushSpin(0.5f, 0.155f, SlamScale(T), -2.f);
+		if (!Pic(TEXT("t_youwin"), 0.5f, 0.155f, 0.26f)) Text(TEXT("YOU WIN"), 0.5f, 0.155f, 90.f, Green, 0, EKSFont::Comic, 3.f);
 		PopSpin();
-		if (G.bLastResultDecision) Text(TEXT("ON POINTS"), 0.5f, 0.405f, 26.f, Yellow, 0, EKSFont::Comic, 2.f, FLinearColor::Black);
-		Label(F.DefeatLine, 0.5f, 0.455f, 0.95f, Lilac);
+		if (G.bLastResultDecision) Text(TEXT("ON POINTS"), 0.5f, 0.372f, 24.f, Yellow, 0, EKSFont::Comic, 2.f, FLinearColor::Black);
+		Lines(F.DefeatLine, 0.5f, 0.435f, 0.58f, 2, 19.f, Lilac);
 		// The numbers count in one after another.
 		const FKSStats& S = G.Stats;
 		const TPair<const TCHAR*, int32> Rows[] = { { TEXT("LANDED"), S.Landed }, { TEXT("COUNTERS"), S.Counters }, { TEXT("DODGES"), S.Dodges }, { TEXT("BLOCKS"), S.Blocks },
@@ -581,25 +818,25 @@ void AKSHUD::DrawFight(const AKSGameMode& G)
 			const float Shown = T - 0.35f - 0.11f * i;
 			if (Shown < 0.f) continue;
 			const float X = 0.235f + 0.0885f * i;
-			PushSpin(X, 0.555f, PopScale(Shown), 0.f);
-			Text(FString::FromInt(Rows[i].Value), X, 0.545f, 52.f, i == 4 ? Magenta : Cyan, 0, EKSFont::Comic, 2.4f, FLinearColor::Black);
+			PushSpin(X, 0.545f, PopScale(Shown), 0.f);
+			Text(FString::FromInt(Rows[i].Value), X, 0.535f, 50.f, i == 4 ? Magenta : Cyan, 0, EKSFont::Comic, 2.4f, FLinearColor::Black, 0.08f);
 			PopSpin();
-			Text(Rows[i].Key, X, 0.613f, 12.5f, Lilac);
+			Text(Rows[i].Key, X, 0.598f, 12.5f, Lilac, 0, EKSFont::Hud, 2.f, FLinearColor(0.04f, 0.f, 0.10f, 0.95f), 0.084f);
 		}
 		const bool bLast = G.FighterIndex + 1 >= G.NumFights();
-		Plate(0.27f, 0.655f, 0.46f, 0.075f);
-		Label(bLast ? TEXT("The screen cracks. There is a way out.") : FString::Printf(TEXT("NEXT: %s"), G.LadderFighter(G.FighterIndex + 1).Name), 0.5f, 0.691f, 1.05f, Yellow);
-		if (FMath::Frac(Now * 0.9f) < 0.65f) Label(TEXT("Press ENTER or throw a punch"), 0.5f, 0.765f, 0.9f, Lilac);
+		Plate(0.27f, 0.632f, 0.46f, 0.07f);
+		Label(bLast ? TEXT("The screen cracks. There is a way out.") : FString::Printf(TEXT("NEXT: %s"), G.LadderFighter(G.FighterIndex + 1).Name), 0.5f, 0.666f, 1.05f, Yellow, 0, 0.36f);
+		if (FMath::Frac(Now * 0.9f) < 0.65f) Label(TEXT("Press ENTER or throw a punch"), 0.5f, 0.733f, 0.9f, Lilac, 0, 0.58f);
 	}
 	if (G.Phase == EKSPhase::Continue)
 	{
 		const float T = G.PhaseTime;
 		Fill(0.f, 0.f, 1.f, 1.f, FLinearColor(0.f, 0.f, 0.f, G.BlackFade));
-		PushSpin(0.5f, 0.27f, SlamScale(T), -2.f);
+		PushSpin(0.5f, 0.24f, SlamScale(T), -2.f);
 		const TCHAR* Art = G.bLastResultDecision ? TEXT("t_youlose") : TEXT("t_knockedout");
-		if (!Pic(Art, 0.5f, 0.27f, 0.34f)) Text(G.bLastResultDecision ? TEXT("LOST ON POINTS") : TEXT("KNOCKED OUT"), 0.5f, 0.27f, 80.f, Red, 0, EKSFont::Comic, 3.f);
+		if (!Pic(Art, 0.5f, 0.24f, 0.34f)) Text(G.bLastResultDecision ? TEXT("LOST ON POINTS") : TEXT("KNOCKED OUT"), 0.5f, 0.27f, 80.f, Red, 0, EKSFont::Comic, 3.f);
 		PopSpin();
-		Label(G.bLastResultDecision ? TEXT("Lost on points. The cabinet keeps you for another round.") : TEXT("The cabinet keeps you for another round."), 0.5f, 0.475f, 1.1f, Lilac);
+		Label(G.bLastResultDecision ? TEXT("Lost on points. The cabinet keeps you for another round.") : TEXT("The cabinet keeps you for another round."), 0.5f, 0.475f, 1.1f, Lilac, 0, 0.94f);
 		const int32 Count = FMath::Max(0, FMath::FloorToInt(G.ContinueLeft));
 		if (Count != SeenCount) { SeenCount = Count; CountAt = Now; }
 		if (!Pic(TEXT("t_continue"), 0.43f, 0.63f, 0.17f)) Text(TEXT("CONTINUE?"), 0.43f, 0.63f, 70.f, Yellow, 0, EKSFont::Comic, 3.f);
@@ -608,7 +845,7 @@ void AKSHUD::DrawFight(const AKSGameMode& G)
 		Pic(TEXT("burst_hurt"), 0.74f, 0.63f, 0.25f);
 		Text(FString::FromInt(Count), 0.74f, 0.625f, 78.f, FLinearColor(0.85f, 0.f, 0.25f), 0, EKSFont::Comic, 3.f, FLinearColor::Black);
 		PopSpin();
-		if (FMath::Frac(Now * 0.9f) < 0.65f) Label(TEXT("Press ENTER or throw a punch"), 0.5f, 0.80f, 1.0f, Lilac);
+		if (FMath::Frac(Now * 0.9f) < 0.65f) Label(TEXT("Press ENTER or throw a punch"), 0.5f, 0.775f, 1.0f, Lilac);
 	}
 	if (G.bPaused)
 	{
@@ -622,18 +859,22 @@ void AKSHUD::DrawFight(const AKSGameMode& G)
 void AKSHUD::DrawCalibrate(const AKSGameMode& G)
 {
 	const UKSTrackingSubsystem* T = G.Tracking();
-	Fill(0.f, 0.f, 1.f, 1.f, FLinearColor(0.02f, 0.f, 0.05f, 0.55f));
+	Fill(0.f, 0.f, 1.f, 1.f, FLinearColor(0.02f, 0.f, 0.05f, 0.72f));
 	Plate(0.30f, 0.02f, 0.40f, 0.085f);
-	Label(FString::Printf(TEXT("CALIBRATION   STEP %d OF %d"), G.CalStep + 1, AKSGameMode::CalSteps), 0.5f, 0.061f, 1.15f, FLinearColor::White);
+	Label(FString::Printf(TEXT("CALIBRATION   STEP %d OF %d"), G.CalStep + 1, AKSGameMode::CalSteps), 0.5f, 0.061f, 1.15f, FLinearColor::White, 0, 0.30f);
+	// How far a panel's chrome rim reaches in from its edge. Everything written or drawn in a panel stays inside it.
+	const float RimX = 42.f * Unit / SW, RimY = 42.f * Unit / SH;
+	bool bFits = true;
 
 	/* ---- the mirror: what the camera sees of you, flipped like a mirror ---- */
-	const float BX = 0.04f, BY = 0.15f, BW = 0.40f, BH = 0.66f;
-	Panel(BX - 0.012f, BY - 0.02f, BW + 0.024f, BH + 0.04f);
+	const float PX = 0.03f, PY = 0.13f, PW = 0.43f, PH = 0.70f;
+	Panel(PX, PY, PW, PH);
+	const float BX = PX + RimX, BY = PY + RimY, BW = PW - 2.f * RimX, BH = PH - 2.f * RimY;
 	// Where the shoulders must be above, and the elbows inside.
 	Fill(BX, BY + BH * 0.52f, BW, 0.003f, Faded(Lilac, 0.5f));
-	Label(TEXT("shoulders above this line"), BX + 0.012f, BY + BH * 0.52f - 0.018f, 0.7f, Lilac, -1);
+	Label(TEXT("shoulders above this line"), BX + 0.012f, BY + BH * 0.52f - 0.020f, 0.7f, Lilac, -1, BW - 0.024f);
 	Fill(BX, BY + BH * 0.95f, BW, 0.003f, Faded(Lilac, 0.5f));
-	Label(TEXT("elbows above this line"), BX + 0.012f, BY + BH * 0.95f - 0.018f, 0.7f, Lilac, -1);
+	Label(TEXT("elbows above this line"), BX + 0.012f, BY + BH * 0.95f - 0.020f, 0.7f, Lilac, -1, BW - 0.024f);
 	if (T && T->IsBodySeen() && T->GetImageLandmarks().Num() >= 33)
 	{
 		const TArray<FVector2f>& L = T->GetImageLandmarks();
@@ -651,30 +892,44 @@ void AKSHUD::DrawCalibrate(const AKSGameMode& G)
 		DrawRect(Yellow, Head.X - 9.f * Unit, Head.Y - 9.f * Unit, 18.f * Unit, 18.f * Unit);
 		for (int32 Wrist : { 15, 16 }) { const FVector2D W = Pt(Wrist); DrawRect(Wrist == 15 ? Cyan : Magenta, W.X - 7.f * Unit, W.Y - 7.f * Unit, 14.f * Unit, 14.f * Unit); }
 	}
-	else if (!G.bCalSteady[0]) Label(TEXT("no body in view"), BX + BW * 0.5f, BY + BH * 0.4f, 1.0f, Muted);   // not for a single lost frame: that made the words blink
-	Label(TEXT("YOU, AS THE CAMERA SEES YOU"), BX + BW * 0.5f, BY + BH + 0.045f, 0.7f, Lilac);
+	else if (!G.bCalSteady[0]) Label(TEXT("no body in view"), BX + BW * 0.5f, BY + BH * 0.3f, 1.0f, Muted, 0, BW - 0.03f);   // not for a single lost frame: that made the words blink
+	Label(TEXT("YOU, AS THE CAMERA SEES YOU"), PX + PW * 0.5f, PY + PH + 0.028f, 0.7f, Lilac, 0, PW);
 
-	/* ---- what to do ---- */
-	const float RX = 0.72f;
-	Panel(0.47f, 0.13f, 0.50f, 0.24f);
-	Text(G.CalTitle, RX, 0.195f, 44.f, Yellow, 0, EKSFont::Comic, 2.6f, FLinearColor::Black);
-	Label(G.CalHint, RX, 0.262f, 1.05f, G.CalHint.Contains(TEXT("STEP")) || G.CalHint.Contains(TEXT("MOVE")) || G.CalHint.Contains(TEXT("COME")) ? Red : Lilac);
-	Fill(RX - 0.2f, 0.305f, 0.40f, 0.024f, FLinearColor(0.15f, 0.08f, 0.25f, 0.9f));
-	Fill(RX - 0.2f, 0.305f, 0.40f * FMath::Clamp(G.CalProgress, 0.f, 1.f), 0.024f, Green);
-	Fill(RX - 0.2f, 0.305f, 0.40f * FMath::Clamp(G.CalProgress, 0.f, 1.f), 0.008f, FLinearColor(1.f, 1.f, 1.f, 0.4f));
-	if (G.CalCountNeed > 0)
+	/* ---- what to do: the move, the advice (two lines at most) and how far along, all inside the panel ---- */
+	const float QX = 0.49f, QY = 0.13f, QW = 0.48f, QH = 0.32f, RX = QX + QW * 0.5f, Room = QW - 2.f * RimX - 0.02f;
+	Panel(QX, QY, QW, QH);
+	Text(G.CalTitle, RX, QY + RimY + 0.040f, 40.f, Yellow, 0, EKSFont::Comic, 2.6f, FLinearColor::Black, Room);
+	const bool bWarn = G.CalHint.Contains(TEXT("STEP")) || G.CalHint.Contains(TEXT("MOVE")) || G.CalHint.Contains(TEXT("COME"));
+	bFits &= Lines(G.CalHint, RX, QY + RimY + 0.112f, Room, 2, 19.f, bWarn ? Red : Lilac);
+	bFits &= TextSize(G.CalTitle, Fit(G.CalTitle, 40.f, EKSFont::Comic, Room), EKSFont::Comic).X <= Room * SW;
+	const float BarW = Room * 0.92f, BarY = QY + QH - RimY - 0.036f;
+	Fill(RX - BarW * 0.5f, BarY, BarW, 0.022f, FLinearColor(0.15f, 0.08f, 0.25f, 0.9f));
+	Fill(RX - BarW * 0.5f, BarY, BarW * FMath::Clamp(G.CalProgress, 0.f, 1.f), 0.022f, Green);
+	Fill(RX - BarW * 0.5f, BarY, BarW * FMath::Clamp(G.CalProgress, 0.f, 1.f), 0.007f, FLinearColor(1.f, 1.f, 1.f, 0.4f));
+
+	/* ---- below it: the count of a move being practised, or the list of what the camera still needs ---- */
+	if (G.CalChecks.Num())
 	{
-		Pic(TEXT("burst_hit"), RX, 0.50f, 0.25f);
-		Text(FString::Printf(TEXT("%d / %d"), G.CalCountNow, G.CalCountNeed), RX, 0.495f, 58.f, G.CalCountNow >= G.CalCountNeed ? FLinearColor(0.f, 0.5f, 0.1f) : FLinearColor(0.95f, 0.08f, 0.05f), 0, EKSFont::Comic, 2.6f, FLinearColor::Black);
+		const float Row = 0.045f, CY = 0.50f;
+		Panel(QX, CY, QW, 2.f * RimY + Row * G.CalChecks.Num());
+		float Y = CY + RimY + Row * 0.5f;
+		for (const TPair<FString, bool>& Check : G.CalChecks)
+		{
+			Label(Check.Value ? TEXT("OK") : TEXT("NO"), QX + RimX + 0.012f, Y, 0.9f, Check.Value ? Green : Red, -1);
+			Label(Check.Key, QX + RimX + 0.062f, Y, 0.9f, Check.Value ? Green : Red, -1, Room - 0.06f);
+			Y += Row;
+		}
 	}
-	if (G.CalChecks.Num()) Panel(0.47f, 0.645f, 0.50f, 0.045f * G.CalChecks.Num() + 0.06f);
-	float Y = 0.695f;
-	for (const TPair<FString, bool>& Check : G.CalChecks)
+	else if (G.CalCountNeed > 0)
 	{
-		Label((Check.Value ? TEXT("OK    ") : TEXT("NO    ")) + Check.Key, 0.50f, Y, 0.9f, Check.Value ? Green : Red, -1);
-		Y += 0.045f;
+		Pic(TEXT("burst_hit"), RX, 0.635f, 0.26f);
+		Text(FString::Printf(TEXT("%d / %d"), G.CalCountNow, G.CalCountNeed), RX, 0.630f, 54.f, G.CalCountNow >= G.CalCountNeed ? FLinearColor(0.f, 0.5f, 0.1f) : FLinearColor(0.95f, 0.08f, 0.05f), 0, EKSFont::Comic, 2.6f, FLinearColor::Black, 0.10f);
 	}
-	Label(TEXT("SPACE  skip this step          K  play with the keyboard instead"), 0.5f, 0.945f, 0.85f, Lilac);
+	Label(TEXT("SPACE  skip this step          K  play with the keyboard instead"), 0.5f, 0.945f, 0.85f, Lilac, 0, 0.94f);
+
+	// For tools/check.sh: writing that does not fit its panel even at the smallest size.
+	bCalTextOutside |= !bFits;
+	if (!bLoggedCal && G.CalStep >= 3) { bLoggedCal = true; UE_LOG(LogTemp, Display, TEXT("KSTEST ui calibration text_outside_box=%d"), bCalTextOutside ? 1 : 0); }
 }
 
 void AKSHUD::DrawHUD()
@@ -688,14 +943,16 @@ void AKSHUD::DrawHUD()
 	switch (G->Phase)
 	{
 	case EKSPhase::Menu: DrawMenu(*G); break;
+	case EKSPhase::Intro: DrawIntro(*G); break;
 	case EKSPhase::Street: case EKSPhase::PullIn: case EKSPhase::Ending: DrawStreet(*G); break;
 	case EKSPhase::Calibrate: DrawCalibrate(*G); break;
 	default: DrawFight(*G); break;
 	}
 
-	// Whoever is speaking gets a comic speech bubble by the head.
-	const bool bFighters = G->Phase == EKSPhase::Card || G->Phase == EKSPhase::Fight || G->Phase == EKSPhase::FightEnd || G->Phase == EKSPhase::Result || G->Phase == EKSPhase::Continue;
-	if (bFighters) SpeechBubble(*G); else BubbleLine.Reset();
+	// Whoever is speaking gets a comic speech bubble by the head; over the result and continue panels, a plate along the bottom.
+	if (G->Phase == EKSPhase::Card || G->Phase == EKSPhase::Fight || G->Phase == EKSPhase::FightEnd) SpeechBubble(*G);
+	else if (G->Phase == EKSPhase::Result || G->Phase == EKSPhase::Continue) SpeechCaption(*G);
+	else { BubbleLine.Reset(); bBubbleSet = false; }
 
 	if (G->RedFlash > 0.f) Fill(0.f, 0.f, 1.f, 1.f, FLinearColor(1.f, 0.f, 0.f, 0.35f * G->RedFlash));
 	if (G->WhiteFade > 0.f) Fill(0.f, 0.f, 1.f, 1.f, FLinearColor(1.f, 1.f, 1.f, G->WhiteFade));

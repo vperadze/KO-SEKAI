@@ -574,6 +574,18 @@ FVector AKSDummy::GloveWorld(EKSArm Arm) const
 	return Hand + (Hand - Fore).GetSafeNormal() * 10.f;   // the glove sits a little past the wrist
 }
 
+void AKSDummy::BodyPoints(TArray<FVector>& Out) const
+{
+	Out.Reset();
+	if (!bCharacter || !Skel)
+	{
+		for (int32 i = 0; i < KSJoint::Num; i++) Out.Add(GetJointWorld((KSJoint::Type)i));
+		return;
+	}
+	const FTransform World = Skel->GetComponentTransform();
+	for (const FTransform& Bone : Skel->GetComponentSpaceTransforms()) Out.Add(World.TransformPosition(Bone.GetLocation()));
+}
+
 FVector AKSDummy::FaceWorld(bool bHome) const
 {
 	if (!bCharacter) return GetJointWorld(KSJoint::Head);

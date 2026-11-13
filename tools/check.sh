@@ -52,7 +52,7 @@ else echo "  skipped"; fi
 
 echo "== self-playing ladder (two bouts, no camera)"
 LOG="$OUT/ladder.log"
-run_until 2 "KSTEST bout=" 240 "$LOG" -KSStart=fight -KSAuto -KSNoCamera
+run_until 2 "KSTEST bout=" 240 "$LOG" -KSStart=fight -KSAuto -KSNoCamera -KSArenaTour
 BOUTS=$(grep -c "KSTEST bout=" "$LOG" 2> /dev/null); BOUTS=${BOUTS:-0}
 [ "$BOUTS" -ge 2 ] && pass "two bouts were fought to the end" || fail "only $BOUTS bout(s) finished in 240 s"
 field() { echo "$1" | tr -d "\r" | sed -n "s/.*$2=\([^ ]*\).*/\1/p"; }
@@ -100,6 +100,14 @@ done
 line=$(grep "KSTEST music " "$LOG" 2> /dev/null | head -1)
 if [ "$(field "$line" loaded)" = 1 ] && [ "$(field "$line" looping)" = 1 ]; then pass "fight music loaded and set to loop ($(field "$line" seconds) s)"
 else fail "fight music missing or not looping (${line:-no KSTEST music line}); run art/tools/music.py, then art/tools/import_voice_faces.py"; fi
+# A static pointer to an asset is not seen by the garbage collector. The player won the ladder, walked back to the
+# cabinet and the game crashed: the beam cone cached in a static had been freed while he was on the street.
+bad=$(grep -nE "static U[A-Za-z]+\* *[A-Za-z]+ *= *LoadObject" "$ROOT"/unreal/Source/KoSekai/*.cpp | sed "s|$ROOT/||")
+[ -z "$bad" ] && pass "no asset is cached in a static without being kept alive" || fail "asset cached in a static and never rooted (wrap it in Keep() or call AddToRoot): $bad"
+# Arenas: -KSArenaTour builds every arena once before the first bout. One whose backdrop, ring canvas or music is
+# missing would show a bare wall or fall silent, and only on the day that arena comes up.
+n=$(grep "KSTEST arena_built " "$LOG" 2> /dev/null | tr -d "\r" | grep "backdrop=1 mat=1 music=1" | sed 's/.*key=\([^ ]*\).*/\1/' | sort -u | wc -l)
+[ "$n" -ge 11 ] && pass "all $n arenas build with their backdrop, ring canvas and music" || fail "only $n of 11 arenas built complete: $(grep "KSTEST arena_built " "$LOG" 2> /dev/null | grep -v "backdrop=1 mat=1 music=1" | sed 's/.*KSTEST //' | head -3 | tr "\n\r" "; ")"
 # Faces and voices. The bug this guards: fighters stood through a whole bout with one expression (the Count with his
 # mouth open) and never spoke.
 while read -r line; do
@@ -127,14 +135,22 @@ if [ "$(field "$line" missing)" = 0 ] && [ "$(field "$line" pictures)" -ge 29 ] 
 else fail "interface art incomplete (${line:-no KSTEST ui line}); run art/ui/cut_ui.py, then art/ui/import_ui.py"; fi
 grep -q "KSTEST ui speech bubble shown picture=1" "$LOG" 2> /dev/null && pass "a spoken line was shown in a speech bubble" || fail "no speech bubble was drawn"
 grep -q "KSTEST ui damage badge shown" "$LOG" 2> /dev/null && pass "a hit showed its damage badge" || fail "no damage badge was drawn"
+# Badges used to land on the fighters. The HUD now finds each one a place beside them and reports how the first ten did.
+line=$(grep "KSTEST ui layout badges=" "$LOG" 2> /dev/null | head -1)
+cover=$(field "$line" worst_body_cover)
+if [ "$(field "$line" on_heads)" = 0 ] && awk "BEGIN{exit !(${cover:-9} <= 0.35)}"; then pass "badges keep off the fighters (none on a face, at most ${cover} of one over a body)"
+else fail "badges cover the fighters (${line:-no KSTEST ui layout line})"; fi
 n=$(grep "KSTEST sound=Pop " "$LOG" 2> /dev/null | head -1 | tr -d "\r" | sed -n 's/.*recorded_variants=\([0-9]*\).*/\1/p')
 [ "${n:-0}" -ge 1 ] && pass "interface sounds loaded (Pop: $n takes)" || fail "interface sound Pop missing; run art/tools/prep_audio.py, then art/ui/import_ui.py"
 
-echo "== start menu (chooses its first line by itself, no camera)"
+echo "== opening film and start menu (skips and chooses by itself, no camera)"
 LOG="$OUT/menu.log"
 run_until 1 "KSTEST menu chosen" 90 "$LOG" -KSAuto -KSNoCamera
 grep -q "KSTEST ui menu shown background=1 logo=1" "$LOG" 2> /dev/null && pass "the start menu is drawn with its background and logo" || fail "the start menu was not drawn, or its pictures are missing"
-grep -q "KSTEST menu chosen=0" "$LOG" 2> /dev/null && pass "the start menu hands over to the street" || fail "the start menu did not start the game"
+line=$(grep "KSTEST intro shown " "$LOG" 2> /dev/null | head -1 | tr -d "\r")
+[ -n "$line" ] && [ "$(field "$line" shots)" -ge 1 ] && [ "$(field "$line" shots)" = "$(field "$line" loaded)" ] && pass "the opening film plays: $(field "$line" shots) shots, every sheet loaded" || fail "the opening film is missing pictures (${line:-it was never shown})"
+grep -q "KSTEST intro ended" "$LOG" 2> /dev/null && pass "the opening film hands over to the start menu" || fail "the opening film never ended"
+grep -q "KSTEST menu chosen=0" "$LOG" 2> /dev/null && pass "the start menu's first line starts the fights" || fail "the start menu did not start the game"
 
 echo "== calibration screen (stepped through automatically, no camera)"
 LOG="$OUT/calibration.log"
@@ -143,6 +159,7 @@ LOG="$OUT/calibration.log"
 run_until 1 "KSTEST calibration done" 120 "$LOG" -KSStart=fight -KSCalDemo -KSCalJitter -KSNoCamera
 n=$(grep "KSTEST calibration hint_changes=" "$LOG" 2> /dev/null | head -1 | tr -d "\r" | sed -n 's/.*hint_changes=\([0-9]*\).*/\1/p')
 [ -n "$n" ] && [ "$n" -le 40 ] && pass "calibration text is steady with a jittering camera reading ($n changes of the hint in nine steps)" || fail "calibration text flickers: the hint changed ${n:-?} times in nine steps"
+grep -q "KSTEST ui calibration text_outside_box=0" "$LOG" 2> /dev/null && pass "calibration writing stays inside its panels" || fail "calibration writing runs out of its panel ($(grep "KSTEST ui calibration" "$LOG" 2> /dev/null | head -1 | sed 's/.*KSTEST/KSTEST/'))"
 grep -q "KSTEST calibration done completed=1" "$LOG" 2> /dev/null && pass "all nine calibration steps run and hand over to the first bout" || fail "calibration did not reach its end"
 
 echo "== recorded moves (tests/tracking/*.csv with a .expect file)"

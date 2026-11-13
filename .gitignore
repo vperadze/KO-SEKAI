@@ -17,3 +17,14 @@ unreal/.vscode/
 
 # Recorded move sessions: joint positions of a person, kept local
 tests/tracking/*.csv
+
+# Made again by a tool from files that are kept: the arena pictures are copies of art/arena/raw under their true
+# type (art/tools/import_arenas.py), the film sheets come from art/cinematic/raw (prep_cinematic.py), and the arena
+# music is rendered from code in under a minute (art/tools/music_arenas.py).
+art/arena/T_KS_Bg_*.png
+art/arena/T_KS_Mat_*.png
+art/cinematic/T_KS_Cine_*.png
+art/audio/M_*.wav
+
+# The speech models' Python environment (2 GB): art/tools/voices.py says how to make it
+art/voice-model/

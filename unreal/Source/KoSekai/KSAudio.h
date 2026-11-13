@@ -12,9 +12,10 @@ namespace KSAudio
 {
 	void Play(UObject* WorldContext, EKSSfx Sfx, float Volume = 1.f);
 
-	/** Fades the looping fight music (/Game/KS/Audio/M_Fight, made by art/tools/music.py) to Volume; 0 stops it,
+	/** Fades the looping music /Game/KS/Audio/M_<TrackName> (art/tools/music.py, music_arenas.py) to Volume; a new
+	    track name replaces the one playing; 0 stops it,
 	    and the next call above 0 starts it from the top. Player is the caller's to keep alive (a UPROPERTY). */
-	void Music(UObject* WorldContext, TObjectPtr<class UAudioComponent>& Player, float Volume, float FadeSeconds = 0.8f);
+	void Music(UObject* WorldContext, TObjectPtr<class UAudioComponent>& Player, float Volume, float FadeSeconds = 0.8f, const TCHAR* TrackName = TEXT("Fight"));
 
 	/** The looping murmur of the hall (/Game/KS/Audio/M_Crowd), faded to Volume in the same way as Music. */
 	void Crowd(UObject* WorldContext, TObjectPtr<class UAudioComponent>& Player, float Volume);

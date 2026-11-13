@@ -84,6 +84,31 @@ One entry per bug that cost time: what happened, the cause, the rule. Add to it 
   record several takes, have a speech recogniser (faster-whisper) write each down, keep one that says the line,
   and give the model at least four or five words.
 
+- **A crash on the second walk into the arena: `static UStaticMesh* Cone = LoadObject(...)`.** The player won all
+  three bouts, went back to the cabinet and the game died in `SetStaticMesh`. A raw pointer in a static keeps
+  nothing alive: on the street no actor used the cone, the garbage collector freed it, and the static still
+  pointed there. No test walked in twice. Rule: an asset cached in a static is rooted (`Keep()` in `KSWorld.cpp`,
+  `AddToRoot` in `KSAudio.cpp`); `tools/check.sh` greps the source for the bare pattern.
+- **Dreamina refuses some video prompts with a bare number.** Two of six film shots failed with error 20114 and
+  20115 and no text: suits slamming a stamp and pulling a lever, and a man grabbed and dragged by electricity.
+  Reworded without people in trouble (machines going dark; the camera flying into the screen) both passed.
+  Whether the failed tries were charged is not shown. Rule: keep harm to people out of video prompts.
+- **The film is not played as video.** There is no ffmpeg here and Unreal's players differ per platform, with the
+  Windows build untestable from this machine. Each shot is a 4096 sheet of 640x360 frames at 12 a second, drawn
+  by the HUD: the same code everywhere, and the roughness passes for VHS. Cost: 96 MB in `Content/KS/Cine`.
+- **Dreamina hands back PNG data in a file called `.jpg`.** Unreal chooses its importer by the file name and the
+  import failed with nothing but "could not be found in the Asset Registry". Rule: look at the first bytes and
+  hand the file over under its true type (`art/tools/import_arenas.py`).
+- **A painted backdrop on the arena wall was invisible.** The fight camera sits low over the player's shoulder and
+  looks down: it never sees the wall above 4 m, and the crowd fills what it does see. Ten paid backdrops showed
+  as a strip of colour. Rule: look at a still from the real camera before making art for a place; the backdrops
+  are now sunk so their horizon is at the floor, and each bout's intro opens with a wide shot of the arena.
+
+- **"Same style" for music means the same recipe, not the same synth.** Asked for ten more tracks "same way, same
+  style" for different arenas, the first set gave each arena its own genre (beach steel pan, bar shuffle, funk).
+  The player kept only the one that happened to share the fight track's recipe. Rule: when a result is approved,
+  vary what was not noticed (key, tempo, melody) and keep what makes it that result (beat, bass, instruments).
+
 - **Dreamina's canvas CLI has limits the first crowd run hit one after another.** A request takes at most 20 nodes;
   a run above roughly 100 credits is refused until `node confirm --credit-ceiling` gives a token for
   `node run --credit-token`; `resource download` needs `--project-id` when the canvas is not the current one (it
@@ -102,6 +127,11 @@ One entry per bug that cost time: what happened, the cause, the rule. Add to it 
 
 ## Interface art
 
+- **Badges and speech bubbles landed on the fighters, and calibration text ran out of its panel.** Both were placed at
+  fixed spots or fixed offsets from a head, with fixed text sizes, so nothing knew where the fighters or the panel's
+  rim were. Rule: anything that pops up goes through the HUD's placer (`BeginLayout`, `Reserve`, `FindSpot`: it knows
+  both fighters' screen boxes from their bones and keeps a badge where it was first put); anything written in a box
+  passes a `MaxW` or goes through `Lines`, and a panel's contents stay inside its rim (`RimX`, `RimY`).
 - **Unreal's font importer crashes without a window** (`CurrentApplication.IsValid()` in a headless `pythonscript` run),
   and it took the rest of the import script down with it. Rule: fonts are plain `.ttf` files in
   `Content/KS/UI/Fonts`, read by `KSHUD` at run time and staged by `DefaultGame.ini`; never import them as assets.

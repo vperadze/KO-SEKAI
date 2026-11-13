@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "KSArenaData.h"
 
 class UStaticMesh;
 class UMaterialInterface;
@@ -65,6 +66,10 @@ struct FKSArena
 	TArray<FBeam> Beams;                                  // stage lamps sweeping over the stands
 	TArray<TWeakObjectPtr<AActor>> Lasers;                // thin glowing rods fanned out from LaserFrom
 	FVector LaserFrom = FVector::ZeroVector;
+	// The painted wall behind the crowd and the lights of the place itself (lightning, lava), for AKSGameMode::TickArenaFx.
+	TArray<TObjectPtr<UMaterialInstanceDynamic>> Wall;
+	float WallGlow = 0.55f;
+	TArray<TWeakObjectPtr<APointLight>> PulseLights;
 	static constexpr float LaserLength = 2600.f;
 };
 
@@ -72,7 +77,7 @@ namespace KSWorld
 {
 	/** bDead builds the street after the ending: the cabinet is switched off. */
 	void BuildStreet(FKSBuilder& B, FKSStreet& Street, bool bDead);
-	void BuildArena(FKSBuilder& B, FKSArena& Arena);
+	void BuildArena(FKSBuilder& B, FKSArena& Arena, const FKSArenaDef& Def);
 	/** Stretches a beam cone from the lamp at From towards Aim. */
 	void AimBeam(UMaterialInstanceDynamic* Cone, const FVector& From, const FVector& Aim, float Length, float Radius);
 }
