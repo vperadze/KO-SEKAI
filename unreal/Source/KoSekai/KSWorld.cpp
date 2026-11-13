@@ -326,26 +326,38 @@ void KSWorld::BuildArena(FKSBuilder& B, FKSArena& Arena, const FKSArenaDef& Def)
 	// The stands: steps the crowd stands on (KSGameMode's SeatCrowd puts row N at height 40 N), each with a strip of
 	// neon along its edge, and a higher platform at the back for the giants.
 	const FLinearColor Step = bHall ? FLinearColor(0.022f, 0.014f, 0.045f) : FLinearColor(Def.Floor.R * 1.6f + 0.004f, Def.Floor.G * 1.6f + 0.004f, Def.Floor.B * 1.6f + 0.004f);
-	for (int32 Row = 1; Row <= 2; Row++)
+	// Both ends alike (End +1 behind the opponent, -1 behind the player): the house goes all the way round the ring.
+	for (int32 End = -1; End <= 1; End += 2)
 	{
-		const float Half = 520.f + 70.f * Row, X = 465.f + 118.f * Row;
-		B.Box(FVector(X + 59.f * (3 - Row) - 59.f, 0, 20.f * Row), FVector(118.f * (3 - Row), 2.f * Half, 40.f * Row), Step);
-		B.Box(FVector(X - 59.f, 0, 40.f * Row), FVector(5, 2.f * Half, 5), Row % 2 ? Cyan : Magenta, 5.f);
+		for (int32 Row = 1; Row <= 2; Row++)
+		{
+			const float Half = 520.f + 70.f * Row, X = 465.f + 118.f * Row;
+			B.Box(FVector(End * (X + 59.f * (3 - Row) - 59.f), 0, 20.f * Row), FVector(118.f * (3 - Row), 2.f * Half, 40.f * Row), Step);
+			B.Box(FVector(End * (X - 59.f), 0, 40.f * Row), FVector(5, 2.f * Half, 5), Row % 2 ? Cyan : Magenta, 5.f);
+		}
+		B.Box(FVector(End * 980.f, 0, 70), FVector(260, 1700, 140), Step);
+		B.Box(FVector(End * 850.f, 0, 140), FVector(5, 1700, 5), Yellow, 5.f);
+		// A stepped block in each corner, between the end stands and the side stands (SeatCrowd: height 60 + 30 per step back).
+		for (int32 Side = -1; Side <= 1; Side += 2) for (int32 Ring = 0; Ring < 3; Ring++)
+		{
+			const float Size = 104.f * (3 - Ring), Shift = 104.f * Ring + Size * 0.5f - 52.f;
+			B.Box(FVector(End * (500.f + Shift), Side * (655.f + Shift), 30.f + 15.f * Ring), FVector(Size, Size, 60.f + 30.f * Ring), Step);
+		}
 	}
-	B.Box(FVector(980, 0, 70), FVector(260, 1700, 140), Step);
-	B.Box(FVector(850, 0, 140), FVector(5, 1700, 5), Yellow, 5.f);
 	for (int32 Side = -1; Side <= 1; Side += 2)
 	{
-		B.Box(FVector(85, Side * 588.f, 20), FVector(720, 118, 40), Step);
-		B.Box(FVector(85, Side * 529.f, 40), FVector(720, 5, 5), Cyan, 5.f);
-		B.Box(FVector(85, Side * 850.f, 50), FVector(720, 240, 100), Step);
-		B.Box(FVector(85, Side * 730.f, 100), FVector(720, 5, 5), Yellow, 5.f);
+		B.Box(FVector(35, Side * 588.f, 20), FVector(820, 118, 40), Step);
+		B.Box(FVector(35, Side * 529.f, 40), FVector(820, 5, 5), Cyan, 5.f);
+		B.Box(FVector(35, Side * 850.f, 50), FVector(820, 240, 100), Step);
+		B.Box(FVector(35, Side * 730.f, 100), FVector(820, 5, 5), Yellow, 5.f);
 	}
 	// Soft house lights low over the stands, so the steps and the shadows at the crowd's feet can be seen.
 	Dry(B.Light(FVector(620, -380, 330), FLinearColor(0.55f, 0.45f, 1.f), 420.f, 1100.f), 0.15f);
 	Dry(B.Light(FVector(620, 380, 330), FLinearColor(1.f, 0.45f, 0.8f), 420.f, 1100.f), 0.15f);
 	Dry(B.Light(FVector(100, -640, 300), FLinearColor(0.45f, 0.7f, 1.f), 340.f, 1000.f), 0.15f);
 	Dry(B.Light(FVector(100, 640, 300), FLinearColor(1.f, 0.5f, 0.75f), 340.f, 1000.f), 0.15f);
+	Dry(B.Light(FVector(-620, -420, 330), FLinearColor(1.f, 0.45f, 0.8f), 420.f, 1100.f), 0.15f);
+	Dry(B.Light(FVector(-620, 420, 330), FLinearColor(0.55f, 0.45f, 1.f), 420.f, 1100.f), 0.15f);
 
 	// The lighting rig: a square truss over the ring with lamp heads, and stage lamps on it that sweep the stands.
 	const float RigZ = 640.f, RigHalf = 430.f;

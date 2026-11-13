@@ -38,9 +38,9 @@ Packaged build under 1 GB, plus a 30–60 s gameplay video. Windows packaging ne
 | Path | What |
 |---|---|
 | `unreal/` | The game. C++ only, everything spawned from code, no level files. |
-| `unreal/Source/KoSekai/` | `KSGameMode` (rules, phases, crowd), `KSDummy` (a fighter), `KSWorld` (street and arena), `KSHUD`, `KSAudio`, `KSTracking` + `KSCameraTracker` + `KSDetector` (webcam). |
-| `unreal/Content/KoSekai/Characters/` | Seven fighters, 17 shared clips each, face materials. |
-| `unreal/Content/KS/` | Materials, arena pictures and spectator sprites (`Arena/T_KS_Crowd_*`, six poses each), sounds (`Audio/`), the pose model (`Tracker/`). |
+| `unreal/Source/KoSekai/` | `KSGameMode` (rules, phases, crowd, special abilities and their effects), `KSMic` (hears a shout), `KSDummy` (a fighter), `KSWorld` (street and arena), `KSHUD`, `KSAudio`, `KSTracking` + `KSCameraTracker` + `KSDetector` (webcam). |
+| `unreal/Content/KoSekai/Characters/` | Seven fighters, 17 shared clips each plus six of their own (`Fun_A`, `Fun_B`, `Picked`, `Special`, `Win`, `Stagger`), face materials. |
+| `unreal/Content/KS/` | Materials, arena pictures and spectator pictures (`Arena/T_KS_Crowd_*`, eight poses each), sounds (`Audio/`), the pose model (`Tracker/`). |
 | `unreal/Content/KS/UI/` | Interface pictures `T_UI_<name>` and the two fonts (`F_RussoOne`, `F_Bangers`); `KSHUD` falls back to plain boxes without them. |
 | `unreal/Content/KS/Voice/` | Spoken lines `V_<Fighter>_<line>`; text and mouth timing are in the generated `KSVoiceData.h`. The ring announcer is `V_Announcer_<line>` (`KSAnnouncerData.h`). |
 | `art/` | Source art and the tools that make it (`art/tools`, `art/arena`, `art/tracker-model`). Mostly untracked. |
@@ -68,6 +68,8 @@ Test flags (all optional):
 | `-KSFighter=N` `-KSPlayer=N` | Force the first opponent / the player's fighter (roster index 0–6). |
 | `-KSShots=N` `-KSHitShots` | Save screenshots to `unreal/Saved/Screenshots` (timed / bursts around each hit). |
 | `-KSNoCamera` | Do not open the webcam. |
+| `-KSNoMic` | Do not open the microphone (it is also left shut with `-nosound`). |
+| `-KSMic` | Open the microphone even with `-nosound` (the self-check's recorder test). |
 | `-KSCamera=N` | Use camera index N. |
 | `-KSReplay=<file>` `-KSReplayExit` | Run the move detector over a recording and log its decisions. |
 | `-KSStart=menu` | Skip the opening film. No `-KSStart`: film, then menu. `-KSStart=street`: the old street walk, which nothing in the game leads to any more. |
@@ -98,7 +100,8 @@ New music: edit and run `python3 art/tools/music.py` (the fight loop; numpy only
 `python3 art/tools/music_arenas.py` (the ten arena loops, planned in `docs/ARENAS.md`), then `art/tools/import_voice_faces.py`
 headless; no rebuild needed.
 
-New spectators or crowd sounds: `art/arena/gen_crowd.py` and `gen_crowd_sound.py` (Dreamina, credits), then
+New spectators or crowd sounds: `art/tracker-model/venv/bin/python art/arena/gen_crowd_real.py quote|run <ceiling> [name]`
+(the realistic eight-pose sheets, 2 credits each; `gen_crowd.py` made the old pixel ones) and `gen_crowd_sound.py` (Dreamina, credits), then
 `art/tracker-model/venv/bin/python art/arena/slice_crowd.py` (rewrites `KSCrowdData.h`: rebuild) and
 `~/ielts-listening/.venv/bin/python art/tools/prep_crowd.py`, then `art/tools/import_crowd.py` headless.
 
@@ -111,8 +114,15 @@ The arena's beam material `M_KS_Beam` is made by `art/tools/make_beam_material.p
 New announcer lines: `art/voice-model/venv/bin/python art/tools/announcer.py [key ...]` (local models, about two
 minutes a line; rewrites `KSAnnouncerData.h`: rebuild), then `art/tools/import_voice_faces.py -KSReimport` headless.
 
-New fighter portraits (select screen): run the game with `-KSPortraits -KSNoCamera -nosound`, then
-`art/tracker-model/venv/bin/python art/ui/make_avatars.py`, then `art/ui/import_ui.py` headless.
+New fighter portraits (select screen): run the game with `-KSPortraits -KSNoCamera -nosound` (photographs of the
+models), `art/tracker-model/venv/bin/python art/ui/gen_avatars.py quote|run <ceiling> [Folder]` (Dreamina paints them
+from the photographs, 2 credits each), `art/tracker-model/venv/bin/python art/ui/make_avatars.py`, then
+`art/ui/import_ui.py` headless.
+
+New fighter moves from Meshy's library: edit the table in `art/tools/add_moves.py`, `python3 art/tools/add_moves.py
+quote|run <ceiling>` (3 credits a clip, bought once on Turbotron's rig and copied onto every fighter), then
+`art/tools/import_moves.py -KSReimport` headless. It needs no staging editor: the clips go onto each fighter's
+existing skeleton. Its log is `unreal/Saved/import_moves.txt`. A new clip name must be added to `ClipNames` in `KSDummy.cpp`.
 
 New faces or lines: `art/tools/bake_faces.py` (faces) and `art/voice-model/venv/bin/python art/tools/voices.py`
 (lines; rebuild the game after it, it rewrites `KSVoiceData.h`), then `art/tools/import_voice_faces.py` headless.

@@ -8,6 +8,7 @@
 #include "KSWorld.h"
 #include "KSAudio.h"
 #include "KSCrowdData.h"
+#include "KSMic.h"
 #include "KSGameMode.generated.h"
 
 class AKSDummy;
@@ -77,6 +78,13 @@ public:
 	float RedFlash = 0.f, WhiteFade = 0.f, BlackFade = 0.f;
 	FString Subtitle, Prompt;
 	bool bLastResultWin = false, bLastResultDecision = false;
+	// Special abilities: a meter each (0..1) that fighting fills; the player's goes off on a shout (or S), the opponent's by itself.
+	float PlayerMeter = 0.f, OppMeter = 0.f;
+	bool bSpecialOn = false, bSpecialByPlayer = false;
+	float SpecialStart = 0.f, SpecialImpact = -10.f, SpecialEnd = 0.f;   // game clock
+	bool bMicOpen = false; float MicLevel = 0.f;
+	/** What the player shouts to set off his fighter's special ("MULLET POWER!"). */
+	FString PlayerCry() const;
 	// Choosing a fighter (after FIGHT on the menu): the one looked at stands in the hall, the seven portraits run along the bottom.
 	int32 SelectIndex = 0;
 	float SelectMovedAt = -10.f, SelectChosenAt = -1.f;   // game clock; SelectChosenAt < 0 until the player has chosen
@@ -182,6 +190,29 @@ private:
 	float OnlineReadyAt = 0.f, OnlineLockedUntil = 0.f, OnlineGuardDownUntil = 0.f, OnlineCueUntil = 0.f;
 	double OnlinePingAt = 0.0;
 
+	/* ---- special abilities and their effects ---- */
+	void StartSpecial(bool bByPlayer);
+	void TickSpecial(float Dt);
+	void SpecialLaunch(const FVector& From, const FVector& To);     // what flies, a moment before it lands
+	void SpecialLand(const FVector& From, const FVector& To);       // what happens where it lands, and the damage
+	bool bSpecialLaunched = false, bSpecialHit = false, bShoutNow = false, bMeterFullSaid = false;
+	int32 SpecialIndex = 0;                   // roster index of whoever is doing it
+	float OppStaggerUntil = 0.f;              // the opponent reels after a blocked punch
+	TUniquePtr<FKSMic> Mic;
+	// A piece of an effect: an engine shape that flies, grows or shrinks, and is gone after Life seconds.
+	struct FFx { TWeakObjectPtr<AActor> Actor; FVector Pos = FVector::ZeroVector, Vel = FVector::ZeroVector, Size0 = FVector::OneVector, Size1 = FVector::OneVector; FRotator Rot = FRotator::ZeroRotator, Spin = FRotator::ZeroRotator; float Age = 0.f, Life = 1.f, Gravity = 0.f, Delay = 0.f; };
+	TArray<FFx> Fx;
+	int32 FxMade = 0;                         // for the self-check
+	void FxAdd(UStaticMesh* Mesh, const FVector& Pos, const FVector& Vel, const FVector& Size0, const FVector& Size1, const FLinearColor& Color, float Glow, float Life,
+		float Gravity = 0.f, const FRotator& Rot = FRotator::ZeroRotator, const FRotator& Spin = FRotator::ZeroRotator, float Delay = 0.f);
+	void FxBeam(const FVector& From, const FVector& To, float Thick0, float Thick1, const FLinearColor& Color, float Glow, float Life, float Delay = 0.f);
+	void FxBurst(const FVector& At, int32 Count, float Speed, float Size, const FLinearColor& Color, float Glow, float Life, float Gravity = 500.f);
+	void TickFx(float Dt);
+	float SelectClipUntil = 0.f; int32 SelectClipStep = 0;
+	// Between punches each fighter does his own thing instead of all holding the same stance (see DriveCharacters).
+	int32 OppIdleCount = 0, PlayerIdleCount = 0;
+	float PlayerIdleSince = 0.f;
+
 	/* ---- helpers ---- */
 	float Speak(class AKSDummy* Who, const TCHAR* Prefix, bool bMust = false);
 	// A line waiting for its moment, and who answers it (the loser speaks after the announcer, the winner after the loser).
@@ -246,19 +277,20 @@ private:
 
 	FKSStreet Street;
 	FKSArena Arena;
-	// A ringside spectator: a flat old-arcade sprite with six poses (KSCrowdData.h), moved about in whole steps.
-	enum class ECrowdMove : uint8 { Idle, Jump, Hop, Shake, Sway, Pulse, Cower, Dance, Loop };
+	// A ringside spectator: a picture of a rendered character with eight poses (KSCrowdData.h), turned to the camera and moved smoothly.
+	enum class ECrowdMove : uint8 { Idle, Jump, Hop, Shake, Sway, Pulse, Cower, Dance, Loop, Clap };
 	struct FSpectator
 	{
 		TWeakObjectPtr<AActor> Actor; TObjectPtr<UMaterialInstanceDynamic> MID;
 		FVector Foot = FVector::ZeroVector, Across = FVector::ZeroVector;   // where it stands and which way its picture runs
 		float Width = 112.f, Height = 224.f;
 		EKSBuild Build = EKSBuild::Normal; bool bBeast = false;
-		float Phase = 0.f, CueAt = 0.f, BusyUntil = 0.f, NextWhim = 0.f, WaveAt = 0.f;
+		float Phase = 0.f, CueAt = 0.f, CueSeconds = 1.f, BusyUntil = 0.f, NextWhim = 0.f, WaveAt = 0.f;
+		float Lift = 0.f, Side = 0.f, Tilt = 0.f, Wide = 1.f, High = 1.f;     // where the picture is now; it eases towards what the move asks for
 		// Everyone moves a little differently.
 		float IdleRate = 1.6f, BobRate = 3.2f, BobHeight = 3.f, JumpRate = 9.f, JumpHeight = 20.f, SwayRate = 3.f, SwayAngle = 6.f;
 		float HoverRate = 1.f, HoverHeight = 0.f, DriftRate = 0.3f, DriftWidth = 0.f;                // flyers only
-		int32 IdleStyle = 0;                                  // 0 looks about and bobs, 1 sways, 2 breathes, 3 stands like a post
+		int32 IdleStyle = 0;                                  // 0 shifts his weight and looks about, 1 sways, 2 bounces on his toes, 3 stands like a post
 		int32 Pose = 0, AltPose = -1, Shown = -1;             // AltPose: a second pose it flips to and fro with
 		ECrowdMove Move = ECrowdMove::Idle;
 		bool bCueCheer = false;
@@ -266,6 +298,7 @@ private:
 	};
 	void CrowdAct(FSpectator& S, bool bHappy, float Seconds);     // picks one of several ways to cheer or to despair
 	float NextCrowdVoiceAt = 0.f, NextShoutAt = 0.f, NextBeastAt = 0.f, NextWaveAt = 0.f;
+	int32 CrowdTwice = 0;                                         // spectators dealt a second time (must stay 0), for the self-check
 	int32 CrowdMovesSeen = 0, CrowdPosesSeen = 0;                 // bit sets, for the self-check
 	UPROPERTY() TObjectPtr<class UAudioComponent> CrowdPlayer;    // the murmur under everything
 	// Arena effects (lamps and lasers live in FKSArena; see TickArenaFx).
@@ -285,6 +318,14 @@ private:
 	FVector CamOffset = FVector::ZeroVector, CamVel = FVector::ZeroVector, CamAimLag = FVector::ZeroVector;
 	float CamRoll = 0.f, CamRollVel = 0.f, CamFovKick = 0.f, CamDolly = 0.f, CamSide = 0.f, CamDrop = 0.f;
 	void CamPunch(const FVector& Impulse, float RollImpulse, float FovKick) { CamVel += Impulse; CamRollVel += RollImpulse; CamFovKick += FovKick; }
+	// The cameraman (see UpdateFightCamera): where he stands round the fighters, where he is heading, and for how long.
+	float OpAngle = 0.f, OpAngleVel = 0.f, OpRadius = 313.f, OpRadiusVel = 0.f, OpHeight = 212.f, OpHeightVel = 0.f, OpFov = 62.f, OpRoll = 0.f;
+	float OpWantAngle = 0.f, OpWantRadius = 313.f, OpWantHeight = 212.f, OpWantFov = 62.f, OpShotUntil = 0.f, OpHurry = 0.f, OpStep = 0.f, OpDir = 0.f;
+	FVector OpAim = FVector::ZeroVector;
+	bool bOpAimSet = false;
+	EKSOppState OpSeenState = EKSOppState::Idle;
+	int32 OpShots = 0, OpFrames = 0, OpLost = 0, OpHidden = 0;                  // for the self-check
+	float OpTravel = 0.f, OpMinAngle = 1000.f, OpMaxAngle = -1000.f;
 	TArray<FSpectator> Spectators;
 	bool bCalFromMenu = false;                // calibration was chosen in the menu: go back there when it is done
 	bool bCalibrationDone = false, bCalDemo = false;   // -KSCalDemo: enter calibration without a camera and step through it, for the self-check

@@ -428,8 +428,10 @@ void AKSHUD::DrawIntro(const AKSGameMode& G)
 	Fill(0.f, 0.915f, 1.f, 0.085f, FLinearColor::Black);
 	const float Rise = FMath::Clamp((T - 0.25f) / 0.2f, 0.f, 1.f);
 	Text(Shot.Caption, 0.5f, 0.815f + 0.02f * (1.f - Rise), 40.f, FLinearColor(1.f, 0.9f, 0.3f, Rise), 0, EKSFont::Comic, 3.f, FLinearColor(0.04f, 0.f, 0.10f, 0.95f * Rise), 0.92f);
-	const bool bJabSkips = G.Tracking() && G.Tracking()->IsTracking();
-	if (FMath::Frac(Now * 0.8f) < 0.7f) Label(bJabSkips ? TEXT("ENTER  or  JAB  skip") : TEXT("ENTER  skip"), 0.985f, 0.957f, 0.7f, Lilac, 1);
+	// Steady, and worded by whether a camera is plugged in, not by whether it sees a body this frame: the first version
+	// blinked on a timer and swapped its words whenever the tracker lost or found the player ("jab, enter, jab, enter").
+	const bool bJabSkips = G.Tracking() && G.Tracking()->IsConnected();
+	Label(bJabSkips ? TEXT("ENTER  or  JAB  skip") : TEXT("ENTER  skip"), 0.985f, 0.957f, 0.7f, Lilac, 1);
 	// The tape itself: scan lines and a band of noise that wanders up the picture.
 	for (float Y = 0.f; Y < SH; Y += 4.f * Unit) DrawRect(FLinearColor(0.f, 0.f, 0.f, 0.16f), 0.f, Y, SW, 1.5f * Unit);
 	Fill(0.f, 1.f - FMath::Frac(Now * 0.11f), 1.f, 0.014f, FLinearColor(1.f, 1.f, 1.f, 0.06f));
@@ -924,6 +926,37 @@ void AKSHUD::DrawFight(const AKSGameMode& G)
 		HealthBar(0.57f, 0.405f, G.OppHP / G.OppMaxHP, G.OppTrail / G.OppMaxHP, Magenta, true, Jolt(OppJoltAt));
 		Text(FString::Printf(TEXT("YOU  -  %s"), G.PlayerFighter().Name), 0.07f, 0.150f, 19.f, Cyan, -1, EKSFont::Hud, 2.f, Edge, 0.36f);
 		Text(G.bOnline ? FString::Printf(TEXT("%s  -  RIVAL"), F.Name) : FString(F.Name), 0.93f, 0.150f, 19.f, Magenta, 1, EKSFont::Hud, 2.f, Edge, 0.36f);
+		// Special abilities are not played online yet (each game judges only its own health), so no meters there.
+		if (!G.bOnline)
+		{
+			// The special meters: a thin bar under each name. A full one flashes, and the player is told what to shout.
+			auto Meter = [this](float X, float W, float V, const FLinearColor& Color, bool bFromRight)
+			{
+				V = FMath::Clamp(V, 0.f, 1.f);
+				Fill(X - 0.002f, 0.1765f, W + 0.004f, 0.014f, FLinearColor(0.02f, 0.f, 0.06f, 0.85f));
+				const bool bFull = V >= 1.f;
+				Fill(bFromRight ? X + W * (1.f - V) : X, 0.179f, W * V, 0.009f, bFull ? (FMath::Frac(Now * 4.f) < 0.5f ? FLinearColor::White : Yellow) : Color);
+			};
+			Meter(0.07f, 0.24f, G.PlayerMeter, Cyan, false);
+			Meter(0.69f, 0.24f, G.OppMeter, Magenta, true);
+			if (G.Phase == EKSPhase::Fight && G.PlayerMeter >= 1.f && !G.bSpecialOn)
+			{
+				Reserve(0.05f, 0.19f, 0.42f, 0.085f);
+				const float Beat = 1.f + 0.05f * FMath::Abs(FMath::Sin(Now * 6.f));
+				PushSpin(0.07f, 0.225f, Beat, 0.f);
+				Text(FString::Printf(TEXT("%s  %s"), G.bMicOpen ? TEXT("SHOUT") : TEXT("PRESS S"), *G.PlayerCry()), 0.07f, 0.225f, 30.f, Yellow, -1, EKSFont::Comic, 2.5f, FLinearColor::Black, 0.40f);
+				PopSpin();
+				if (G.bMicOpen)
+				{
+					// How loud the microphone hears the room, so a player whose shout does nothing can see why.
+					Label(TEXT("MIC"), 0.07f, 0.262f, 0.55f, Lilac, -1);
+					Fill(0.105f, 0.257f, 0.12f, 0.009f, FLinearColor(0.02f, 0.f, 0.06f, 0.85f));
+					Fill(0.105f, 0.257f, 0.12f * G.MicLevel, 0.009f, Green);
+					Label(TEXT("or press S"), 0.235f, 0.262f, 0.55f, Muted, -1);
+				}
+			}
+			else Label(TEXT("SPECIAL"), 0.07f, 0.2f, 0.5f, Muted, -1);
+		}
 		const int32 Secs = FMath::CeilToInt(FMath::Max(0.f, G.TimeLeft));
 		const bool bLate = Secs <= 10 && G.Phase == EKSPhase::Fight;
 		PushSpin(0.5f, 0.088f, bLate ? 1.f + 0.08f * FMath::Abs(FMath::Sin(Now * PI)) : 1.f, 0.f);
