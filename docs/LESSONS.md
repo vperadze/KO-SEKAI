@@ -234,3 +234,96 @@ One entry per bug that cost time: what happened, the cause, the rule. Add to it 
   before it goes in; reword with what sets it apart (bald, red beard, grey overalls; "no letters, no logo").
 - **A figure taller than its cell cannot be sliced.** "An extremely tall" basketball player twice ran his legs
   through the row below. Rule: giants are drawn at normal proportions and made big by the game (`EKSBuild::Giant`).
+- **A camera aimed at where a fighter is put down loses him when he dances** (player report, 2026-11-13: on the select
+  screen Turbotron's breakdance carried him out of the picture, and the title band cut Count Hairspray's hair). The
+  select camera looked at a fixed point with a fixed lens, and the only test showed one fighter standing. Three rules.
+  A camera that must hold a fighter frames `AKSDummy::BodyBox()` (bones, the flesh round them, and the hair above the
+  face from the `KSHeadRooms` table), not a point. What the interface covers and what the camera frames come from the
+  same numbers (`KSSelectFrame`). And every fighter in the roster is toured by the check (`-KSSelectTour`), which also
+  measures each model's hair and fails when a fighter is missing from the table: that is what catches a new character.
+- **A dance clip from Meshy's library can travel across the ring and sink into the floor** (Turbotron's `Win`). On the
+  select screen the fighter is held over his spot whatever the clip does; a dancer's body is lifted by whatever its
+  lowest bone is under the floor (`AKSDummy::KeepOnFloor`).
+- **Meshy's models are stored in metres and drawn a hundred times that size.** A measurement taken from the vertex
+  buffer came out as 0 cm until that factor was applied. Print the raw extents once before trusting a derived number.
+
+## Meshy set pieces (the arena kit)
+
+- **A Meshy model has 0.1 to 2.7 million triangles, and Unreal cannot cut it down without a window.** The first
+  import of 19 props was 956 MB and the game ran at 13 frames a second. `StaticMeshEditorSubsystem` (set_lods) does
+  not exist in a `pythonscript` run, and the asset keeps the whole source mesh anyway. There is no Blender here.
+  Rule: slim the GLB before import (`art/tools/slim_props.py`, numpy only), and print the triangle count in the
+  import log.
+- **Meshy's metal maps glitter.** Imported as they come, the risers sparkled like tinsel and the floor lamps looked
+  carved from ice: near-mirror metal, fine perforated patterns, and no temporal anti-aliasing in this game. Rule:
+  props wear `M_KS_Prop` (paint only, nearly matt, kit without its normal map, the much-repeated riser darkened).
+- **Text-to-3D gives the object, not the part.** "One straight section of box truss" came back as a cube of truss,
+  and "a long thin truss beam" as a whole gantry with legs. The gantry was the better set piece; the rig was
+  redesigned around it instead of paying a third time. Rule: look at the thumbnail and the bounds before writing the
+  code that places a model, and ask for things that exist as a whole object.
+- **"No text" does not stop text.** The jukebox says JUCKERK and the lifeguard hut LUKY. Look at every thumbnail.
+- **A lamp that lights a landmark at 5200 candelas burns it white**, with the material's own glow on top. 1300 and a
+  glow of 0.16 still burn out the silver organ pipes. Judge exposure in the opening wide shot, where they are seen.
+- **`pgrep -f "[U]nrealEditor-Cmd"` matched the shell that was about to run UnrealEditor-Cmd**, twice. Rule: match
+  the process name: `pgrep -x UnrealEditor-Cm` (names are cut at 15 letters).
+- **Interchange names imported textures after the file** (`model_slim_texture_0`), so renaming the source file
+  renamed the assets and a script that looked for `model_texture_0` found nothing. Rule: find them by their ending.
+- **The crowd's places were sorted by distance from (75, 0), not from the ring's middle**, so with a few places to
+  spare the near end stayed short (36 of the 40 the check wants). Sorted from (0, 0) both ends fill alike.
+- **A hold put on a fighter for his victory dance stayed on for the next bout.** The winner is held over his spot so
+  the dance stays in the picture; the player's fighter is the same actor bout after bout, so in the next bout he
+  stood where he had landed the knockout, inside his opponent. It showed only as two camera checks failing "at
+  random". Rule: anything switched on for one phase on an actor that lives longer is switched off where the next
+  phase begins (`AKSDummy::LetGo` in `StartCard`); and a check that fails now and then is logged in detail before
+  its limit is touched (the log showed the player at x=130). The check now reports where the player fought from.
+
+- **The special's side-on camera stood outside the ropes, level with the top one** (seen in stills, 2026-11-13): a
+  cyan bar right across the picture in every special of the player's. The shot's wide position was 400 cm out; the
+  ropes run at 330, the top one 130 high, the camera 132. It had been like that since the specials were made: six
+  of the seven had never been looked at. Rule: a camera position written as numbers is checked against the ropes
+  (330); and a new shot is not done until a still of it has been seen. Now 300 out with a wider lens.
+- **Particle effects from a pack, first try: the whole screen white for seconds.** A dozen effects per special at
+  double size, with the packs' light colours set to the fighter's colour times six. The player had asked for
+  restraint in the same hour ("not covering the whole screen for too long, 1-2 seconds"). Rule: start from the
+  pack's own size and brightness, one or two effects per moment, and cap every effect's life in the player
+  (`KSVfx`); look at stills before adding a second layer. Details and the other pack lessons: `docs/VFX.md`.
+- **A tour that photographs effects one after another must take the last one away first.** Half of them never end by
+  themselves; the first set of 246 stills showed every earlier fire in every later picture.
+- **`pgrep -f "[U]nrealEditor-Cmd "` matched the shell that was about to start it** (third time for this family of
+  mistakes): a queued load test waited on itself for ten minutes while the player was told it was running. Rule:
+  guards look at process names only, `ps -eo comm | grep -x -E "UnrealEditor|UnrealEditor-Cm|dotnet"` (names are cut
+  at 15 letters), and a queued job is confirmed started before anybody is told so.
+- **Fighters on two fixed marks cannot dodge, be driven back or land anywhere** (player, 2026-11-13: a dodge should
+  move the fighter and the opponent adapt; the jumping special landed behind the opponent and then "reappeared" in
+  front). Every move was a lean of the drawn body inside an actor that never moved, and a clip that travelled was
+  eased back home when it ended. Rule: the actor is where the fighter is (`AKSGameMode::TickRing`); a lean or a
+  clip's travel that should last is handed over to the actor (`AKSDummy::TakeShift`, `CommitTravel`), never eased
+  away; and code written for "player at 0,0, opponent at 150,0" (the camera) stays in that frame and is carried into
+  the world in one place (`RingToWorld`).
+- **A script that deletes an asset before it has made the new one leaves nothing when it fails.**
+  `make_beam_material.py` removed `M_KS_Beam` and then stopped on a Python error (a helper's argument named `a`
+  clashed with the mask node's `a` property); for a minute the arena had no beam material at all. Rule: after a
+  headless asset script, look for its "made" line (`unreal/Saved/beam_material.txt`) before building or running.
+- **A beam of light drawn on a mesh needs its brightness from the beam, not from the mesh.** Flat glow on a cone is a
+  coloured wedge; soft sides from the cone's own normals lost the narrow end. The material now works from the beam's
+  axis and tip (two parameters set wherever a beam is aimed), which also works on a box, so the lasers share it.
+- **"One particular move" was still an accident waiting to happen** (player, 2026-11-13, third report about the film
+  and the menus). After "any punch" came "a jab" for the film and "left punch next, right punch choose" for the
+  menus: a person settling in front of the camera threw twelve "punches" in half a minute. Rule: outside a bout
+  nothing a single stroke can do is a button; a menu moves on a swipe (a shoulder's width in a quarter second) and
+  "yes" is a jab with one hand and then the other. And measure it: phase changes are marked in the recordings now.
+- **A shift of the body is called as a left and a right at once.** Both wrists move with the trunk; the recordings show
+  pairs 0 to 170 ms apart. The detector throws out the second of a pair within 120 ms; the menus ask for 200.
+- **Tuning from recordings: change one thing, replay, count.** A higher bar, an automatic bar and a both-arms rule
+  together halved the punches in the player's sessions, far more than was meant; each alone was modest. The replay
+  (`-KSReplay`) needs the tracker: it does nothing with `-KSNoCamera`.
+- **A blend timed by the phase clock starts again at every phase change.** After the bell the camera turns to the
+  winner over 0.7 s of `PhaseTime`; that clock restarts when the knockout gives way to the result, so the camera swung
+  back to the fight view for a fifth of a second there and cut the winner (Channel Zero, 7 to 18 frames of 280). The
+  first guess, a lens not wide enough, was wrong: the log of the bad frames showed the phase and the time. Rule: what
+  spans several phases has its own clock (`OpSinceBell`); and log the bad frames before fixing by theory.
+- **"Keeps the opponent's head in the picture" was not "keeps both fighters in the picture"** (player report,
+  2026-11-13: the cameraman sometimes loses one of them). The check counted one head and allowed 7% of the frames.
+  Rule: a promise about the picture is enforced where the picture is made, after everything else has had its say
+  (the last block before `SetView` in `UpdateFightCamera`: both heads and both body middles inside the middle 86%,
+  by turning the camera and, if need be, opening the lens), and the check counts on the picture as shown.

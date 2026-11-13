@@ -1,4 +1,6 @@
 #include "KSDummy.h"
+#include "AnimationRuntime.h"
+#include "Rendering/SkeletalMeshRenderData.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/PointLightComponent.h"
@@ -16,6 +18,16 @@
 #include "Components/AudioComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "TimerManager.h"
+
+// How far each model reaches above the front of its face (the "headfront" bone), in cm at full size: hair, horn, hat or
+// television set. Bones end at the skull, so a camera that frames by bones alone cuts a big hairdo off. The numbers are
+// measured from the model itself in every editor run (UseCharacter, "KSTEST shape"), and tools/check.sh fails when a
+// fighter is missing here or has grown past his entry: that is the guard for new characters.
+static const TPair<const TCHAR*, float> KSHeadRooms[] = {
+	{ TEXT("SergeantMulletV2"), 32.f }, { TEXT("ChannelZero"), 30.f }, { TEXT("SirLasercorn"), 37.f }, { TEXT("AerobicsAnnihilator"), 33.f },
+	{ TEXT("GrandmaThunder"), 29.f }, { TEXT("Turbotron"), 37.f }, { TEXT("CountHairspray"), 37.f },
+};
+static const float KSHeadRoomUnknown = 60.f;      // a fighter not in the table yet: generous, so nothing is cut meanwhile
 
 using namespace KSJoint;
 
@@ -243,7 +255,9 @@ bool AKSDummy::UseCharacter(const FString& InFolder)
 		TEXT("Hit_Reaction_to_Waist"), TEXT("Knock_Down"), TEXT("victory"), TEXT("Chest_Pound_Taunt"), TEXT("Punch_Combo"),
 		// The extra moves (art/tools/add_moves.py): two fun idles and a "picked" move for the select screen, the special
 		// ability, the win celebration, and the stagger of an attacker whose punch was blocked.
-		TEXT("Fun_A"), TEXT("Fun_B"), TEXT("Picked"), TEXT("Special"), TEXT("Win"), TEXT("Stagger") };
+		TEXT("Fun_A"), TEXT("Fun_B"), TEXT("Picked"), TEXT("Special"), TEXT("Win"), TEXT("Stagger"),
+		// Hit by a special ability: jolted rigid by electricity, or thrown back (AKSGameMode::SpecialHitClip).
+		TEXT("Shocked"), TEXT("Blown") };
 	static const TCHAR* FaceNames[] = { TEXT("hurt"), TEXT("ko"), TEXT("dizzy"), TEXT("hit"), TEXT("smug"), TEXT("happy"), TEXT("love"), TEXT("neutral"),
 		TEXT("calm"), TEXT("talk"), TEXT("angry"), TEXT("blink") };
 
@@ -262,6 +276,41 @@ bool AKSDummy::UseCharacter(const FString& InFolder)
 
 	Skel->SetSkeletalMesh(Mesh);
 	Puppet->SetSkinnedAssetAndUpdate(Mesh);
+	HeadRoomCm = KSHeadRoomUnknown;
+	bool bListed = false;
+	for (const TPair<const TCHAR*, float>& Row : KSHeadRooms) if (InFolder == Row.Key) { HeadRoomCm = Row.Value; bListed = true; }
+#if WITH_EDITOR
+	{
+		// Measure it from the model: the highest vertex above the "headfront" bone in the pose the model was made in.
+		// (Only the editor keeps the vertices in memory; a packaged game has the table.)
+		float Measured = -1.f;
+		const FReferenceSkeleton& Ref = Mesh->GetRefSkeleton();
+		int32 HeadBone = Ref.FindBoneIndex(TEXT("headfront"));
+		if (HeadBone == INDEX_NONE) HeadBone = Ref.FindBoneIndex(TEXT("Head"));
+		FSkeletalMeshRenderData* Render = Mesh->GetResourceForRendering();
+		if (HeadBone != INDEX_NONE && Render && Render->LODRenderData.Num())
+		{
+			const FPositionVertexBuffer& Vertices = Render->LODRenderData[0].StaticVertexBuffers.PositionVertexBuffer;
+			TArray<FTransform> Pose;
+			FAnimationRuntime::FillUpComponentSpaceTransforms(Ref, Ref.GetRefBonePose(), Pose);
+			const FTransform World = Skel->GetComponentTransform();
+			const FVector Up = World.InverseTransformVectorNoScale(FVector::UpVector);
+			if (Vertices.GetNumVertices() > 0 && Vertices.GetVertexData() && Pose.IsValidIndex(HeadBone))
+			{
+				float Top = -BIG_NUMBER, Bottom = BIG_NUMBER;
+				for (uint32 i = 0; i < Vertices.GetNumVertices(); i++)
+				{
+					const float Height = (float)FVector::DotProduct(FVector(Vertices.VertexPosition(i)), Up);
+					Top = FMath::Max(Top, Height); Bottom = FMath::Min(Bottom, Height);
+				}
+				// Meshy's models are stored in metres and drawn a hundred times that size (the rig carries the factor).
+				const float ToCm = Top - Bottom < 10.f ? 100.f : 1.f;
+				Measured = (Top - (float)FVector::DotProduct(Pose[HeadBone].GetLocation(), Up)) * ToCm;
+			}
+		}
+		UE_LOG(LogTemp, Display, TEXT("KSTEST shape fighter=%s head_room=%.0f table=%.0f listed=%d"), *InFolder, Measured, HeadRoomCm, bListed ? 1 : 0);
+	}
+#endif
 	bPuppet = false;
 	Skel->SetAnimationMode(EAnimationMode::AnimationSingleNode);
 	Skel->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
@@ -295,7 +344,7 @@ bool AKSDummy::UseCharacter(const FString& InFolder)
 		if (LoadObject<USoundBase>(nullptr, *FString::Printf(TEXT("/Game/KS/Voice/%s.%s"), *Asset, *Asset), nullptr, LOAD_NoWarn | LOAD_Quiet)) Sounds++;
 	}
 	int32 Moves = 0;
-	for (const TCHAR* Name : { TEXT("Fun_A"), TEXT("Fun_B"), TEXT("Picked"), TEXT("Special"), TEXT("Win"), TEXT("Stagger") }) Moves += Clips.Contains(Name) ? 1 : 0;
+	for (const TCHAR* Name : { TEXT("Fun_A"), TEXT("Fun_B"), TEXT("Picked"), TEXT("Special"), TEXT("Win"), TEXT("Stagger"), TEXT("Shocked"), TEXT("Blown") }) Moves += Clips.Contains(Name) ? 1 : 0;
 	UE_LOG(LogTemp, Display, TEXT("KSTEST fighter=%s faces=%d voice_lines=%d moves=%d"), *Folder, Faces.Num(), Sounds, Moves);
 	ImpactGlove.Reset();
 	for (const FKSImpact& Row : KSImpacts) if (Folder == Row.Fighter) ImpactGlove.Add(Row.Clip, Row.Glove);
@@ -515,7 +564,7 @@ void AKSDummy::SolveLeg(bool bLeft, const FVector& FootAt, const FQuat& FootRota
 void AKSDummy::Footwork(float DeltaSeconds)
 {
 	// Not while falling or celebrating: those clips move the legs themselves.
-	static const TCHAR* OwnLegs[] = { TEXT("Knock_Down"), TEXT("victory"), TEXT("Chest_Pound_Taunt"), TEXT("Fun_A"), TEXT("Fun_B"), TEXT("Picked"), TEXT("Special"), TEXT("Win"), TEXT("Stagger") };
+	static const TCHAR* OwnLegs[] = { TEXT("Knock_Down"), TEXT("victory"), TEXT("Chest_Pound_Taunt"), TEXT("Fun_A"), TEXT("Fun_B"), TEXT("Picked"), TEXT("Special"), TEXT("Win"), TEXT("Stagger"), TEXT("Shocked"), TEXT("Blown") };
 	bool bWanted = true;
 	for (const TCHAR* Name : OwnLegs) bWanted &= CurrentClip != Name;
 	LegWeight = FMath::FInterpTo(LegWeight, bWanted ? 1.f : 0.f, DeltaSeconds, 6.f);
@@ -588,6 +637,33 @@ FVector AKSDummy::GloveWorld(EKSArm Arm) const
 	return Hand + (Hand - Fore).GetSafeNormal() * 10.f;   // the glove sits a little past the wrist
 }
 
+FVector AKSDummy::BodyMiddle() const
+{
+	TArray<FVector> Points;
+	BodyPoints(Points);
+	if (!Points.Num()) return GetActorLocation();
+	FVector Sum = FVector::ZeroVector;
+	for (const FVector& Point : Points) Sum += Point;
+	return Sum / Points.Num();
+}
+
+FBox AKSDummy::BodyBox() const
+{
+	TArray<FVector> Points;
+	BodyPoints(Points);
+	FBox Box(ForceInit);
+	for (const FVector& Point : Points) Box += Point;
+	if (!Box.IsValid) return FBox(GetActorLocation() - FVector(40.f), GetActorLocation() + FVector(40.f, 40.f, 190.f));
+	const float Scale = GetActorScale3D().Z;
+	Box = Box.ExpandBy(15.f * Scale);                  // flesh, gloves and boots round the bones
+	// The head: whichever way it is turned, everything on it lies within this far of the face.
+	const FVector Face = FaceWorld(false);
+	const float Room = bCharacter ? HeadRoom() : 20.f * Scale;
+	Box += Face - FVector(Room);
+	Box += Face + FVector(Room);
+	return Box;
+}
+
 void AKSDummy::BodyPoints(TArray<FVector>& Out) const
 {
 	Out.Reset();
@@ -631,6 +707,32 @@ void AKSDummy::TakeHit(EKSPunch Type, EKSArm AttackerArm, float Strength)
 		RecoilVel.X -= 120.f * Strength; RecoilVel.Z += 230.f * Strength; LeanVel.X += 260.f * Strength;
 		break;
 	}
+}
+
+FVector2D AKSDummy::HipsOwn() const
+{
+	const FVector Own = GetActorTransform().InverseTransformPosition(Skel->GetSocketLocation(TEXT("Hips"))) - Skel->GetRelativeLocation();
+	return FVector2D(Own.X, Own.Y);
+}
+
+FVector2D AKSDummy::TakeShift()
+{
+	if (!bCharacter) return FVector2D::ZeroVector;
+	const FVector World = GetActorTransform().TransformVector(FVector(0.f, ShiftNow, 0.f));
+	ShiftNow = ShiftTarget = 0.f;
+	return FVector2D(World.X, World.Y);
+}
+
+FVector2D AKSDummy::CommitTravel()
+{
+	if (!bCharacter || !bHipsHomeKnown) return FVector2D::ZeroVector;
+	const FVector2D Own = HipsOwn() - HipsHome;
+	if (Own.Size() < 8.f) return FVector2D::ZeroVector;      // he has not gone anywhere worth a step
+	TravelFix += Own; TravelClip = CurrentClip;
+	const FVector World = GetActorTransform().TransformVector(FVector(Own.X, Own.Y, 0.f));
+	// The feet are planted in the world: without this they would be dragged along by the move of the actor.
+	Feet[0].bPlaced = Feet[1].bPlaced = false;
+	return FVector2D(World.X, World.Y);
 }
 
 void AKSDummy::HitStop(float Seconds)
@@ -694,16 +796,8 @@ void AKSDummy::Flash(const FLinearColor& Color, float Seconds)
 		HitLight->SetLightColor(Color);
 		HitLight->SetIntensity(14.f);
 		LightLeft = Seconds + 0.06f;
-		// and a quick burst at the point of contact
-		if (!BurstMID && SolidMaterial) { BurstMID = UMaterialInstanceDynamic::Create(SolidMaterial, this); Burst->SetMaterial(0, BurstMID); }
-		if (BurstMID)
-		{
-			BurstMID->SetVectorParameterValue(TEXT("Color"), Color);
-			Burst->SetWorldLocation(FaceWorld(false) + GetActorForwardVector() * 10.f);
-			Burst->SetWorldScale3D(FVector(0.10f));
-			Burst->SetVisibility(true);
-			BurstAge = 0.f;
-		}
+		// The burst at the point of contact used to be a glowing ball here ("hit circles", player, 2026-11-13: make
+		// them look better). It is a particle effect now, played by the game: AKSGameMode::HitSpark.
 	}
 	FlashColor = Color;
 	FlashLeft = Seconds;
@@ -779,7 +873,45 @@ void AKSDummy::Tick(float DeltaSeconds)
 				if (BurstMID) BurstMID->SetScalarParameterValue(TEXT("Glow"), 30.f * (1.f - U));
 			}
 		}
-		Skel->SetRelativeLocation(FVector(Reach.X - KnockNow, ShiftNow + Reach.Y, 0.f));
+		// A dancer stays on the floor (player report, 2026-11-13: Turbotron's breakdance went into the canvas). The lowest
+		// bone of the pose is brought back up to where bones rest: a finger above the floor when he is on his feet (toes),
+		// a hand's breadth when he is down on it (the middle of a back or a thigh).
+		float Lift = 0.f;
+		if (bKeepOnFloor)
+		{
+			const FTransform World = Skel->GetComponentTransform();
+			const float Scale = FMath::Max(0.01f, (float)GetActorScale3D().Z), Base = GetActorLocation().Z + FloorLift;
+			float Low = BIG_NUMBER;
+			for (const FTransform& Bone : Skel->GetComponentSpaceTransforms()) Low = FMath::Min(Low, (float)World.TransformPosition(Bone.GetLocation()).Z);
+			if (Low < BIG_NUMBER)
+			{
+				const bool bDown = Skel->GetSocketLocation(TEXT("headfront")).Z - Base < 95.f * Scale;
+				Lift = FMath::Max(0.f, (bDown ? 9.f : 1.f) * Scale - (Low - Base));
+			}
+		}
+		FloorLift = Lift;
+		if (bStayOnSpot)
+		{
+			// Where the middle of the body would be without the shift it has now, and the shift that puts it over the spot.
+			const FVector Shifted = GetActorTransform().TransformVectorNoScale(FVector(SpotShift.X, SpotShift.Y, 0.f));
+			const FVector Middle = BodyMiddle() - Shifted;
+			const FVector Need = GetActorTransform().InverseTransformVectorNoScale(FVector(Spot.X - Middle.X, Spot.Y - Middle.Y, 0.f));
+			SpotShift = FVector2D(Need.X, Need.Y);
+		}
+		else SpotShift = FVector2D::ZeroVector;
+		const float OwnScale = FMath::Max(0.01f, (float)GetActorScale3D().Z);
+		// Travel handed over to the actor (CommitTravel): taken off the drawn body in full while the clip that travelled
+		// is still on, and less and less as the next clip is eased in (the same curve as the blend below).
+		FVector2D Travel = FVector2D::ZeroVector;
+		if (!TravelFix.IsZero())
+		{
+			if (CurrentClip == TravelClip) Travel = TravelFix;
+			else if (BlendLeft > 0.f) Travel = TravelFix * (1.f - FMath::SmoothStep(0.f, 1.f, 1.f - BlendLeft / BlendTime));
+			else TravelFix = FVector2D::ZeroVector;
+		}
+		// Where the stance keeps the hips, learnt while he stands in it: what CommitTravel measures travel from.
+		if (CurrentClip == TEXT("Combat_Stance") && BlendLeft <= 0.f) { HipsHome = bHipsHomeKnown ? FMath::Lerp(HipsHome, HipsOwn(), 0.1f) : HipsOwn(); bHipsHomeKnown = true; }
+		Skel->SetRelativeLocation(FVector(Reach.X - KnockNow + SpotShift.X / OwnScale - Travel.X, ShiftNow + Reach.Y + SpotShift.Y / OwnScale - Travel.Y, FloorLift / OwnScale));
 		Skel->SetRelativeScale3D(FVector(1.f, 1.f, SquashNow * ReachSquash));
 
 		// Tracked arms: show the puppet, give it the clip's pose, then point its arms where the player's arms point.

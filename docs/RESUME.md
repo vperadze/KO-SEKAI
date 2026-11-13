@@ -162,6 +162,88 @@ Updated 2026-11-13. Deadline 2026-11-16 02:59 CET.
   showed on the first frame of a run, so the first bout may hitch while they load. The painted wall still covers
   only the far 230 degrees: behind the near stands it is dark. Crowd textures are now 126 MB before cooking.
 
+- Arena rebuilt from Meshy 3D models (player request, 2026-11-13; 600 credits: 19 models and one bought twice).
+  A kit every arena uses, in `Content/KS/Props` (`art/arena/gen_props.py` -> `art/tools/slim_props.py` ->
+  `art/tools/import_props.py`, placed by `FKSBuilder::Prop` in `KSWorld.cpp`): stage risers as the stands, steel crowd
+  barriers at ringside, ring posts, four truss gantries standing round the ring with stage lamps hung under them that
+  turn with their beams, moving heads on the floor, a scoreboard cube over the ring, a wide gantry across the far end,
+  loudspeaker towers, four round podiums. And one landmark per themed arena behind the far stands (a pair, the Dojo's
+  gate alone in the middle): rocket, lifeguard tower, jukebox, water tower, torii gate, pipe organ, boombox, stack of
+  wrecked cars, stone idol, TV camera.
+  The stands are steeper (each row 55 cm above the one in front, was 40; measures in `KSStands`, `KSWorld.h`), the
+  near end has a real aisle, the giants stand at the back of the platforms and on the round podiums. Checked: every
+  arena reports its pieces and none missing, 179 seated, 40 or more on each side. Seen in stills (hall, space, beach,
+  dojo, castle, volcano): four levels of crowd read in the fight view; the landmarks show in each bout's opening wide
+  shot, not in the fight view (the crowd fills it).
+  The other five were looked at later in their opening shot: jukeboxes, water towers, boomboxes and car stacks stand
+  the right way round and read; the studio's TV cameras are dark and hard to make out.
+  **Not verified**: the scoreboard, podiums and near-end loudspeakers have not been seen in any still;
+  nothing has been seen in motion (lamp housings turning); the frame rate was not measured (a self-played bout made
+  about as many frames as before, 948 and 1255); the cameraman may pass behind a gantry leg (46 cm thick, at the rig's
+  corners); whether a spectator's feet sit exactly on his riser was judged by eye. Known flaws: the organ's pipes and
+  the white lifeguard huts burn out under their lamps; the risers' frames still glint in the bright arenas; the
+  jukebox and the hut carry made-up words (JUCKERK, LUKY). `Content/KS/Props` is 196 MB before cooking.
+
+- Select screen and celebrations, fixed 2026-11-13 after player reports (Turbotron danced out of the picture and
+  into the floor, the title band cut Count Hairspray's hair, ropes across the picture, winners leaving the frame):
+  - The select camera frames the room the fighter uses (`AKSDummy::BodyBox`: bones, flesh, and hair from the
+    `KSHeadRooms` table), between the bands given by `KSSelectFrame`, from inside the far ropes; the fighter stands
+    at the player's end, dances on the spot (`StayOnSpot`) and on the floor (`KeepOnFloor`); the ropes are hidden
+    on this screen. He is drawn smaller than before the fix, because all of him now fits between the bands.
+  - After the bell the winner dances on his spot and on the floor, the cameraman steps back, looks at where he is
+    and opens the lens until he fits.
+  - Guards in `tools/check.sh`: every fighter is toured (`-KSSelectTour`) and must stay inside his part of the
+    screen; each model's hair is measured and must be covered by the table (a new fighter fails until he is
+    listed); frames with the winner partly out of the picture after the bell; where the player fought from.
+  Checked, and the select screen seen in stills. **Not seen**: a celebration (no stills taken of one since the
+  change), anything in motion, and whether holding dancers to their spot makes their feet slide noticeably.
+
+- Special abilities redrawn with particle effects, and fighters that move (player requests, 2026-11-13 evening).
+  - **Effects**: the glowing shapes are gone; each special is a few Niagara effects from free Fab packs
+    (`docs/VFX.md`, `KSVfx`): rings while charging, then fire along the floor (slam), an electric beam and crackle
+    (static), six coloured beams (laser), a ring of flames (fire ring), bolts from the roof (lightning), a flying
+    ball with flames (blast), purple puffs and bats (hairspray); sparks and a ring of bent air where it lands.
+    Every effect is gone within two seconds. Seen in stills of all seven, as the player's special and as the
+    opponent's. **Not seen in motion; the beams and bolts are faint in the stills and may need more.**
+  - **Movement** (`TickRing`): the fighters have real places in the ring. A dodge that is let go of is a step and
+    the opponent turns and closes in after a moment; a punch drives the one hit back and the other follows; a block
+    throws the attacker back; a special throws its victim most of a metre. Aerobics Annihilator's jump leaves her
+    where she lands (187 cm on) and the opponent turns to her; the camera follows the pair round. In three
+    self-played bouts: 4 dodge steps and 5-7 m of travel a bout, no crash. **Nobody has played it**: whether the
+    camera swinging round after the jump is readable, whether dodging feels like stepping, and whether the pushes
+    are too much or too little are all unjudged.
+  - The special's side-on shot had a ring rope across it; fixed (see LESSONS).
+  - **Fixture lights** (player: "lights done with meshes look bad"): the lamps' beams and the lasers are no longer
+    flat wedges and solid rods of one colour. `M_KS_Beam` (`art/tools/make_beam_material.py`) now shades a beam from
+    its own axis: bright down the middle, nothing at the edge, hot at the lamp, uneven like haze and drifting, fading
+    into whatever it meets; the lasers use it too. Seen in stills of the hall: soft shafts and thin soft lines.
+    **Not seen**: the other ten arenas, the knockout light show, the drift in motion.
+  - **Hit by a special, the clips**: bought (6 Meshy credits) and on all seven fighters: `Shocked` (Electrocution
+    Reaction) for static, laser and lightning, `Blown` (Hit Reaction) for the rest, 1.2 s. The check sees the right
+    one chosen. **Not looked at closely**: the stills are too small to judge the acting.
+  - **Hit marks**: the glowing ball at the point of contact is replaced by thin rings flying off the glove (bigger,
+    with sparks, on a counter; red when the player is hit; pale ones off a guard). Seen in stills: small and crisp.
+    **Not seen in motion.**
+
+- Webcam input made less twitchy (player, 2026-11-13 night; details and numbers in `docs/TRACKING.md`):
+  - **Film, menu, select**: a hand swept down/up moves the menu, right/left moves along the fighters, a jab with one
+    hand and then the other chooses or skips the film. A punch alone does nothing there any more.
+  - **Bouts**: a punch has to be faster (bar 5.0, was 3.5), the bar rises to 60% of the player's own typical punch
+    (at most 6.25), and a left and a right in the same instant (the body shifting) count as one. Replayed over three
+    of the player's recorded sessions the detector now calls about 30% fewer punches (308 -> 204, 434 -> 283,
+    398 -> 282).
+  **Not verified**: nothing here has been tried by a person. Whether real punches are now missed, whether a swipe is
+  always seen, and whether left-then-right is comfortable are all open; a calibration from the menu still adapts the
+  bar to a soft hitter.
+
+- Both fighters always in the picture during a bout (player report, 2026-11-13): the last step of the fight camera
+  turns it, and opens the lens if it must, until each fighter's head and the middle of his body are inside the
+  middle 86% of the screen; the check counts frames with either of them out (0 in every bout run so far; the rule
+  acts in about a fifth of the frames). After the bell the cameraman also keeps 3.2 m from the winner, and the
+  turn to the winner no longer restarts at the result screen (Channel Zero's dance was cut there; nine replays
+  clean). Seen in stills: both fighters in every bout frame; the winner after the bell is whole but small.
+  **Not judged**: whether the correction is felt as a jerk in motion.
+
 ## Built but not verified with a person
 
 - Early punch call (punch starts while the arm is still extending).

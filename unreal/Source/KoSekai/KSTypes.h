@@ -1,6 +1,14 @@
 // Shared small types for KO-SEKAI.
 #pragma once
 
+// The select screen: the part of the picture the fighter has to stay inside, as fractions of the screen. Above it is the
+// title band, below it the portraits, left of it the name and tagline. KSHUD draws its bands from these numbers and
+// AKSGameMode::TickSelect frames the fighter into them, so the two cannot drift apart.
+namespace KSSelectFrame
+{
+	const float Left = 0.50f, Right = 0.985f, Top = 0.15f, Bottom = 0.715f;
+}
+
 #include "CoreMinimal.h"
 
 /** The three punches, matching tracker.js ("straight", "hook", "uppercut"). */

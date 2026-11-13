@@ -7,6 +7,7 @@
 #include "KSPawn.h"
 #include "KSHUD.h"
 #include "KSTracking.h"
+#include "NiagaraComponent.h"
 #include "Engine/World.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/TextureCube.h"
@@ -67,6 +68,28 @@ namespace
 		{ TEXT("HAIRSPRAY!"),     EFxKind::Cloud,    FLinearColor(0.65f, 0.2f, 1.0f),  0.60f },
 	};
 	const float SpecialDamage = 24.f, OppSpecialDamage = 22.f;
+
+	// The particle effects the specials are built from (Fab packs, docs/VFX.md; chosen from stills of -KSVfxTour).
+	namespace Vx
+	{
+		const TCHAR* const Fire = TEXT("/Game/MixedVFX/Particles/Fires/NS_BigFire");                           // a rush of flames. Not the pack's explosions: their smoke is drawn black here and blots out the picture
+		const TCHAR* const Orb = TEXT("/Game/MixedVFX/Particles/Projectiles/NS_Projectile_04");                 // a glowing yellow ball that flies
+		const TCHAR* const Bats = TEXT("/Game/MixedVFX/Particles/Projectiles/NS_Shuriken_02");                  // black bats scattering
+		const TCHAR* const BoltHit = TEXT("/Game/MixedVFX/Particles/Projectiles/Hits/NS_LightningBolt_Hit");    // white forks of lightning
+		const TCHAR* const GreenHit = TEXT("/Game/MixedVFX/Particles/Projectiles/Hits/NS_Projectile_03_Hit");   // a green splash
+		const TCHAR* const Laser[] = { TEXT("/Game/FreeStylizedLaserBeamVFX/VFX/NS_Laser_01"), TEXT("/Game/FreeStylizedLaserBeamVFX/VFX/NS_Laser_02"), TEXT("/Game/FreeStylizedLaserBeamVFX/VFX/NS_Laser_03") };
+		const TCHAR* const Sparkle = TEXT("/Game/FreeStylizedLaserBeamVFX/VFX/Hit/NS_Hit_01");                  // a burst of glowing dots
+		const TCHAR* const Rings = TEXT("/Game/FreeStylizedLaserBeamVFX/VFX/Hit/NS_Hit_02");                    // rings flying outwards
+		const TCHAR* const Crackle = TEXT("/Game/FreeStylizedLaserBeamVFX/VFX/Hit/NS_Hit_03");                  // a ball of electricity
+		const TCHAR* const ChargeRings = TEXT("/Game/FreeStylizedLaserBeamVFX/VFX/MuzzleFlash/NS_MuzzleFlash_02");
+		const TCHAR* const SmokePuff = TEXT("/Game/PotaVFX_Smoke/VFX/System/SmokeBurst/NS_MagicSmokeBurstAir");
+		const TCHAR* const SmokeRing = TEXT("/Game/PotaVFX_Smoke/VFX/System/SmokeRing/NS_SmokeRing");           // dust rolling out over the floor
+		const TCHAR* const Shockwave = TEXT("/Game/Vefects/VFX_Distortion/VFX/Particles/NS_Distortion_Flat_13");   // the air bends in a ring
+		// All of them, loaded one after another when the game starts (see FKSVfx::Load for why).
+		const TCHAR* const All[] = { Fire, Orb, Bats, BoltHit, GreenHit, Laser[0], Laser[1], Laser[2], Sparkle, Rings, Crackle, ChargeRings, SmokePuff, SmokeRing, Shockwave };
+		// How bright a colour is handed to an effect: the packs' own colours are several times "white".
+		const float Glow = 2.f;
+	}
 
 	enum class EOutcome : uint8 { HitPlus, Hit, Half, Blocked, Dodged };   // ordered worst to best for the player
 
@@ -156,6 +179,12 @@ void AKSGameMode::BeginPlay()
 	FString Start;
 	FParse::Value(Cmd, TEXT("KSStart="), Start);
 	bPortraits = FParse::Param(Cmd, TEXT("KSPortraits"));
+	bSelectTour = FParse::Param(Cmd, TEXT("KSSelectTour"));
+	bVfxTour = FParse::Param(Cmd, TEXT("KSVfxTour"));
+	for (const TCHAR* Path : Vx::All) Vfx.Load(Path);
+	UE_LOG(LogTemp, Display, TEXT("KSTEST vfx loaded=%d missing=%d"), (int32)UE_ARRAY_COUNT(Vx::All) - Vfx.Missing, Vfx.Missing);
+	bTestSpecials = FParse::Param(Cmd, TEXT("KSSpecials"));
+	bNoRing = FParse::Param(Cmd, TEXT("KSNoRing"));
 	// FXAA instead of the engine's default (TSR). TSR blends each frame with the last and needs to know how everything
 	// moved; the fighters' drawn bodies (poseable meshes) do not say, so a fighter moving fast dissolved into noise.
 	if (IConsoleVariable* Method = IConsoleManager::Get().FindConsoleVariable(TEXT("r.AntiAliasingMethod"))) Method->Set(1, ECVF_SetByGameOverride);
@@ -204,12 +233,22 @@ void AKSGameMode::ClearWorld()
 	Arena = FKSArena();
 	Spectators.Reset(); Flashes.Reset(); FlashLights.Reset(); FlashesOwed = 0.f; Confetti.Reset(); bArenaFxLogged = false;
 	Motes.Reset(); ArenaIndex = -1; ArenaShowUntil = 0.f; bLookDirty = true;
-	Fx.Reset(); bSpecialOn = false;
+	Fx.Reset(); Vfx.Clear(); bSpecialOn = false;
 	PlayerDummy = nullptr; OppDummy = nullptr;
 }
 
 void AKSGameMode::SetPhase(EKSPhase NewPhase)
 {
+	// Into the webcam recording too: without it nobody can tell afterwards which punches were called on the menu and
+	// which in a bout (the first tuning of the menus' sensitivity had to guess from the first half minute of a session).
+	if (TrackingSubsystem && NewPhase != Phase) TrackingSubsystem->Mark(FString::Printf(TEXT("phase %d (swipes %d, double jabs %d so far)"), (int32)NewPhase, Gesture.Swipes, DoubleJabs));
+	// For tools/check.sh: how the celebration that has just ended was framed (see the end of UpdateFightCamera).
+	const auto After = [](EKSPhase P) { return P == EKSPhase::FightEnd || P == EKSPhase::Result || P == EKSPhase::Continue; };
+	if (After(Phase) && !After(NewPhase) && CelebFrames > 0)
+	{
+		UE_LOG(LogTemp, Display, TEXT("KSTEST celebration bout=%d frames=%d winner_out=%d"), FighterIndex, CelebFrames, CelebOut);
+		CelebFrames = CelebOut = 0;
+	}
 	Phase = NewPhase;
 	PhaseTime = 0.f;
 	// The fight music: full in the bout, lower while a fighter is introduced or the result is up (voices and
@@ -270,7 +309,22 @@ bool AKSGameMode::Down(const FKey& Key) const { return PC && PC->IsInputKeyDown(
 
 bool AKSGameMode::ConfirmPressed()
 {
-	return Pressed(EKeys::Enter) || Pressed(EKeys::SpaceBar) || Pressed(EKeys::E) || Pressed(EKeys::Gamepad_FaceButton_Bottom) || FramePunches.Num() > 0;
+	return Pressed(EKeys::Enter) || Pressed(EKeys::SpaceBar) || Pressed(EKeys::E) || Pressed(EKeys::Gamepad_FaceButton_Bottom) || bDoubleJab;
+}
+
+/** A punch the webcam called. One from each arm, the second 0.2 to 1.2 s after the first, is the webcam's "yes". Closer
+ *  together than that is the body moving, not two jabs. */
+void AKSGameMode::NoteWebPunch(EKSArm Arm)
+{
+	const double Now = FPlatformTime::Seconds();
+	const int32 Mine = Arm == EKSArm::Left ? 0 : 1;
+	const double Gap = Now - LastWebPunch[1 - Mine];
+	// The first of the two must come out of stillness: a flurry with one arm and then a twitch of the other is not a
+	// left-right (the self-check's fake player did exactly that and stopped the film with it).
+	const bool bClean = Now - LastAnyWebPunch > 0.8;
+	LastAnyWebPunch = Now;
+	if (Gap > 0.2 && Gap < 1.2 && bWebPunchClean[1 - Mine]) { bDoubleJab = true; DoubleJabs++; LastWebPunch[0] = LastWebPunch[1] = -100.0; bWebPunchClean[0] = bWebPunchClean[1] = false; }
+	else { LastWebPunch[Mine] = Now; bWebPunchClean[Mine] = bClean; }
 }
 
 void AKSGameMode::Popup(const FString& Text, const FLinearColor& Color, float X, float Y, bool bBig)
@@ -330,9 +384,16 @@ void AKSGameMode::Tick(float Dt)
 
 	// Collect this frame's punches: the webcam tracker always, the keyboard only while fighting (A and D walk in the street).
 	FramePunches.Reset();
+	bDoubleJab = false;
 	if (TrackingSubsystem)
 	{
-		for (const FKSPunchEvent& E : TrackingSubsystem->TakePunches()) FramePunches.Add({ E.Arm, E.Type });
+		for (const FKSPunchEvent& E : TrackingSubsystem->TakePunches()) { FramePunches.Add({ E.Arm, E.Type }); NoteWebPunch(E.Arm); }
+		// Hand swipes for the menus; and outside a fight a punch has to be a good deal harder to be believed.
+		const bool bFighting = Phase == EKSPhase::Fight || Phase == EKSPhase::Card || Phase == EKSPhase::Calibrate;
+		static const TArray<FVector2f> Nobody;
+		Gesture.Update(!bFighting && TrackingSubsystem->IsBodySeen() ? TrackingSubsystem->GetImageLandmarks() : Nobody, 4.f / 3.f, FPlatformTime::Seconds());
+		const float Want = PunchSensitivity * (bFighting ? 1.f : 0.7f);
+		if (Want != SensitivitySent) { SensitivitySent = Want; TrackingSubsystem->SetSensitivity(Want); }
 	}
 	if (Phase == EKSPhase::Fight || Phase == EKSPhase::Card || Phase == EKSPhase::Calibrate)
 	{
@@ -409,11 +470,14 @@ void AKSGameMode::TickMenu(float Dt)
 {
 	Pawn->SetView(WalkPos + FVector(0, 0, 165.f), FRotator::ZeroRotator, 90.f);
 	const int32 Lines = 4;
-	// The webcam works here too, once it has found the player: a left punch moves down the list, a right punch chooses.
+	// The webcam works here too, once it has found the player: a hand swept down or up moves down or up the list, and
+	// a jab with one hand and then the other chooses. (It was "left punch next, right punch choose": the menu moved
+	// and chose by itself whenever the player shifted his weight.)
 	const bool bTracked = TrackingSubsystem && TrackingSubsystem->IsTracking() && PhaseTime > 1.5f;
 	bool bNext = Pressed(EKeys::Down) || Pressed(EKeys::S) || Pressed(EKeys::Gamepad_DPad_Down), bChoose = false;
-	if (bTracked) for (const TPair<EKSArm, EKSPunch>& Punch : FramePunches) { if (Punch.Key == EKSArm::Left) bNext = true; else bChoose = true; }
-	if (Pressed(EKeys::Up) || Pressed(EKeys::W) || Pressed(EKeys::Gamepad_DPad_Up)) { MenuIndex = (MenuIndex + Lines - 1) % Lines; Sfx(EKSSfx::Menu, 0.7f); }
+	bool bBack = Pressed(EKeys::Up) || Pressed(EKeys::W) || Pressed(EKeys::Gamepad_DPad_Up);
+	if (bTracked) { bNext |= Gesture.StepY > 0; bBack |= Gesture.StepY < 0; bChoose = bDoubleJab; }
+	if (bBack) { MenuIndex = (MenuIndex + Lines - 1) % Lines; Sfx(EKSSfx::Menu, 0.7f); }
 	if (bNext) { MenuIndex = (MenuIndex + 1) % Lines; Sfx(EKSSfx::Menu, 0.7f); }
 	bChoose |= Pressed(EKeys::Enter) || Pressed(EKeys::SpaceBar) || Pressed(EKeys::Gamepad_FaceButton_Bottom);
 	if ((PhaseTime > 0.6f && bChoose) || (bAuto && PhaseTime > 3.f))
@@ -438,18 +502,21 @@ void AKSGameMode::TickIntro(float Dt)
 	Pawn->SetView(WalkPos + FVector(0, 0, 165.f), FRotator::ZeroRotator, 90.f);
 	float Total = 0.f;
 	for (const FKSCineShot& Shot : KSCineShots) Total += Shot.Frames / KSCineFps;
-	// A confirm key skips the film, and so does a jab at the webcam. Only a jab: "any punch" ended the film whenever
-	// the player moved, because someone settling in front of the camera sets off the odd hook or uppercut.
+	// A confirm key skips the film, and so does a jab with one hand and then the other at the webcam. Nothing less:
+	// "any punch" ended the film whenever the player moved, and so, in the end, did "one jab" (player, twice).
 	if (bFakeFilmPunches)
 	{
-		// For tools/check.sh: what a player moving about in front of the camera sets off, and then a real jab.
+		// For tools/check.sh: what a player moving about in front of the camera sets off (punches with one arm, a lone
+		// jab, a left and a right in the same instant as the body shifts), and then a real left-right.
 		const float Before = PhaseTime - Dt;
-		if (PhaseTime > 1.6f && PhaseTime < 5.f && FMath::FloorToInt(PhaseTime * 2.f) != FMath::FloorToInt(Before * 2.f))
-			FramePunches.Add({ EKSArm::Right, FMath::FloorToInt(PhaseTime * 2.f) % 2 ? EKSPunch::Hook : EKSPunch::Uppercut });
-		if (Before < 6.f && PhaseTime >= 6.f) FramePunches.Add({ EKSArm::Left, EKSPunch::Straight });
+		auto At = [&](float When) { return Before < When && PhaseTime >= When; };
+		if (PhaseTime > 1.6f && PhaseTime < 5.f && FMath::FloorToInt(PhaseTime * 2.f) != FMath::FloorToInt(Before * 2.f)) NoteWebPunch(EKSArm::Right);
+		if (At(5.5f)) NoteWebPunch(EKSArm::Left);
+		if (At(7.5f)) { NoteWebPunch(EKSArm::Left); NoteWebPunch(EKSArm::Right); }
+		if (At(9.5f)) NoteWebPunch(EKSArm::Left);
+		if (At(9.9f)) NoteWebPunch(EKSArm::Right);
 	}
-	bool bJab = false;
-	if (PhaseTime > 1.5f) for (const TPair<EKSArm, EKSPunch>& Punch : FramePunches) bJab |= Punch.Value == EKSPunch::Straight;
+	const bool bJab = PhaseTime > 1.5f && bDoubleJab;
 	const bool bKey = Pressed(EKeys::Enter) || Pressed(EKeys::SpaceBar) || Pressed(EKeys::E) || Pressed(EKeys::Gamepad_FaceButton_Bottom) || Pressed(EKeys::Escape);
 	// The self-playing test watches two and a half seconds.
 	const bool bSkip = PhaseTime > 0.5f && (bKey || bJab);
@@ -468,6 +535,9 @@ void AKSGameMode::EnterSelect()
 {
 	ClearWorld();
 	RaiseArena(0);
+	// The ropes come down for this screen (player report, 2026-11-13): glowing bars across the picture and across the
+	// fighter on show. A bout raises its own arena afresh, ropes and all.
+	for (const TWeakObjectPtr<AActor>& Rope : Arena.Ropes) if (AActor* Actor = Rope.Get()) Actor->SetActorHiddenInGame(true);
 	SeatCrowd();
 	SelectIndex = FMath::Clamp(ChosenPlayer >= 0 ? ChosenPlayer : SelectIndex, 0, Roster().Num() - 1);
 	SelectChosenAt = -1.f; SelectMovedAt = Clock; bSelectNameSaid = false; PortraitT = 0.f;
@@ -477,21 +547,36 @@ void AKSGameMode::EnterSelect()
 	if (!bPortraits) Announcer(TEXT("choose"));
 }
 
+// Where the fighter on show stands: at the player's end of the ring, so the camera at the far ropes has the distance
+// to show all of him, dance and all, without a fish-eye lens.
+static const FVector SelectSpot(-285.f, 60.f, 0.f);
+
+void AKSGameMode::LogSelectFrame()
+{
+	if (SelectFrames > 0) UE_LOG(LogTemp, Display, TEXT("KSTEST select_frame fighter=%s frames=%d out=%d worst=%.3f"), Roster()[SelectIndex].Asset, SelectFrames, SelectOut, SelectWorst);
+	SelectFrames = SelectOut = 0; SelectWorst = 0.f;
+}
+
 void AKSGameMode::ShowSelectFighter()
 {
 	// A fresh actor each time, as for every bout (a second mesh on an old actor froze in one pose).
 	if (PlayerDummy) { PlayerDummy->StopTalking(); WorldActors.Remove(PlayerDummy); PlayerDummy->Destroy(); }
 	const FKSFighterDef& F = Roster()[SelectIndex];
-	PlayerDummy = GetWorld()->SpawnActor<AKSDummy>(FVector::ZeroVector, FRotator::ZeroRotator);
+	PlayerDummy = GetWorld()->SpawnActor<AKSDummy>(SelectSpot, FRotator::ZeroRotator);
 	WorldActors.Add(PlayerDummy);
 	PlayerDummy->Setup(F.Body, F.Gloves, false, 0.25f);
 	const bool bReal = F.Asset && PlayerDummy->UseCharacter(F.Asset);
 	PlayerDummy->SetActorScale3D(FVector(bReal ? 1.f : F.Height));
 	PlayerDummy->Snap(KSPoses::Guard());
 	if (bReal) PlayerDummy->PlayClip(TEXT("Combat_Stance"), true);
+	// Seen in the first stills of the new select camera: Turbotron's dance is a breakdance that travels across half the
+	// ring and sinks into the canvas, and a lens wide enough to hold all of that makes him a speck. On this screen a
+	// fighter dances on the spot and on the floor, whatever his clip does.
+	PlayerDummy->KeepOnFloor(true); PlayerDummy->StayOnSpot(SelectSpot);
 	PlayerClipKey.Reset(); SpokenLine.Reset();
 	// He stands in his stance for a moment, then gets on with whatever he does when nobody is hitting him.
 	SelectClipUntil = Clock + 0.35f; SelectClipStep = 0;
+	SelectShownAt = Clock; SelectTourStep = 0; SelectSpace = FBox(ForceInit);
 }
 
 void AKSGameMode::TickSelect(float Dt)
@@ -519,12 +604,75 @@ void AKSGameMode::TickSelect(float Dt)
 		return;
 	}
 
-	// The fighter stands right of the middle; the camera drifts a little so the hall behind is not a still picture.
-	const float Sway = FMath::Sin(Clock * 0.5f);
-	// Far enough back that a raised glove or a jump stays under the title band.
-	const FVector Eye(415.f + 12.f * FMath::Cos(Clock * 0.37f), 92.f + 26.f * Sway, 120.f);
-	Pawn->SetView(Eye, (FVector(0.f, 92.f, 108.f) - Eye).Rotation(), 52.f);
+	// The camera frames the room the fighter needs, not the fighter (player report, 2026-11-13: Turbotron's dance
+	// carried him out of the picture and the title band cut the Count's hair; the camera stood still and looked at
+	// the spot where a fighter is put down). SelectSpace is everything that has been drawn of him lately: it grows at
+	// once when he reaches or steps further and shrinks slowly, so the picture does not pump with every move. The
+	// lens opens until that room fits between the title band and the portraits (KSSelectFrame), right of the writing.
+	FBox Now(SelectSpot - FVector(45.f, 45.f, 0.f), SelectSpot + FVector(45.f, 45.f, 185.f));
+	if (PlayerDummy) Now += PlayerDummy->BodyBox();
+	Now.Min.Z = FMath::Min(Now.Min.Z, 0.f);
+	if (!SelectSpace.IsValid) SelectSpace = Now;
+	for (int32 Axis = 0; Axis < 3; Axis++)
+	{
+		SelectSpace.Min[Axis] = FMath::FInterpTo(SelectSpace.Min[Axis], Now.Min[Axis], Dt, Now.Min[Axis] < SelectSpace.Min[Axis] ? 30.f : 0.45f);
+		SelectSpace.Max[Axis] = FMath::FInterpTo(SelectSpace.Max[Axis], Now.Max[Axis], Dt, Now.Max[Axis] > SelectSpace.Max[Axis] ? 30.f : 0.45f);
+	}
+	{
+		int32 ViewX = 16, ViewY = 9;
+		if (PC) PC->GetViewportSize(ViewX, ViewY);
+		const float Aspect = ViewY > 0 ? (float)ViewX / ViewY : 16.f / 9.f;
+		const float Margin = 0.032f;
+		const float Left = KSSelectFrame::Left + Margin, Right = KSSelectFrame::Right - Margin, Top = KSSelectFrame::Top + Margin, Bottom = KSSelectFrame::Bottom - Margin;
+		// He stands at the player's end and faces the far end of the ring, where the camera stands just inside the ropes
+		// (from outside them, a rope ran across his chest), looking straight back along the ring and level.
+		const float EyeX = 300.f + 6.f * FMath::Cos(Clock * 0.37f);
+		const FVector Centre = SelectSpace.GetCenter(), Size = SelectSpace.GetSize();
+		// Everything is reckoned at the near side of his room, where he is drawn largest and furthest from the middle
+		// of the picture; what is further away is drawn smaller and nearer the middle, so it fits if the near side does.
+		// (Reckoned at the middle of the room, a dance towards the camera stuck out by a twentieth of the screen.)
+		const float Near = FMath::Max(150.f, EyeX - SelectSpace.Max.X), Depth = Near;
+		const float Tan = FMath::Clamp(FMath::Max(Size.Y / (2.f * Near * (Right - Left)), Aspect * Size.Z / (2.f * Near * (Bottom - Top))), 0.3f, 1.3f);
+		const FVector Eye(EyeX, Centre.Y + (Left + Right - 1.f) * Depth * Tan, FMath::Max(25.f, Centre.Z - (1.f - Top - Bottom) * Depth * Tan / Aspect));
+		Pawn->SetView(Eye, FRotator(0.f, 180.f, 0.f), 2.f * FMath::RadiansToDegrees(FMath::Atan(Tan)));
+	}
 	SpokenLine = PlayerDummy && PlayerDummy->IsTalking() ? PlayerDummy->SpokenText() : FString();
+	// For tools/check.sh (player report, 2026-11-13: Turbotron danced out of the picture, the title band cut the
+	// Count's hair): every frame, is everything that is drawn of him inside the part of the screen left for him?
+	if (PlayerDummy && PC && Clock - SelectShownAt > 0.6f)
+	{
+		const FBox Box = PlayerDummy->BodyBox();
+		int32 ViewX = 0, ViewY = 0;
+		PC->GetViewportSize(ViewX, ViewY);
+		float Over = 0.f;
+		for (int32 i = 0; i < 8 && ViewX > 0 && ViewY > 0; i++)
+		{
+			const FVector Corner(i & 1 ? Box.Max.X : Box.Min.X, i & 2 ? Box.Max.Y : Box.Min.Y, i & 4 ? Box.Max.Z : Box.Min.Z);
+			FVector2D At;
+			if (!PC->ProjectWorldLocationToScreen(Corner, At)) { Over = 1.f; continue; }
+			const float X = At.X / ViewX, Y = At.Y / ViewY;
+			Over = FMath::Max(Over, FMath::Max(FMath::Max(KSSelectFrame::Left - X, X - KSSelectFrame::Right), FMath::Max(KSSelectFrame::Top - Y, Y - KSSelectFrame::Bottom)));
+		}
+		SelectFrames++; SelectWorst = FMath::Max(SelectWorst, Over);
+		if (Over > 0.004f) SelectOut++;
+	}
+	if (bSelectTour && SelectChosenAt < 0.f && PlayerDummy)
+	{
+		// Every fighter in turn: five seconds of his dance, then his "picked" move, then the next; after the last, quit.
+		if (SelectTourStep == 0 && Clock - SelectShownAt > 5.f)
+		{
+			SelectTourStep = 1;
+			const TCHAR* Clip = PlayerDummy->HasClip(TEXT("Picked")) ? TEXT("Picked") : TEXT("Chest_Pound_Taunt");
+			if (PlayerDummy->HasCharacter()) PlayerDummy->PlayClip(Clip, false);
+			SelectTourUntil = Clock + FMath::Min(PlayerDummy->HasCharacter() ? PlayerDummy->ClipSeconds(Clip) : 1.f, 3.2f) + 0.3f;
+		}
+		else if (SelectTourStep == 1 && Clock >= SelectTourUntil)
+		{
+			LogSelectFrame();
+			if (SelectIndex + 1 < Count) { SelectIndex++; ShowSelectFighter(); }
+			else { SelectTourStep = 2; UE_LOG(LogTemp, Display, TEXT("KSTEST select_tour done fighters=%d"), Count); PC->ConsoleCommand(TEXT("quit")); }
+		}
+	}
 
 	if (SelectChosenAt >= 0.f)
 	{
@@ -532,6 +680,7 @@ void AKSGameMode::TickSelect(float Dt)
 		if (Clock - SelectChosenAt > FMath::Max(1.3f, SelectVoiceSeconds + 0.25f))
 		{
 			ChosenPlayer = SelectIndex; WhiteFade = 1.f;
+			LogSelectFrame();
 			EnterArena(); BeginLadder();
 		}
 		return;
@@ -550,15 +699,18 @@ void AKSGameMode::TickSelect(float Dt)
 		}
 	}
 
-	// Keys, or the webcam once it has the player: a left punch moves on, a right punch chooses (as on the menu).
+	// Keys, or the webcam once it has the player: a hand swept right or left moves that way, a jab with one hand and
+	// then the other chooses (as on the menu).
 	const bool bTracked = TrackingSubsystem && TrackingSubsystem->IsTracking() && PhaseTime > 1.5f;
 	int32 Move = 0; bool bChoose = false;
 	if (Pressed(EKeys::Right) || Pressed(EKeys::D) || Pressed(EKeys::Gamepad_DPad_Right)) Move = 1;
 	if (Pressed(EKeys::Left) || Pressed(EKeys::A) || Pressed(EKeys::Gamepad_DPad_Left)) Move = -1;
-	if (bTracked) for (const TPair<EKSArm, EKSPunch>& Punch : FramePunches) { if (Punch.Key == EKSArm::Left) Move = 1; else bChoose = true; }
+	if (bTracked) { if (Gesture.StepX != 0) Move = Gesture.StepX; bChoose = bDoubleJab; }
 	bChoose |= Pressed(EKeys::Enter) || Pressed(EKeys::SpaceBar) || Pressed(EKeys::Gamepad_FaceButton_Bottom);
+	if (bSelectTour) Move = 0, bChoose = false;
 	if (Move != 0)
 	{
+		LogSelectFrame();
 		SelectIndex = (SelectIndex + Move + Count) % Count;
 		SelectMovedAt = Clock; bSelectNameSaid = false;
 		Sfx(EKSSfx::Menu, 0.7f); HushAnnouncer();
@@ -570,7 +722,7 @@ void AKSGameMode::TickSelect(float Dt)
 		bSelectNameSaid = true;
 		Announcer(FString(TEXT("name_")) + Roster()[SelectIndex].Asset);
 	}
-	if ((PhaseTime > 0.6f && bChoose) || (bAuto && PhaseTime > 2.5f))
+	if ((PhaseTime > 0.6f && bChoose) || (bAuto && !bSelectTour && PhaseTime > 2.5f))
 	{
 		SelectChosenAt = Clock;
 		Sfx(EKSSfx::Select, 0.9f); Sfx(EKSSfx::Cheer, 0.5f); HushAnnouncer();
@@ -759,10 +911,10 @@ void AKSGameMode::RaiseArena(int32 Index)
 	// One line per arena for tools/check.sh: an arena whose picture or music is missing shows a bare wall or falls silent.
 	auto Has = [](const FString& Path) { return LoadObject<UObject>(nullptr, *Path, nullptr, LOAD_NoWarn | LOAD_Quiet) != nullptr; };
 	const bool bHall = !Def.Key[0];
-	UE_LOG(LogTemp, Display, TEXT("KSTEST arena_built index=%d key=%s backdrop=%d mat=%d music=%d wall_panels=%d motes=%d"), ArenaIndex, bHall ? TEXT("Hall") : Def.Key,
+	UE_LOG(LogTemp, Display, TEXT("KSTEST arena_built index=%d key=%s backdrop=%d mat=%d music=%d wall_panels=%d motes=%d props=%d props_missing=%d"), ArenaIndex, bHall ? TEXT("Hall") : Def.Key,
 		Has(bHall ? FString(TEXT("/Game/KS/Arena/T_KS_Stands.T_KS_Stands")) : FString::Printf(TEXT("/Game/KS/Arena/T_KS_Bg_%s.T_KS_Bg_%s"), Def.Key, Def.Key)) ? 1 : 0,
 		Has(bHall ? FString(TEXT("/Game/KS/Arena/T_KS_Mat.T_KS_Mat")) : FString::Printf(TEXT("/Game/KS/Arena/T_KS_Mat_%s.T_KS_Mat_%s"), Def.Key, Def.Key)) ? 1 : 0,
-		Has(FString::Printf(TEXT("/Game/KS/Audio/M_%s.M_%s"), Def.Music, Def.Music)) ? 1 : 0, Arena.Wall.Num(), Motes.Num());
+		Has(FString::Printf(TEXT("/Game/KS/Audio/M_%s.M_%s"), Def.Music, Def.Music)) ? 1 : 0, Arena.Wall.Num(), Motes.Num(), Arena.Props, Arena.PropsMissing);
 }
 
 void AKSGameMode::UseArena(int32 Index)
@@ -854,6 +1006,12 @@ void AKSGameMode::StartCard(int32 Index)
 	OppDummy->SetActorScale3D(FVector(bReal ? 1.f : F.Height));   // the real models are already the right size
 	OppClipKey.Reset(); PlayerClipKey.Reset();
 	OppDummy->Snap(KSPoses::Guard());
+	// The player's fighter is the same actor bout after bout: the hold that kept his victory dance on the spot must
+	// come off, or he fights the next bout from where he landed the knockout, inside his opponent (that happened).
+	PlayerDummy->LetGo();
+	// And he goes back to his mark: the last bout left him wherever the fight had taken him (TickRing).
+	ResetRing();
+	PlayerDummy->SetActorLocationAndRotation(FVector(0.f, 0.f, PlayerDummy->GetActorLocation().Z), FRotator::ZeroRotator);
 	PlayerDummy->Snap(KSPoses::Guard());
 	if (Arena.NameSign) Arena.NameSign->GetTextRender()->SetText(FText::FromString(F.Name));
 	SeatCrowd();
@@ -874,6 +1032,7 @@ void AKSGameMode::StartCard(int32 Index)
 	if (PlayerDummy) PlayerDummy->StopTalking();
 	bIntroSaid = false; bChampionSaid = false; VoiceQuietUntil = 0.f; LaterVoices.Reset();
 	PlayerMeter = OppMeter = 0.f; bSpecialOn = false; bMeterFullSaid = false; OppStaggerUntil = 0.f; SpecialImpact = -10.f;
+	OppSpecialHitUntil = PlayerSpecialHitUntil = 0.f;
 	SetPhase(EKSPhase::Card);
 	// The announcer calls the opponent into the ring; the opponent answers when he has finished.
 	if (F.Asset) Announcer(FString(TEXT("name_")) + F.Asset);
@@ -951,13 +1110,17 @@ void AKSGameMode::UpdateFightCamera(float Dt)
 		auto Wrap = [](float A) { return FRotator::NormalizeAxis(A); };
 		auto Either = []() { return FMath::RandBool() ? 1.f : -1.f; };
 		if (OpShotUntil <= 0.f) OpShotUntil = Clock + FMath::FRandRange(1.2f, 2.2f);
+		// At the bell he stops whatever close shot he was on and steps back for the celebration.
+		if (!bBout && bOpWasBout) { OpShotUntil = Clock; OpHurry = 0.6f; }
+		bOpWasBout = bBout;
+		OpSinceBell = bBout ? 0.f : OpSinceBell + Dt;
 		bool bNewShot = false;
 		if (bBout && OppState != OpSeenState)
 		{
 			if (OppState == EKSOppState::Windup && FMath::Abs(OpAngle) > 62.f)
 			{
 				// A punch is coming and he is out at the side: back behind the nearer shoulder, at a run.
-				OpWantAngle = FMath::Sign(OpAngle) * FMath::FRandRange(20.f, 36.f); OpWantRadius = HomeRadius; OpWantHeight = FMath::FRandRange(192.f, 222.f); OpWantFov = 62.f;
+				OpWantAngle = FMath::Sign(OpAngle) * FMath::FRandRange(25.f, 40.f); OpWantRadius = HomeRadius; OpWantHeight = FMath::FRandRange(205.f, 232.f); OpWantFov = 62.f;
 				OpHurry = 1.f; OpShotUntil = Clock + FMath::FRandRange(2.2f, 3.4f); bNewShot = true;
 			}
 			else if (OppState == EKSOppState::Open)
@@ -975,7 +1138,7 @@ void AKSGameMode::UpdateFightCamera(float Dt)
 			{
 				// After the bell: round and round the winner and the fallen, all the way.
 				if (OpDir == 0.f) OpDir = Either();
-				OpWantAngle = Wrap(OpAngle + OpDir * FMath::FRandRange(70.f, 150.f)); OpWantRadius = FMath::FRandRange(250.f, 330.f); OpWantHeight = FMath::FRandRange(100.f, 215.f); OpWantFov = FMath::FRandRange(58.f, 66.f);
+				OpWantAngle = Wrap(OpAngle + OpDir * FMath::FRandRange(70.f, 150.f)); OpWantRadius = FMath::FRandRange(295.f, 335.f); OpWantHeight = FMath::FRandRange(125.f, 215.f); OpWantFov = FMath::FRandRange(58.f, 66.f);
 				OpShotUntil = Clock + FMath::FRandRange(2.2f, 3.6f);
 			}
 			else
@@ -984,7 +1147,7 @@ void AKSGameMode::UpdateFightCamera(float Dt)
 				for (int32 Try = 0; Try < 6; Try++)
 				{
 					const float Roll = FMath::FRand(), Side = Either();
-					if (Roll < 0.30f)      { Want = Side * FMath::FRandRange(18.f, 36.f);  OpWantRadius = HomeRadius;                     OpWantHeight = FMath::FRandRange(195.f, 225.f); OpWantFov = 62.f; }   // over a shoulder
+					if (Roll < 0.30f)      { Want = Side * FMath::FRandRange(25.f, 40.f);  OpWantRadius = HomeRadius;                     OpWantHeight = FMath::FRandRange(205.f, 232.f); OpWantFov = 62.f; }   // over a shoulder
 					else if (Roll < 0.52f) { Want = Side * FMath::FRandRange(44.f, 66.f);  OpWantRadius = FMath::FRandRange(270.f, 320.f); OpWantHeight = FMath::FRandRange(150.f, 200.f); OpWantFov = 62.f; }   // three-quarter
 					else if (Roll < 0.74f) { Want = Side * FMath::FRandRange(78.f, 102.f); OpWantRadius = FMath::FRandRange(300.f, 335.f); OpWantHeight = FMath::FRandRange(118.f, 165.f); OpWantFov = 60.f; }   // side-on, both in profile
 					else if (Roll < 0.88f) { Want = Side * FMath::FRandRange(56.f, 100.f); OpWantRadius = FMath::FRandRange(228.f, 268.f); OpWantHeight = FMath::FRandRange(68.f, 104.f);  OpWantFov = 66.f; }   // down on one knee, looking up
@@ -1019,9 +1182,49 @@ void AKSGameMode::UpdateFightCamera(float Dt)
 		// he has to cross right behind one he lifts the camera to look over the head.
 		const float OffSide = FMath::Abs(FMath::Sin(Rad));                                          // 0 behind a fighter, 1 square to the side
 		const float Radius = FMath::Max(OpRadius, FMath::Lerp(HomeRadius, 205.f, FMath::SmoothStep(0.55f, 0.92f, OffSide)));
-		const float Over = 1.f - FMath::SmoothStep(0.12f, 0.33f, OffSide);
-		Pos = OpPivot + FVector(-FMath::Cos(Rad) * Radius, FMath::Sin(Rad) * Radius, FMath::Lerp(OpHeight, FMath::Max(OpHeight, 268.f), Over));
+		// (Widened after a check run in which a tall fighter's head covered the opponent's in 104 of 1201 frames: the
+		// lift now starts at 24 degrees off his back, and the shoulder shots stand at 25 to 40 degrees, not 18 to 36.)
+		const float Over = 1.f - FMath::SmoothStep(0.14f, 0.41f, OffSide);
+		Pos = OpPivot + FVector(-FMath::Cos(Rad) * Radius, FMath::Sin(Rad) * Radius, FMath::Lerp(OpHeight, FMath::Max(OpHeight, 278.f), Over));
 		Pos.X = FMath::Clamp(Pos.X, -328.f, 328.f); Pos.Y = FMath::Clamp(Pos.Y, -328.f, 328.f);      // he stays inside the ropes
+		// After the bell he keeps his distance from the winner. He circles the middle of the ring, and the winner stands
+		// at one end of it: passing behind him he was 170 cm away, and a dance with big jumps (Channel Zero's) would have
+		// needed a lens wider than there is, so the winner was cut in up to 18 of 280 frames. Where the ropes are too
+		// near for that distance he slides along them.
+		FVector2D PushWant = FVector2D::ZeroVector;
+		if (!bBout)
+		{
+			if (const AKSDummy* Winner = bLastResultWin ? PlayerDummy.Get() : OppDummy.Get())
+			{
+				const FVector Centre3 = WorldToRing(Winner->BodyBox().GetCenter());
+				const FVector2D Centre(Centre3.X, Centre3.Y), Here(Pos.X, Pos.Y);
+				const float Keep = 325.f, Rope = 328.f, Dist = FVector2D::Distance(Here, Centre);
+				if (Dist < Keep)
+				{
+					const FVector2D Dir = Dist > 1.f ? (Here - Centre) / Dist : FVector2D(-1.f, 0.f);
+					FVector2D There = Centre + Dir * Keep;
+					There.X = FMath::Clamp(There.X, -Rope, Rope); There.Y = FMath::Clamp(There.Y, -Rope, Rope);
+					const float DX = There.X - Centre.X, DY = There.Y - Centre.Y;
+					if (FMath::Sqrt(DX * DX + DY * DY) < Keep - 4.f)
+					{
+						// Against a rope: keep that coordinate and go along the rope until the distance is right.
+						if (FMath::Abs(There.X) >= Rope - 0.1f && FMath::Abs(DX) < Keep)
+						{
+							const float Along = FMath::Sqrt(Keep * Keep - DX * DX), Side = DY >= 0.f ? 1.f : -1.f;
+							There.Y = FMath::Abs(Centre.Y + Side * Along) <= Rope ? Centre.Y + Side * Along : FMath::Clamp(Centre.Y - Side * Along, -Rope, Rope);
+						}
+						else if (FMath::Abs(There.Y) >= Rope - 0.1f && FMath::Abs(DY) < Keep)
+						{
+							const float Along = FMath::Sqrt(Keep * Keep - DY * DY), Side = DX >= 0.f ? 1.f : -1.f;
+							There.X = FMath::Abs(Centre.X + Side * Along) <= Rope ? Centre.X + Side * Along : FMath::Clamp(Centre.X - Side * Along, -Rope, Rope);
+						}
+					}
+					PushWant = There - Here;
+				}
+			}
+		}
+		OpCelebPush = bBout ? FVector2D::ZeroVector : FMath::Vector2DInterpTo(OpCelebPush, PushWant, Dt, 5.f);
+		Pos.X += OpCelebPush.X; Pos.Y += OpCelebPush.Y;
 		// His footsteps come through the rig as a small bob and sway, more the faster he goes; his breathing always.
 		const float Ground = FMath::Abs(OpAngleVel) * PI / 180.f * Radius + FMath::Abs(OpRadiusVel), Stride = FMath::Clamp(Ground / 150.f, 0.f, 1.f);
 		OpStep += Ground / 85.f * OpDt;
@@ -1032,11 +1235,34 @@ void AKSGameMode::UpdateFightCamera(float Dt)
 		// player from behind the opponent; up at them from below, down from above. The frame trails him a little.
 		const float Mix = 0.5f + 0.5f * FMath::Cos(Rad);
 		FVector AimWant(OppDistance * Mix, -8.f * FMath::Sin(Rad), 128.f - 0.12f * (Pos.Z - 212.f));
-		if (!bBout) AimWant = FMath::Lerp(AimWant, FVector(OppDistance * 0.5f, 0.f, 100.f), 0.85f * FMath::SmoothStep(0.f, 2.f, PhaseTime));      // after the bell: both of them, the one standing and the one on the floor
+		float CelebFov = 0.f;
+		if (!bBout)
+		{
+			// After the bell the winner celebrates, and he is always in the picture (player request, 2026-11-13): the
+			// camera looks at where he really is, a little towards the one on the floor, and the lens opens until all
+			// of him fits, however far his dance carries him or however high he jumps.
+			const FVector Both(OppDistance * 0.5f, 0.f, 100.f);
+			FVector Look = Both;
+			if (const AKSDummy* Winner = bLastResultWin ? PlayerDummy.Get() : OppDummy.Get())
+			{
+				const FBox Box = Winner->BodyBox();
+				const FVector Centre = WorldToRing(Box.GetCenter()), Half = Box.GetExtent();
+				Look = FMath::Lerp(Centre, Both, 0.2f);
+				const float Round = FMath::Max(Half.X, Half.Y) * 1.2f, Away = FMath::Max(120.f, FVector::Dist2D(Pos, Centre) - Round);
+				const float Wide = (Round + FVector::Dist2D(Look, Centre)) * 1.3f / Away, High = (Half.Z + FMath::Abs(Look.Z - Centre.Z)) * 1.3f / Away * 16.f / 9.f;
+				CelebFov = FMath::Min(2.f * FMath::RadiansToDegrees(FMath::Atan(FMath::Max(Wide, High))), 105.f);
+			}
+			// Timed from the bell, not from the phase: the phase's own clock starts again when the knockout gives way to
+			// the result, and the camera swung back to the fight view for a fifth of a second there (that, not the lens,
+			// was what cut Channel Zero: 7 to 18 frames of 280, always at the start of the result).
+			AimWant = FMath::Lerp(AimWant, Look, FMath::SmoothStep(0.f, 0.7f, OpSinceBell));
+		}
+		// Wider at once (a jump is over before a lens that eases open has caught it), narrower at leisure.
+		OpCelebFov = bBout ? 0.f : CelebFov > OpCelebFov ? CelebFov : FMath::FInterpTo(OpCelebFov, CelebFov, Dt, 1.5f);
 		AimWant += FVector(0.f, FMath::Sin(Clock * 0.53f) * 3.f, FMath::Sin(Clock * 0.81f + 0.7f) * 2.5f);
 		if (!bOpAimSet) { OpAim = AimWant; bOpAimSet = true; }
-		OpAim = FMath::VInterpTo(OpAim, AimWant, Dt, 6.f);
-		Aim = OpAim; Fov = OpFov;
+		OpAim = FMath::VInterpTo(OpAim, AimWant, Dt, bBout ? 6.f : 9.f);
+		Aim = OpAim; Fov = FMath::Max(OpFov, OpCelebFov);
 		OpTravel += FMath::Abs(OpAngleVel) * OpDt; OpMinAngle = FMath::Min(OpMinAngle, OpAngle); OpMaxAngle = FMath::Max(OpMaxAngle, OpAngle);
 	}
 	OpRoll = FMath::FInterpTo(OpRoll, OpRollWant, Dt, 4.f);
@@ -1051,10 +1277,11 @@ void AKSGameMode::UpdateFightCamera(float Dt)
 		const FVector Who(bSpecialByPlayer ? 0.f : OppDistance, 0.f, 0.f);
 		const float Face = bSpecialByPlayer ? 1.f : -1.f;
 		const FVector ClosePos = Who + FVector(Face * (150.f - 15.f * T), 300.f, 140.f), CloseAim = Who + FVector(0.f, 0.f, 122.f);
-		const FVector WidePos(OppDistance * 0.5f, 400.f, 132.f), WideAim(OppDistance * 0.5f, 0.f, 112.f);
+		// Inside the ropes (they run at 330, the top one at 130 high: from 400 out it lay right across the picture).
+		const FVector WidePos(OppDistance * 0.5f, 300.f, 132.f), WideAim(OppDistance * 0.5f, 0.f, 112.f);
 		Pos = FMath::Lerp(Pos, FMath::Lerp(ClosePos, WidePos, Wide), W);
 		Aim = FMath::Lerp(Aim, FMath::Lerp(CloseAim, WideAim, Wide), W);
-		Fov = FMath::Lerp(Fov, FMath::Lerp(50.f, 60.f, Wide), W);
+		Fov = FMath::Lerp(Fov, FMath::Lerp(50.f, 74.f, Wide), W);
 	}
 
 	/* ---- what the fight itself does to the camera ---- */
@@ -1077,7 +1304,7 @@ void AKSGameMode::UpdateFightCamera(float Dt)
 		// A nervous hand when the player is nearly out.
 		if (PlayerHP < 30.f) Pos += FVector(FMath::Sin(Clock * 7.3f), FMath::Sin(Clock * 9.1f + 2.f), FMath::Sin(Clock * 8.2f + 4.f)) * (2.5f * (1.f - PlayerHP / 30.f));
 		// Keeps the opponent's head in the picture as he sways and reels.
-		if (OppDummy) CamAimLag = FMath::VInterpTo(CamAimLag, (OppDummy->FaceWorld(false) - FVector(OppDistance, 0.f, 150.f)) * (0.35f * (0.5f + 0.5f * FMath::Cos(FMath::DegreesToRadians(OpAngle)))), Dt, 5.f);
+		if (OppDummy) CamAimLag = FMath::VInterpTo(CamAimLag, (WorldToRing(OppDummy->FaceWorld(false)) - FVector(OppDistance, 0.f, 150.f)) * (0.35f * (0.5f + 0.5f * FMath::Cos(FMath::DegreesToRadians(OpAngle)))), Dt, 5.f);
 	}
 	else CamAimLag = FMath::VInterpTo(CamAimLag, FVector::ZeroVector, Dt, 3.f);
 	CamDolly = FMath::FInterpTo(CamDolly, WantDolly, Dt, 3.2f);
@@ -1096,23 +1323,85 @@ void AKSGameMode::UpdateFightCamera(float Dt)
 	Pos += Move;
 	Aim += Move * 0.35f + CamAimLag + FVector(0, 0, -CamDrop * 0.5f);
 	Pos += FMath::VRand() * Shake * 0.6f;
+	// Everything above is worked out with the player at 0,0 and the opponent 150 in front of him; here it goes to
+	// where the two really are (TickRing).
+	Pos = RingToWorld(Pos); Aim = RingToWorld(Aim);
 	FRotator Rot = (Aim - Pos).Rotation();
 	Rot.Roll = CamRoll + OpRoll;
-	const float FinalFov = Fov + WantFov * FMath::Clamp(FMath::Abs(CamDolly) / 24.f, 0.f, 1.f) + CamFovKick;
+	float FinalFov = Fov + WantFov * FMath::Clamp(FMath::Abs(CamDolly) / 24.f, 0.f, 1.f) + CamFovKick;
+	// The last word on every shot of a bout: both fighters are in the picture (player report, 2026-11-13: "the
+	// cameraman sometimes loses one player"). Whatever the cameraman, the springs, the dolly and the special's shot have
+	// made of the view, each fighter's head and the middle of his body must lie inside the middle 86% of it. If they do
+	// not, the camera is turned just far enough, and if the two are too far apart for the lens, the lens is opened.
+	if (Phase == EKSPhase::Fight && PlayerDummy && OppDummy)
+	{
+		const FVector Must[] = { PlayerDummy->FaceWorld(false), PlayerDummy->BodyMiddle(), OppDummy->FaceWorld(false), OppDummy->BodyMiddle() };
+		const FRotator Level(Rot.Pitch, Rot.Yaw, 0.f);
+		const float Safe = 0.86f, Tall = 9.f / 16.f;
+		float Left = BIG_NUMBER, Right2 = -BIG_NUMBER, Low = BIG_NUMBER, High = -BIG_NUMBER;
+		bool bBehind = false;
+		for (const FVector& Point : Must)
+		{
+			const FVector Local = Level.UnrotateVector(Point - Pos);
+			if (Local.X < 40.f) { bBehind = true; continue; }       // beside or behind the lens: no turn of the camera shows it
+			Left = FMath::Min(Left, (float)(Local.Y / Local.X)); Right2 = FMath::Max(Right2, (float)(Local.Y / Local.X));
+			Low = FMath::Min(Low, (float)(Local.Z / Local.X)); High = FMath::Max(High, (float)(Local.Z / Local.X));
+		}
+		if (!bBehind)
+		{
+			float Tan = FMath::Tan(FMath::DegreesToRadians(FinalFov * 0.5f));
+			Tan = FMath::Min(FMath::Max3(Tan, (Right2 - Left) / (2.f * Safe), (High - Low) / (2.f * Safe * Tall)), 1.3f);
+			const float Wide = Safe * Tan, Up = Safe * Tan * Tall;
+			float Turn = 0.f, Tilt = 0.f;
+			if (Right2 > Wide) Turn = Right2 - Wide; else if (Left < -Wide) Turn = Left + Wide;
+			if (High > Up) Tilt = High - Up; else if (Low < -Up) Tilt = Low + Up;
+			Rot.Yaw += FMath::RadiansToDegrees(FMath::Atan(Turn)); Rot.Pitch += FMath::RadiansToDegrees(FMath::Atan(Tilt));
+			FinalFov = 2.f * FMath::RadiansToDegrees(FMath::Atan(Tan));
+			if (Turn != 0.f || Tilt != 0.f) OpSaved++;
+		}
+	}
 	Pawn->SetView(Pos, Rot, FinalFov);
+	// For tools/check.sh: after the bell the winner celebrates, and the player asked that he is always in the picture.
+	// Counted from a second after the bell (the cameraman needs a moment to turn to him) until the next card or the menu.
+	if ((Phase == EKSPhase::FightEnd || Phase == EKSPhase::Result || Phase == EKSPhase::Continue) && (Phase != EKSPhase::FightEnd || PhaseTime > 1.f))
+	{
+		if (const AKSDummy* Winner = bLastResultWin ? PlayerDummy.Get() : OppDummy.Get())
+		{
+			const FBox Box = Winner->BodyBox();
+			const float Tan = FMath::Tan(FMath::DegreesToRadians(FinalFov * 0.5f));
+			bool bOut = false;
+			for (int32 i = 0; i < 8; i++)
+			{
+				const FVector Local = Rot.UnrotateVector(FVector(i & 1 ? Box.Max.X : Box.Min.X, i & 2 ? Box.Max.Y : Box.Min.Y, i & 4 ? Box.Max.Z : Box.Min.Z) - Pos);
+				bOut |= Local.X < 10.f || FMath::Abs(Local.Y) > Local.X * Tan || FMath::Abs(Local.Z) > Local.X * Tan * 9.f / 16.f;
+			}
+			CelebFrames++; if (bOut) CelebOut++;
+		}
+	}
 	// For tools/check.sh: a cameraman who wanders off is worse than one who stands still. Count the frames of a bout
 	// in which the opponent's head is outside the picture (a special ability has its own shot and is not counted).
 	if (Phase == EKSPhase::Fight && OppDummy && Clock >= SpecialImpact + 0.75f)
 	{
 		const FVector Local = Rot.UnrotateVector(OppDummy->FaceWorld(false) - Pos);
 		const float Tan = FMath::Tan(FMath::DegreesToRadians(FinalFov * 0.5f));
-		OpFrames++;
+		OpFrames++; if (PlayerDummy) OpPlayerX += WorldToRing(PlayerDummy->BodyMiddle()).X;
+		// Both fighters in the picture: the head and the middle of the body of each, in the picture as it is shown.
+		if (PlayerDummy)
+		{
+			bool bGone = false;
+			for (const FVector& Point : { PlayerDummy->FaceWorld(false), PlayerDummy->BodyMiddle(), OppDummy->FaceWorld(false), OppDummy->BodyMiddle() })
+			{
+				const FVector At = Rot.UnrotateVector(Point - Pos);
+				bGone |= At.X < 10.f || FMath::Abs(At.Y) > At.X * Tan || FMath::Abs(At.Z) > At.X * Tan * 9.f / 16.f;
+			}
+			if (bGone) OpEitherLost++;
+		}
 		if (Local.X < 10.f || FMath::Abs(Local.Y) > Local.X * Tan || FMath::Abs(Local.Z) > Local.X * Tan * 9.f / 16.f) OpLost++;
 		// And those in which the player's own head and shoulders are in front of it (the camera straight behind his back).
 		else if (PlayerDummy)
 		{
 			const FVector Mine = Rot.UnrotateVector(PlayerDummy->FaceWorld(false) - Pos);
-			if (Mine.X > 10.f && Mine.X < Local.X && FMath::Abs(Mine.Y / Mine.X - Local.Y / Local.X) < 0.075f && Mine.Z / Mine.X > Local.Z / Local.X - 0.05f) OpHidden++;
+			if (Mine.X > 10.f && Mine.X < Local.X && FMath::Abs(Mine.Y / Mine.X - Local.Y / Local.X) < 0.06f && Mine.Z / Mine.X > Local.Z / Local.X - 0.03f) OpHidden++;
 		}
 	}
 }
@@ -1187,6 +1476,7 @@ void AKSGameMode::UpdateFighterPoses(float Dt)
 		KSPoses::Lean(O, 2.5f * FMath::Sin(Clock * 2.3f), 1.5f + 1.5f * FMath::Sin(Clock * 4.6f));   // breathing bob
 	}
 	OppDummy->SetTarget(O, Speed);
+	TickRing(Dt);
 	DriveCharacters();
 	TickCrowd();
 	if (Phase == EKSPhase::Fight && OppDummy && PlayerDummy) { TestOppHand += OppDummy->DrawnHandFromHead(); TestPlayerHand += PlayerDummy->DrawnHandFromHead(); }
@@ -1224,8 +1514,9 @@ void AKSGameMode::SetCalStep(int32 Step)
 			// little over half of that, within limits, so a light puncher is heard and a hard one gets no phantom hits.
 			CalPeaks.Sort();
 			const float Median = CalPeaks[CalPeaks.Num() / 2];
-			const float Sensitivity = FMath::Clamp(3.5f / (0.55f * Median), 0.8f, 1.5f);
-			TrackingSubsystem->SetSensitivity(Sensitivity);
+			// 5.0 is the detector's bar (StrokePeak): a stroke counts from 55% of this player's own jab.
+			const float Sensitivity = FMath::Clamp(5.0f / (0.55f * Median), 0.8f, 1.5f);
+			PunchSensitivity = Sensitivity;      // Tick tells the tracker
 			TrackingSubsystem->Mark(FString::Printf(TEXT("sensitivity %.2f from %d strokes, median peak %.1f"), Sensitivity, CalPeaks.Num(), Median));
 			UE_LOG(LogTemp, Display, TEXT("KSTEST calibration sensitivity=%.2f strokes=%d median_peak=%.1f"), Sensitivity, CalPeaks.Num(), Median);
 		}
@@ -1413,10 +1704,12 @@ void AKSGameMode::SeatCrowd()
 {
 	if (Spectators.Num()) return;                      // they keep their places for the whole ladder
 	for (AKSDummy* Dummy : Arena.Crowd) if (Dummy) Dummy->SetActorHiddenInGame(true);   // the faceless stand-ins go home
-	// Places all round the ring (the stands are built in KSWorld::BuildArena): three rows behind the far ropes and
-	// three behind the near ones, two rows and a platform row down each side, a block in each corner, a back row for the
-	// giants on every side, and above them the ones that fly. Each row is a step higher than the one in front.
+	// Places all round the ring, on the stands that KSWorld::BuildArena builds to the measures in KSStands: behind
+	// each end a front row on the floor behind the barrier, two rows on risers and a row on the top platform; down each
+	// side a front row, one on a riser and one on the platform; a stepped block in each corner; the giants at the back
+	// of every platform, the two biggest places at each end on round podiums; and above them the ones that fly.
 	// Row says who may stand there: 0 the front (small ones), 1 the middle, 2 the back, 3 giants only, 4 the air.
+	using namespace KSStands;
 	struct FPlace { FVector Foot; int32 Row; };
 	TArray<FPlace> Places;
 	auto Jitter = [](float Amount) { return FMath::FRandRange(-Amount, Amount); };
@@ -1425,33 +1718,37 @@ void AKSGameMode::SeatCrowd()
 	{
 		for (int32 Row = 0; Row < 3; Row++)
 		{
-			const float Half = 430.f + 70.f * Row;
+			const float Half = End > 0 ? 430.f + 60.f * Row : FMath::Min(480.f + 60.f * Row, 565.f);      // the near end makes up for its aisle with longer rows
 			for (float Y = -Half + (Row % 2) * Gap * 0.5f; Y <= Half; Y += Gap)
 			{
 				// The near end keeps an aisle down the middle: the wide shot that opens each bout looks along it.
-				if (End < 0 && FMath::Abs(Y) < 235.f) continue;
-				Places.Add({ FVector(End * (465.f + 118.f * Row + Jitter(16.f)), Y + Jitter(18.f), 40.f * Row), Row });
+				if (End < 0 && FMath::Abs(Y) < Aisle + 10.f) continue;
+				float At = Y + Jitter(18.f);
+				if (End < 0) At = FMath::Sign(Y) * FMath::Max(FMath::Abs(At), Aisle + 30.f);      // nobody with a foot over the edge of the aisle
+				Places.Add({ FVector(End * (EndFront + Depth * Row + Jitter(14.f)), At, Rise * Row), Row });
 			}
 		}
-		for (float Y = -520.f; Y <= 520.f; Y += Gap) Places.Add({ FVector(End * (890.f + Jitter(12.f)), Y + Jitter(18.f), 140.f), 2 });      // the front of the back platform
-		for (float Y = -600.f; Y <= 600.f; Y += 300.f) Places.Add({ FVector(End * (1010.f + Jitter(25.f)), Y + Jitter(50.f), 140.f), 3 });
-		for (int32 i = 0; i < 3; i++) Places.Add({ FVector(End * FMath::FRandRange(520.f, 860.f), FMath::FRandRange(-620.f, 620.f), FMath::FRandRange(340.f, 520.f)), 4 });
+		// The top platform: a row along its front, the giants behind them, and one on each round podium.
+		for (float Y = -564.f; Y <= 564.f; Y += Gap) if (End > 0 || FMath::Abs(Y) > Aisle + 35.f) Places.Add({ FVector(End * (EndFront + Depth * 3.f + Jitter(10.f)), Y + Jitter(18.f), Rise * 3.f), 2 });
+		for (float Y : { -470.f, -250.f, 250.f, 470.f }) Places.Add({ FVector(End * (965.f + Jitter(20.f)), (End > 0 ? Y * 0.8f : Y) + Jitter(30.f), Rise * 3.f), 3 });
+		for (float Y : { -TowerY, TowerY }) Places.Add({ FVector(End * TowerX, Y, Rise * 3.f + TowerTop), 3 });
+		for (int32 i = 0; i < 3; i++) Places.Add({ FVector(End * FMath::FRandRange(520.f, 860.f), FMath::FRandRange(-620.f, 620.f), FMath::FRandRange(400.f, 560.f)), 4 });
 		// The corners, between the end stands and the side stands.
 		for (int32 Side = -1; Side <= 1; Side += 2) for (int32 i = 0; i < 3; i++) for (int32 k = 0; k < 3; k++)
-			Places.Add({ FVector(End * (500.f + 104.f * i + Jitter(14.f)), Side * (655.f + 104.f * k + Jitter(14.f)), 60.f + 30.f * FMath::Min(i, k)), FMath::Min(i, k) });      // steps rise towards the corner, like the blocks under them
+			Places.Add({ FVector(End * (500.f + 104.f * i + Jitter(12.f)), Side * (655.f + 104.f * k + Jitter(12.f)), Corner(i, k)), FMath::Min(i, k) });      // steps rise towards the corner, like the blocks under them
 	}
 	for (int32 Side = -1; Side <= 1; Side += 2)
 	{
 		for (int32 Row = 0; Row < 2; Row++)
 		{
-			for (float X = -330.f + (Row % 2) * Gap * 0.5f; X <= 400.f; X += Gap) Places.Add({ FVector(X + Jitter(18.f), Side * (470.f + 118.f * Row + Jitter(16.f)), 40.f * Row), Row });
+			for (float X = -350.f + (Row % 2) * Gap * 0.5f; X <= 425.f; X += Gap) Places.Add({ FVector(X + Jitter(14.f), Side * (SideFront + Depth * Row + Jitter(14.f)), Rise * Row), Row });
 		}
-		for (float X = -300.f; X <= 400.f; X += Gap) Places.Add({ FVector(X + Jitter(18.f), Side * (770.f + Jitter(12.f)), 100.f), 2 });
-		for (float X = -200.f; X <= 380.f; X += 290.f) Places.Add({ FVector(X + Jitter(40.f), Side * (890.f + Jitter(20.f)), 100.f), 3 });
-		for (int32 i = 0; i < 2; i++) Places.Add({ FVector(FMath::FRandRange(-250.f, 380.f), Side * FMath::FRandRange(540.f, 780.f), FMath::FRandRange(320.f, 480.f)), 4 });
+		for (float X = -350.f; X <= 425.f; X += Gap) Places.Add({ FVector(X + Jitter(14.f), Side * (SideFront + Depth * 2.f + Jitter(10.f)), Rise * 2.f), 2 });
+		for (float X = -200.f; X <= 380.f; X += 290.f) Places.Add({ FVector(X + Jitter(40.f), Side * (848.f + Jitter(16.f)), Rise * 2.f), 3 });
+		for (int32 i = 0; i < 2; i++) Places.Add({ FVector(FMath::FRandRange(-250.f, 380.f), Side * FMath::FRandRange(540.f, 780.f), FMath::FRandRange(360.f, 520.f)), 4 });
 	}
 	// The best places first: nearest the ring. Whoever is dealt first sits there.
-	Places.Sort([](const FPlace& A, const FPlace& C) { return A.Row != C.Row ? A.Row < C.Row : FVector2D(A.Foot.X - 75.f, A.Foot.Y).SizeSquared() < FVector2D(C.Foot.X - 75.f, C.Foot.Y).SizeSquared(); });
+	Places.Sort([](const FPlace& A, const FPlace& C) { return A.Row != C.Row ? A.Row < C.Row : FVector2D(A.Foot.X, A.Foot.Y).SizeSquared() < FVector2D(C.Foot.X, C.Foot.Y).SizeSquared(); });      // from the middle of the ring: both ends fill alike
 
 	// Who may stand in a row, in order of preference: the small ones in front, so nobody stands behind a taller man.
 	static const EKSBuild Front[] = { EKSBuild::Tiny, EKSBuild::Small, EKSBuild::Normal, EKSBuild::Tall };
@@ -1785,6 +2082,7 @@ void AKSGameMode::TickArenaFx()
 		const float Rate = (0.35f + 0.07f * i) * (bShow ? 3.5f : 1.f), T = Now * Rate + i * 1.9f;
 		const FVector Aim = Beam.Aim + FVector(FMath::Sin(T * 0.7f) * 160.f, FMath::Sin(T) * 330.f, FMath::Cos(T * 1.3f) * 70.f);
 		Lamp->SpotLightComponent->SetWorldRotation((Aim - Lamp->GetActorLocation()).Rotation());
+		KSWorld::AimLamp(Beam, Lamp->GetActorLocation(), Aim);
 		KSWorld::AimBeam(Beam.Cone, Lamp->GetActorLocation(), Aim, Beam.Length, Beam.Radius);
 		// During the show the lamps flicker on and off by turns.
 		const float Level = bShow ? (FMath::Sin(Now * 17.f + i * 2.4f) > -0.2f ? 1.6f : 0.15f) : 1.f;
@@ -1800,6 +2098,16 @@ void AKSGameMode::TickArenaFx()
 		const float Yaw = (i - 3.5f) * 15.f + FMath::Sin(Now * Rate + i * 0.8f) * 18.f, Pitch = 48.f + FMath::Sin(Now * Rate * 0.73f + i * 1.7f) * 16.f;
 		const FRotator Rot(Pitch, Yaw, 0.f);
 		Laser->SetActorLocationAndRotation(Arena.LaserFrom + Rot.Vector() * FKSArena::LaserLength * 0.5f, Rot);
+		// Its material shades it from where it starts and which way it points (M_KS_Beam).
+		if (const UStaticMeshComponent* Mesh = Laser->FindComponentByClass<UStaticMeshComponent>())
+		{
+			if (UMaterialInstanceDynamic* MID = Cast<UMaterialInstanceDynamic>(Mesh->GetMaterial(0)))
+			{
+				const FVector Dir = Rot.Vector();
+				MID->SetVectorParameterValue(TEXT("Tip"), FLinearColor(Arena.LaserFrom.X, Arena.LaserFrom.Y, Arena.LaserFrom.Z, 0.f));
+				MID->SetVectorParameterValue(TEXT("Axis"), FLinearColor(Dir.X, Dir.Y, Dir.Z, 0.f));
+			}
+		}
 		Moving++;
 	}
 	if (Moving && !bArenaFxLogged) { bArenaFxLogged = true; int32 Cones = 0; for (const FKSArena::FBeam& Beam : Arena.Beams) Cones += Beam.Cone ? 1 : 0;
@@ -1851,6 +2159,7 @@ void AKSGameMode::DriveCharacters()
 		if (OppState == EKSOppState::KO) Key = TEXT("ko");
 		else if (bLost) Key = TEXT("win");
 		else if (bSpecialOn && !bSpecialByPlayer) Key = TEXT("special");
+		else if (Clock < OppSpecialHitUntil) Key = TEXT("specialhit");
 		else if (Clock < OppHurtUntil) Key = TEXT("hurt");
 		else if (OppState == EKSOppState::Windup) Key = FString::Printf(TEXT("wind %.3f"), OppT);
 		else if (OppState == EKSOppState::Strike) Key = TEXT("strike");
@@ -1883,6 +2192,7 @@ void AKSGameMode::DriveCharacters()
 			else if (Key == TEXT("win")) OppDummy->PlayClip(OppDummy->HasClip(TEXT("Win")) ? TEXT("Win") : TEXT("victory"), true);
 			else if (Key == TEXT("hurt")) OppDummy->PlayClip(TEXT("Face_Punch_Reaction"), false, 1.8f, 0.15f);
 			else if (Key == TEXT("special")) {}   // StartSpecial has put the clip on
+			else if (Key == TEXT("specialhit")) { const TCHAR* Clip = SpecialHitClip(OppDummy); OppDummy->PlayClip(Clip, false, FMath::Clamp(OppDummy->ClipSeconds(Clip) / 1.2f, 0.8f, 2.5f)); }
 			else if (Key == TEXT("stagger"))
 			{
 				// His punch met a guard: he is thrown back off it, squeezed into the time he reels for.
@@ -1949,6 +2259,7 @@ void AKSGameMode::DriveCharacters()
 		if (bKnockedOut) Key = TEXT("ko");
 		else if (bWon) Key = TEXT("win");
 		else if (bSpecialOn && bSpecialByPlayer) Key = TEXT("special");
+		else if (Clock < PlayerSpecialHitUntil && !bMirror) Key = TEXT("specialhit");
 		else if (Clock < PlayerHurtUntil && !bMirror) Key = TEXT("hurt");
 		else if (PunchArm >= 0 && !bMirror) Key = FString::Printf(TEXT("punch %d %.3f"), PunchArm, PunchStart[PunchArm]);
 		else if (D == EKSDefense::Block && !bMirror) Key = TEXT("block");
@@ -1964,6 +2275,7 @@ void AKSGameMode::DriveCharacters()
 			else if (Key == TEXT("win")) PlayerDummy->PlayClip(PlayerDummy->HasClip(TEXT("Win")) ? TEXT("Win") : TEXT("victory"), true);
 			else if (Key == TEXT("hurt")) PlayerDummy->PlayClip(TEXT("Face_Punch_Reaction"), false, 1.8f, 0.15f);
 			else if (Key == TEXT("special")) {}   // StartSpecial has put the clip on
+			else if (Key == TEXT("specialhit")) { const TCHAR* Clip = SpecialHitClip(PlayerDummy); PlayerDummy->PlayClip(Clip, false, FMath::Clamp(PlayerDummy->ClipSeconds(Clip) / 1.2f, 0.8f, 2.5f)); }
 			else if (PunchArm >= 0 && Key.StartsWith(TEXT("punch")))
 			{
 				// The hit lands 0.09 s after the input, so the clip starts just before its impact frame.
@@ -2029,6 +2341,112 @@ float AKSGameMode::Speak(AKSDummy* Who, const TCHAR* Prefix, bool bMust)
 	return Seconds;
 }
 
+/* ================= where the fighters stand ================= */
+
+void AKSGameMode::ResetRing()
+{
+	PlayerStand = FStand(); OppStand = FStand();
+	OppStand.At = FVector2D(OppDistance, 0.f); OppStand.Yaw = 180.f;
+	RingMid = FVector2D(OppDistance * 0.5f, 0.f); RingYaw = 0.f;
+	RingDodgeSide = 0.f; OppFollowAt = 0.f;
+	RingSteps = 0; RingTravel = RingMaxOff = RingMaxGap = RingMaxTurn = 0.f; RingMinGap = 1000.f;
+}
+
+FVector AKSGameMode::RingToWorld(const FVector& Home) const
+{
+	const FVector2D Off = FVector2D(Home.X - OppDistance * 0.5f, Home.Y).GetRotated(RingYaw);
+	return FVector(RingMid.X + Off.X, RingMid.Y + Off.Y, Home.Z);
+}
+
+FVector AKSGameMode::WorldToRing(const FVector& World) const
+{
+	const FVector2D Off = FVector2D(World.X - RingMid.X, World.Y - RingMid.Y).GetRotated(-RingYaw);
+	return FVector(Off.X + OppDistance * 0.5f, Off.Y, World.Z);
+}
+
+void AKSGameMode::RingPush(bool bPlayer, float Speed)
+{
+	FStand& Who = bPlayer ? PlayerStand : OppStand;
+	const FStand& Other = bPlayer ? OppStand : PlayerStand;
+	Who.Vel += (Who.At - Other.At).GetSafeNormal() * Speed;
+	Who.HeldUntil = Clock + 0.7f;     // he does not walk straight back into it: the other one follows him
+}
+
+void AKSGameMode::TickRing(float Dt)
+{
+	if (bNoRing || !PlayerDummy || !OppDummy || !PlayerDummy->HasCharacter() || !OppDummy->HasCharacter()) return;
+	const FVector2D Centre(OppDistance * 0.5f, 0.f);
+	Dt = FMath::Min(Dt, 0.05f);
+	if (Phase == EKSPhase::Fight)
+	{
+		const FVector2D PlayerWas = PlayerStand.At;
+		// A dodge that is let go of (or thrown the other way) is a step: he stays where the lean took him.
+		const EKSDefense D = Defense();
+		const float Side = D == EKSDefense::EvadeLeft ? -1.f : D == EKSDefense::EvadeRight ? 1.f : 0.f;
+		if (RingDodgeSide != 0.f && Side != RingDodgeSide)
+		{
+			const FVector2D Step = PlayerDummy->TakeShift();
+			if (Step.Size() > 6.f) { PlayerStand.At += Step; RingSteps++; OppFollowAt = Clock + 0.22f; }
+		}
+		RingDodgeSide = Side;
+
+		// Pushes die away.
+		for (FStand* S : { &PlayerStand, &OppStand }) { S->At += S->Vel * Dt; S->Vel *= FMath::Exp(-7.f * Dt); }
+
+		// Fighting distance. Whoever has just been driven back stays there and the other closes in; an opponent who is
+		// reeling does not follow anybody; otherwise it is the opponent who adapts, after the moment it takes him to
+		// see where the player went.
+		FVector2D Along = OppStand.At - PlayerStand.At;
+		float Gap = Along.Size();
+		if (Gap < 1.f) { Along = FVector2D(1.f, 0.f); Gap = 1.f; }
+		Along /= Gap;
+		const bool bOppReeling = OppState == EKSOppState::Open || OppState == EKSOppState::KO || Clock < OppFollowAt;
+		float OppShare = Clock < OppStand.HeldUntil || bOppReeling ? 0.1f : 0.75f;
+		float PlayerShare = Clock < PlayerStand.HeldUntil ? 0.1f : 1.f - OppShare;
+		if (bSpecialOn) OppShare = PlayerShare = 0.f;                       // nobody shuffles while a special is in the air
+		const float Close = FMath::Clamp((Gap - OppDistance) * 6.f, -260.f, 260.f) * Dt;   // cm to take off the gap this frame
+		PlayerStand.At += Along * Close * PlayerShare;
+		OppStand.At -= Along * Close * OppShare;
+
+		// The pair drifts back towards the middle of the ring, and never gets near the ropes.
+		const FVector2D Off = (PlayerStand.At + OppStand.At) * 0.5f - Centre;
+		const float Far = Off.Size();
+		if (Far > 1.f)
+		{
+			const FVector2D Back = Off / Far * (FMath::Min(Far, 12.f * Dt) + FMath::Max(0.f, Far - 110.f));
+			PlayerStand.At -= Back; OppStand.At -= Back;
+		}
+
+		// They face each other. The opponent turns after the player with a visible delay (slowly while he reels); while a
+		// special carries its fighter through the air the other one turns to follow the body, not the mark.
+		const bool bFlying = bSpecialOn && bSpecialLaunched;
+		const FVector PlayerSeen = bFlying && bSpecialByPlayer ? PlayerDummy->BodyMiddle() : FVector(PlayerStand.At, 0.f);
+		const FVector OppSeen = bFlying && !bSpecialByPlayer ? OppDummy->BodyMiddle() : FVector(OppStand.At, 0.f);
+		const float PlayerWant = FMath::RadiansToDegrees(FMath::Atan2(OppSeen.Y - PlayerStand.At.Y, OppSeen.X - PlayerStand.At.X));
+		const float OppWant = FMath::RadiansToDegrees(FMath::Atan2(PlayerSeen.Y - OppStand.At.Y, PlayerSeen.X - OppStand.At.X));
+		const bool bPlayerBusy = bSpecialOn && bSpecialByPlayer, bOppBusy = bSpecialOn && !bSpecialByPlayer;   // the clip turns him itself
+		if (!bPlayerBusy) PlayerStand.Yaw += FMath::FindDeltaAngleDegrees(PlayerStand.Yaw, PlayerWant) * (1.f - FMath::Exp(-11.f * Dt));
+		if (!bOppBusy) OppStand.Yaw += FMath::FindDeltaAngleDegrees(OppStand.Yaw, OppWant) * (1.f - FMath::Exp(-(bOppReeling ? 4.f : 9.f) * Dt));
+
+		PlayerDummy->SetActorLocationAndRotation(FVector(PlayerStand.At, PlayerDummy->GetActorLocation().Z), FRotator(0.f, PlayerStand.Yaw, 0.f));
+		OppDummy->SetActorLocationAndRotation(FVector(OppStand.At, OppDummy->GetActorLocation().Z), FRotator(0.f, OppStand.Yaw, 0.f));
+
+		RingTravel += FVector2D::Distance(PlayerWas, PlayerStand.At);
+		RingMaxOff = FMath::Max(RingMaxOff, Far); RingMinGap = FMath::Min(RingMinGap, Gap); RingMaxGap = FMath::Max(RingMaxGap, Gap);
+	}
+	// The frame the camera works in follows the pair: quickly when a punch is on its way (the player must read it from
+	// behind his own fighter), in about a second otherwise, so a fighter who lands behind the other is followed round.
+	// Only while they fight. At the bell the frame stays as it is: the cameraman then frames the winner himself, and a
+	// frame still swinging under him put the winner partly out of the picture (7 of 236 frames, tools/check.sh).
+	if (Phase != EKSPhase::Fight) return;
+	const FVector2D Axis = OppStand.At - PlayerStand.At;
+	const float AxisYaw = FMath::RadiansToDegrees(FMath::Atan2(Axis.Y, Axis.X));
+	const bool bUrgent = OppState == EKSOppState::Windup || OppState == EKSOppState::Strike;
+	RingYaw = FRotator::NormalizeAxis(RingYaw + FMath::FindDeltaAngleDegrees(RingYaw, AxisYaw) * (1.f - FMath::Exp(-(bUrgent ? 8.f : 2.8f) * Dt)));
+	RingMid = FMath::Vector2DInterpTo(RingMid, (PlayerStand.At + OppStand.At) * 0.5f, Dt, 5.f);
+	RingMaxTurn = FMath::Max(RingMaxTurn, FMath::Abs(RingYaw));
+}
+
 /* ================= special abilities ================= */
 
 FString AKSGameMode::PlayerCry() const { return Specials[PlayerChar % UE_ARRAY_COUNT(Specials)].Cry; }
@@ -2068,6 +2486,7 @@ void AKSGameMode::FxBurst(const FVector& At, int32 Count, float Speed, float Siz
 
 void AKSGameMode::TickFx(float Dt)
 {
+	Vfx.Tick(GetWorld(), Dt);
 	for (int32 i = Fx.Num() - 1; i >= 0; i--)
 	{
 		FFx& F = Fx[i];
@@ -2092,6 +2511,88 @@ void AKSGameMode::TickFx(float Dt)
 	}
 }
 
+/** An effect in a fighter's colour. The laser pack's effects take their colours and size by these names; an effect that
+ *  has no such setting ignores it. */
+void AKSGameMode::VfxTinted(const TCHAR* Path, const FVector& At, const FLinearColor& Color, float Size, float Delay, float Life)
+{
+	const FLinearColor Bright(Color.R * Vx::Glow, Color.G * Vx::Glow, Color.B * Vx::Glow, 1.f);
+	Vfx.Play(GetWorld(), Path, At, FRotator::ZeroRotator, 1.f, Life, FVector::ZeroVector, Delay, [Bright, Size](UNiagaraComponent* Comp)
+	{
+		// Not the effects' lights (ColorLight_01, _02): lit in a fighter's colour they whited out the whole picture.
+		static const FName Colours[] = { TEXT("Color"), TEXT("ColorRing"), TEXT("ColorSmoke") };
+		for (const FName& Name : Colours) Comp->SetVariableLinearColor(Name, Bright);
+		Comp->SetVariableFloat(TEXT("Scale"), Size);
+	});
+}
+
+void AKSGameMode::HitSpark(const AKSDummy* Whom, const FLinearColor& Color, float Size, bool bBig)
+{
+	if (!Whom) return;
+	// Half the size it first had (player, 2026-11-13: "make it smaller, like half"): every caller's size goes through here.
+	Size *= 0.5f;
+	// Thin rings flying off the glove, gone in a third of a second: punches come three a second, and the first try (a
+	// burst of dots with its puff of smoke on every punch) hung a beige cloud over the opponent's face for a whole combo.
+	const FVector At = Whom->FaceWorld(false) + Whom->GetActorForwardVector() * 12.f;
+	VfxTinted(Vx::Rings, At, Color, Size, 0.f, 0.3f);
+	if (!bBig) return;
+	const FLinearColor Bright(Color.R * Vx::Glow, Color.G * Vx::Glow, Color.B * Vx::Glow, 1.f);
+	Vfx.Play(GetWorld(), Vx::Sparkle, At, FRotator::ZeroRotator, 1.f, 0.3f, FVector::ZeroVector, 0.f, [Bright, Size](UNiagaraComponent* Comp)
+	{
+		Comp->SetVariableLinearColor(TEXT("Color"), Bright);
+		Comp->SetVariableLinearColor(TEXT("ColorSmoke"), FLinearColor(0.f, 0.f, 0.f, 0.f));
+		Comp->SetVariableFloat(TEXT("Scale"), Size * 0.6f);
+	});
+}
+
+void AKSGameMode::GuardRing(const AKSDummy* Whom)
+{
+	// Pale rings off the gloves. (The ring of bent air used for the specials is a glassy dome a metre across however it
+	// is scaled: on every blocked punch it sat over the blocker like a bubble.)
+	if (Whom) VfxTinted(Vx::Rings, Whom->FaceWorld(false) + Whom->GetActorForwardVector() * 28.f - FVector(0, 0, 8.f), FLinearColor(0.75f, 0.8f, 1.f), 0.18f, 0.f, 0.25f);      // halved with the hit marks
+}
+
+/** A beam of light from one point to another for Life seconds. Kind 0, 1 or 2 picks the look: plain, fiery, electric. */
+void AKSGameMode::VfxBeam(int32 Kind, const FVector& From, const FVector& To, const FLinearColor& Color, float Life, float Delay)
+{
+	const FLinearColor Bright(Color.R * Vx::Glow, Color.G * Vx::Glow, Color.B * Vx::Glow, 1.f);
+	Vfx.Play(GetWorld(), Vx::Laser[FMath::Clamp(Kind, 0, 2)], From, FRotator::ZeroRotator, 1.f, Life, FVector::ZeroVector, Delay, [Bright, To](UNiagaraComponent* Comp)
+	{
+		Comp->SetVariableVec3(TEXT("LaserEnd"), To);
+		Comp->SetVariableLinearColor(TEXT("Color"), Bright); Comp->SetVariableLinearColor(TEXT("Color_01"), Bright); Comp->SetVariableLinearColor(TEXT("Color_02"), Bright);
+	});
+}
+
+/** -KSVfxTour: nobody fights. Both stand in the ring while every effect of the packs is played between them, one
+ *  after another, each photographed early and late (Saved/Screenshots/vfx_NNN_a.png, _b.png). Then the game quits. */
+void AKSGameMode::TickVfxTour()
+{
+	PlayerHP = 100.f; OppHP = OppMaxHP; TimeLeft = RoundSeconds; PlayerMeter = OppMeter = 0.f;
+	OppState = EKSOppState::Idle; OppUntil = Clock + 1.f;
+	if (!PlayerDummy || !OppDummy || PhaseTime < VfxTourNext) return;
+	const TArray<FString>& Tour = FKSVfx::TourList();
+	if (VfxTourIndex >= Tour.Num())
+	{
+		UE_LOG(LogTemp, Display, TEXT("KSTEST vfx tour done shown=%d missing=%d"), Vfx.Made, Vfx.Missing);
+		bVfxTour = false;
+		if (PC) PC->ConsoleCommand(TEXT("quit"));
+		return;
+	}
+	const FString& Path = Tour[VfxTourIndex];
+	const FVector From = PlayerDummy->FaceWorld(false) - FVector(0, 0, 22.f), To = OppDummy->FaceWorld(false) - FVector(0, 0, 18.f);
+	const FString About = Vfx.Describe(*Path);
+	// A beam starts at one fighter and is told where the other is; everything else is shown half way between them.
+	const bool bBeam = About.Contains(TEXT("LaserEnd")) || About.Contains(TEXT("PositionTarget"));
+	// The one before is taken away first: many of them never end by themselves and would be in every later picture.
+	Vfx.Clear();
+	Vfx.Play(GetWorld(), *Path, bBeam ? From : (From + To) * 0.5f, FRotator::ZeroRotator, 1.f, 1.5f, FVector::ZeroVector, 0.f,
+		[To](UNiagaraComponent* Comp) { Comp->SetVariablePosition(TEXT("LaserEnd"), To); Comp->SetVariableVec3(TEXT("LaserEnd"), To); Comp->SetVariablePosition(TEXT("PositionTarget"), To); Comp->SetVariableVec3(TEXT("PositionTarget"), To); });
+	UE_LOG(LogTemp, Display, TEXT("KSTEST vfx tour %03d %s %s"), VfxTourIndex, *Path, *About);
+	BurstShots.Add({ Clock + 0.25f, FString::Printf(TEXT("vfx_%03d_a.png"), VfxTourIndex) });
+	BurstShots.Add({ Clock + 0.85f, FString::Printf(TEXT("vfx_%03d_b.png"), VfxTourIndex) });
+	VfxTourIndex++;
+	VfxTourNext = PhaseTime + 1.9f;
+}
+
 void AKSGameMode::StartSpecial(bool bByPlayer)
 {
 	AKSDummy* Who = bByPlayer ? PlayerDummy.Get() : OppDummy.Get();
@@ -2103,6 +2604,7 @@ void AKSGameMode::StartSpecial(bool bByPlayer)
 	const TCHAR* Clip = bOwn ? TEXT("Special") : TEXT("Chest_Pound_Taunt");
 	const float Length = FMath::Max(0.5f, Who->ClipSeconds(Clip)), Seconds = FMath::Clamp(Length, 1.5f, 2.8f);
 	bSpecialOn = true; bSpecialByPlayer = bByPlayer; bSpecialLaunched = bSpecialHit = false;
+	SpecialsStarted++;
 	SpecialStart = Clock; SpecialImpact = Clock + Seconds * Def.ImpactFrac; SpecialEnd = Clock + Seconds;
 	(bByPlayer ? PlayerMeter : OppMeter) = 0.f;
 	if (bByPlayer) bMeterFullSaid = false;
@@ -2131,62 +2633,68 @@ void AKSGameMode::TickSpecial(float Dt)
 	const FVector From = Who->FaceWorld(false) - FVector(0, 0, 22.f), To = Whom->FaceWorld(false) - FVector(0, 0, 18.f);
 	if (Clock < SpecialImpact - 0.25f)
 	{
-		// Charging up: sparks drawn in from all round him, more of them as it builds.
-		const float Build = FMath::Clamp((Clock - SpecialStart) / FMath::Max(0.1f, SpecialImpact - SpecialStart), 0.f, 1.f);
-		for (int32 i = 0; i < (FMath::FRand() < 0.4f + Build ? 2 : 1); i++)
+		// Charging up: rings of his colour burst off him, twice a second.
+		const float Every = 0.45f;
+		if (FMath::FloorToInt((Clock - SpecialStart) / Every) != FMath::FloorToInt((Clock - Dt - SpecialStart) / Every) || Clock - Dt <= SpecialStart)
 		{
-			const FVector Off = FMath::VRand() * FMath::FRandRange(70.f, 120.f);
-			FxAdd(SphereMesh, From + Off, -Off / 0.3f, FVector(7.f + 6.f * Build), FVector(2.f), Def.Color, 5.f, 0.3f);
+			VfxTinted(Vx::ChargeRings, From, Def.Color);
 		}
 	}
 	if (!bSpecialLaunched && Clock >= SpecialImpact - 0.25f) { bSpecialLaunched = true; Sfx(EKSSfx::Whoosh); SpecialLaunch(From, To); }
 	if (!bSpecialHit && Clock >= SpecialImpact) { bSpecialHit = true; SpecialLand(From, To); }
 	if (bSpecialOn && Clock >= SpecialEnd)
 	{
+		// A move that carried him across the ring leaves him there: the other one turns to him (TickRing).
+		const FVector2D Travelled = Who->CommitTravel();
+		(bSpecialByPlayer ? PlayerStand : OppStand).At += Travelled;
+		UE_LOG(LogTemp, Display, TEXT("KSTEST special travel by=%s cm=%d"), bSpecialByPlayer ? TEXT("player") : TEXT("opponent"), FMath::RoundToInt(Travelled.Size()));
 		bSpecialOn = false;
 		OppClipKey.Reset(); PlayerClipKey.Reset();
 	}
 }
 
+/** What a fighter does when a special lands on him: jolted rigid by anything electric ("Shocked", Meshy's Electrocution
+ *  Reaction), thrown back by the rest ("Blown", Meshy's Hit Reaction). A fighter without them reels with the stagger. */
+const TCHAR* AKSGameMode::SpecialHitClip(const AKSDummy* Whom) const
+{
+	const EFxKind Kind = Specials[SpecialIndex].Kind;
+	const bool bElectric = Kind == EFxKind::Static || Kind == EFxKind::Laser || Kind == EFxKind::Bolt;
+	for (const TCHAR* Clip : { bElectric ? TEXT("Shocked") : TEXT("Blown"), TEXT("Stagger"), TEXT("Hit_Reaction_to_Waist") }) if (Whom && Whom->HasClip(Clip)) return Clip;
+	return TEXT("Face_Punch_Reaction");
+}
+
 void AKSGameMode::SpecialLaunch(const FVector& From, const FVector& To)
 {
 	const FSpecialDef& Def = Specials[SpecialIndex];
+	UWorld* World = GetWorld();
+	const FVector FloorFrom(From.X, From.Y, 4.f), FloorTo(To.X, To.Y, 4.f);
 	switch (Def.Kind)
 	{
 	case EFxKind::Blast:
-		// A ball of fire thrown across the ring, with a tail.
-		FxAdd(SphereMesh, From, (To - From) / 0.25f, FVector(34.f), FVector(60.f), Def.Color, 3.f, 0.25f);
-		for (int32 i = 0; i < 10; i++) FxAdd(SphereMesh, From, (To - From) / 0.25f * FMath::FRandRange(0.6f, 0.95f) + FMath::VRand() * 60.f, FVector(18.f), FVector(2.f), FLinearColor(1.f, 0.8f, 0.2f), 5.f, 0.3f, 0.f, FRotator::ZeroRotator, FRotator::ZeroRotator, i * 0.012f);
+		// A ball of fire thrown across the ring.
+		Vfx.Play(World, Vx::Orb, From, FRotator::ZeroRotator, 1.3f, 0.25f, (To - From) / 0.25f);
+		Vfx.Play(World, Vx::Fire, From - FVector(0, 0, 40.f), FRotator::ZeroRotator, 0.6f, 0.25f, (To - From) / 0.25f);
 		break;
 	case EFxKind::Cloud:
 		// A cloud of hairspray rolling over him.
-		for (int32 i = 0; i < 44; i++)
-		{
-			const float Shade = FMath::FRandRange(0.5f, 1.f);
-			FxAdd(SphereMesh, From + FMath::VRand() * 12.f, (To - From) / FMath::FRandRange(0.22f, 0.5f) * 0.9f + FMath::VRand() * 90.f, FVector(14.f), FVector(FMath::FRandRange(50.f, 85.f)),
-				FLinearColor(Def.Color.R * Shade, Def.Color.G * Shade, Def.Color.B * Shade), 3.f, FMath::FRandRange(0.7f, 1.2f), -40.f, FRotator::ZeroRotator, FRotator::ZeroRotator, i * 0.006f);
-		}
+		for (int32 i = 0; i < 2; i++) VfxTinted(Vx::SmokePuff, FMath::Lerp(From, To, (i + 1) / 2.f), Def.Color, 1.f, i * 0.1f);
 		break;
 	case EFxKind::Slam:
-		// The canvas breaks in a line from his feet to the other's.
-		for (int32 i = 0; i < 9; i++)
-		{
-			const FVector At = FMath::Lerp(FVector(From.X, From.Y, 0.f), FVector(To.X, To.Y, 0.f), (i + 1) / 9.f) + FVector(0, FMath::FRandRange(-14.f, 14.f), 0);
-			FxAdd(CubeMesh, At, FVector(0, 0, 260.f), FVector(26.f, 26.f, 6.f), FVector(20.f, 20.f, 90.f + 12.f * i), Def.Color, 4.f, 0.45f, 900.f, FRotator(0, FMath::FRandRange(0.f, 90.f), 0), FRotator::ZeroRotator, i * 0.026f);
-		}
+		// The canvas bursts in a line from his feet to the other's.
+		for (int32 i = 0; i < 4; i++) Vfx.Play(World, Vx::Fire, FMath::Lerp(FloorFrom, FloorTo, (i + 1) / 5.f), FRotator::ZeroRotator, 0.4f + 0.08f * i, 0.35f, FVector::ZeroVector, i * 0.05f);
+		VfxTinted(Vx::SmokeRing, FloorFrom, FLinearColor(0.5f, 0.4f, 0.3f));
 		break;
 	case EFxKind::FireRing:
 		// A ring of fire thrown outwards from her spin.
-		for (int32 i = 0; i < 30; i++)
+		for (int32 i = 0; i < 8; i++)
 		{
-			const float Angle = i / 30.f * 2.f * PI;
-			const FVector Out(FMath::Cos(Angle), FMath::Sin(Angle), 0.f);
-			FxAdd(SphereMesh, FVector(From.X, From.Y, 95.f) + Out * 35.f, Out * 620.f + FVector(0, 0, FMath::FRandRange(-30.f, 60.f)), FVector(26.f), FVector(8.f), i % 2 ? Def.Color : FLinearColor(1.f, 0.85f, 0.15f), 6.f, 0.5f);
+			const float Angle = i / 8.f * 2.f * PI;
+			Vfx.Play(World, Vx::Fire, FVector(From.X + FMath::Cos(Angle) * 105.f, From.Y + FMath::Sin(Angle) * 105.f, 10.f), FRotator::ZeroRotator, 0.4f, 0.45f, FVector::ZeroVector, i * 0.02f);
 		}
 		break;
 	default:
 		// Laser, lightning and static are instant: a thin warning line first.
-		FxBeam(Def.Kind == EFxKind::Bolt ? To + FVector(0, 0, 620.f) : From + FVector(0, 0, 28.f), To, 3.f, 1.f, Def.Color, 5.f, 0.25f);
+		VfxBeam(0, Def.Kind == EFxKind::Bolt ? To + FVector(0, 0, 620.f) : From + FVector(0, 0, 28.f), To, Def.Color, 0.25f);
 		break;
 	}
 }
@@ -2194,6 +2702,8 @@ void AKSGameMode::SpecialLaunch(const FVector& From, const FVector& To)
 void AKSGameMode::SpecialLand(const FVector& From, const FVector& To)
 {
 	const FSpecialDef& Def = Specials[SpecialIndex];
+	UWorld* World = GetWorld();
+	const FVector FloorTo(To.X, To.Y, 4.f);
 	switch (Def.Kind)
 	{
 	case EFxKind::Laser:
@@ -2201,54 +2711,53 @@ void AKSGameMode::SpecialLand(const FVector& From, const FVector& To)
 		// Six beams, one for every colour of the rainbow, from the horn.
 		static const FLinearColor Rainbow[] = { FLinearColor(1, 0.05f, 0.05f), FLinearColor(1, 0.5f, 0), FLinearColor(1, 0.95f, 0.1f), FLinearColor(0.1f, 1, 0.2f), FLinearColor(0.1f, 0.5f, 1), FLinearColor(0.7f, 0.2f, 1) };
 		const FVector Horn = From + FVector(0, 0, 52.f);
-		for (int32 i = 0; i < 6; i++) FxBeam(Horn + FVector(0, 0, 3.f * (i - 2.5f)), To + FVector(0, 0, 13.f * (i - 2.5f)), 13.f, 2.f, Rainbow[i], 5.f, 0.6f, i * 0.02f);
+		for (int32 i = 0; i < 6; i++) VfxBeam(i % 2, Horn + FVector(0, 0, 3.f * (i - 2.5f)), To + FVector(0, 0, 13.f * (i - 2.5f)), Rainbow[i], 0.6f, i * 0.02f);
+		VfxTinted(Vx::Rings, To, Def.Color);
 		break;
 	}
 	case EFxKind::Bolt:
 	{
-		// Lightning from the roof: a crooked line, struck twice.
+		// Lightning from the roof, struck twice, and forks of it over the floor.
 		for (int32 Strike = 0; Strike < 2; Strike++)
 		{
-			FVector At = To + FVector(FMath::FRandRange(-60.f, 60.f), FMath::FRandRange(-60.f, 60.f), 640.f);
-			for (int32 i = 0; i < 8; i++)
-			{
-				const FVector Next = i == 7 ? To : FVector(To.X + FMath::FRandRange(-45.f, 45.f), To.Y + FMath::FRandRange(-45.f, 45.f), FMath::Lerp(At.Z, To.Z, 1.f / (8 - i)));
-				FxBeam(At, Next, Strike ? 6.f : 11.f, 1.f, Strike ? FLinearColor::White : Def.Color, 12.f, 0.3f, Strike * 0.13f);
-				At = Next;
-			}
+			VfxBeam(2, To + FVector(FMath::FRandRange(-60.f, 60.f), FMath::FRandRange(-60.f, 60.f), 640.f), To, Strike ? FLinearColor::White : Def.Color, 0.3f, Strike * 0.13f);
 		}
-		WhiteFade = FMath::Max(WhiteFade, 0.6f);
+		Vfx.Play(World, Vx::BoltHit, To);
+		VfxTinted(Vx::Crackle, To, Def.Color, 0.6f);
+		WhiteFade = FMath::Max(WhiteFade, 0.3f);
 		break;
 	}
 	case EFxKind::Static:
-	{
-		// The picture breaks up all round him: snow, and a green line across it.
-		FxBeam(From + FVector(0, 0, 28.f), To, 16.f, 1.f, Def.Color, 6.f, 0.4f);
-		for (int32 i = 0; i < 70; i++)
-		{
-			const float Grey = FMath::RandBool() ? 1.f : FMath::FRandRange(0.f, 0.3f);
-			FxAdd(CubeMesh, To + FVector(FMath::FRandRange(-30.f, 30.f), FMath::FRandRange(-75.f, 75.f), FMath::FRandRange(-95.f, 55.f)), FMath::VRand() * 40.f,
-				FVector(2.f, FMath::FRandRange(8.f, 34.f), FMath::FRandRange(3.f, 9.f)), FVector(2.f, 4.f, 2.f), i % 6 ? FLinearColor(Grey, Grey, Grey) : Def.Color, 8.f * Grey + 1.f, FMath::FRandRange(0.15f, 0.4f), 0.f,
-				FRotator::ZeroRotator, FRotator::ZeroRotator, FMath::FRandRange(0.f, 0.5f));
-		}
+		// A line of it from the screen to him, and he crackles green.
+		VfxBeam(2, From + FVector(0, 0, 28.f), To, Def.Color, 0.45f);
+		VfxTinted(Vx::Crackle, To, Def.Color, 0.6f);
+		Vfx.Play(World, Vx::GreenHit, To);
 		break;
-	}
 	case EFxKind::Cloud:
 		// Bats out of the cloud.
-		for (int32 i = 0; i < 14; i++) FxAdd(CubeMesh, To, FMath::VRand() * 260.f + FVector(0, 0, 260.f), FVector(20.f, 5.f, 2.f), FVector(12.f, 3.f, 2.f), FLinearColor(0.02f, 0.f, 0.04f), 0.f, 1.1f, 120.f, FRotator(0, FMath::FRandRange(0.f, 360.f), 0), FRotator(0, 200.f, 900.f));
+		Vfx.Play(World, Vx::Bats, To, FRotator::ZeroRotator, 1.3f, 1.2f);
 		break;
 	case EFxKind::Slam:
-		FxBurst(FVector(To.X, To.Y, 8.f), 26, 420.f, 16.f, FLinearColor(0.35f, 0.25f, 0.2f), 0.5f, 0.9f, 900.f);
+		Vfx.Play(World, Vx::Fire, FloorTo, FRotator::ZeroRotator, 0.8f, 0.45f);
+		VfxTinted(Vx::SmokeRing, FloorTo, FLinearColor(0.5f, 0.4f, 0.3f));
+		break;
+	case EFxKind::FireRing:
+		Vfx.Play(World, Vx::Fire, FloorTo + FVector(0, 0, 40.f), FRotator::ZeroRotator, 0.9f, 0.5f);
+		break;
+	case EFxKind::Blast:
+		Vfx.Play(World, Vx::Fire, FloorTo + FVector(0, 0, 40.f), FRotator::ZeroRotator, 1.f, 0.5f);
+		VfxTinted(Vx::Rings, To, Def.Color);
 		break;
 	default: break;
 	}
-	// Whatever it was, it lands with a burst in his colour and one of white.
-	FxBurst(To, 26, 520.f, 15.f, Def.Color, 6.f, 0.6f);
-	FxBurst(To, 8, 300.f, 20.f, FLinearColor::White, 9.f, 0.25f, 0.f);
+	// Whatever it was, it lands with a burst of sparks in his colour and a ring of bent air.
+	VfxTinted(Vx::Sparkle, To, Def.Color);
+	Vfx.Play(World, Vx::Shockwave, To);
 	Sfx(EKSSfx::Counter); Sfx(EKSSfx::Hit); Sfx(EKSSfx::KO, 0.5f);
 	Shake = FMath::Max(Shake, 14.f); WhiteFade = FMath::Max(WhiteFade, 0.35f);
 	CrowdFlashes(10.f);
-	UE_LOG(LogTemp, Display, TEXT("KSTEST special landed by=%s pieces=%d"), bSpecialByPlayer ? TEXT("player") : TEXT("opponent"), FxMade);
+	UE_LOG(LogTemp, Display, TEXT("KSTEST special landed by=%s kind=%d effects=%d missing=%d reaction=%s"), bSpecialByPlayer ? TEXT("player") : TEXT("opponent"), (int32)Def.Kind, Vfx.Made, Vfx.Missing,
+		SpecialHitClip(bSpecialByPlayer ? OppDummy.Get() : PlayerDummy.Get()));
 	if (bHitShots) QueueHitShots(TEXT("special"));
 	const float Rest = FMath::Max(0.f, SpecialEnd - Clock);
 
@@ -2261,6 +2770,8 @@ void AKSGameMode::SpecialLand(const FVector& From, const FVector& To)
 		OppHurtUntil = Clock + 0.45f;
 		CamPunch(FVector(0.f, -50.f, 10.f), FMath::RandBool() ? 22.f : -22.f, -5.f);
 		if (OppDummy) { OppDummy->Flash(Def.Color, 0.16f); OppDummy->TakeHit(EKSPunch::Uppercut, EKSArm::Right, 2.2f); OppDummy->HitStop(0.16f); }
+		RingPush(false, 420.f);      // thrown back most of a metre
+		OppSpecialHitUntil = Clock + 1.2f;
 		if (PlayerDummy) PlayerDummy->HitStop(0.1f);
 		CrowdReact(true, 1.f);
 		if (OppHP <= 0.f) { EndFight(true, false); return; }
@@ -2279,6 +2790,8 @@ void AKSGameMode::SpecialLand(const FVector& From, const FVector& To)
 	}
 	Attack.Type = EKSPunch::Uppercut; Attack.Side = EKSArm::Right;
 	PlayerHurt(D == EKSDefense::Block ? OppSpecialDamage * 0.5f : OppSpecialDamage, D == EKSDefense::Block);
+	RingPush(true, D == EKSDefense::Block ? 150.f : 320.f);
+	if (D != EKSDefense::Block) PlayerSpecialHitUntil = Clock + 1.2f;
 	if (PlayerHP > 0.f) OppIdle(1.0f + Rest);
 }
 
@@ -2363,6 +2876,8 @@ void AKSGameMode::ResolveStrike()
 		Sfx(EKSSfx::Blocked); Popup(TEXT("BLOCKED"), KSColors::Lilac, 0.38f, 0.45f);
 		OppStaggerUntil = Clock + 0.8f;
 		if (OppDummy) { OppDummy->Knock(26.f); OppDummy->Flash(FLinearColor::White, 0.06f); }
+		RingPush(false, 130.f); RingPush(true, 25.f);      // he bounces off the guard; the guard gives a little
+		GuardRing(PlayerDummy);
 		CamPunch(FVector(45.f, 0.f, 0.f), FMath::RandBool() ? 7.f : -7.f, -2.f);
 		Shake = FMath::Max(Shake, 3.f);
 		OpenUp(1.0f);
@@ -2400,6 +2915,8 @@ void AKSGameMode::PlayerHurt(float Damage, bool bLight)
 	if (PlayerHP > 0.f) { if (FMath::FRand() < 0.6f) Speak(OppDummy, TEXT("hit")); else if (FMath::FRand() < 0.5f) Speak(PlayerDummy, TEXT("hurt")); }
 	CrowdReact(false, bLight ? 0.4f : 0.8f);
 	if (PlayerDummy) { PlayerDummy->Flash(KSColors::Red, 0.12f); PlayerDummy->TakeHit(Attack.Type, Attack.Side, bLight ? 0.5f : 1.f); PlayerDummy->HitStop(0.08f); }
+	RingPush(true, bLight ? 45.f : 100.f);      // driven back a step; the opponent comes after him
+	HitSpark(PlayerDummy, KSColors::Red, bLight ? 0.3f : 0.5f);
 	if (OppDummy) OppDummy->HitStop(0.08f);
 	if (bHitShots) QueueHitShots(TEXT("taken"));
 	if (PlayerHP <= 0.f) EndFight(false, false);
@@ -2432,6 +2949,8 @@ void AKSGameMode::LandHit(const FPendingHit& Hit)
 	{
 		OppGuardUntil = Clock + 0.22f;
 		if (OppDummy) OppDummy->Knock(5.f);   // a blocked punch still nudges him
+		RingPush(false, 35.f);
+		GuardRing(OppDummy);
 		Sfx(EKSSfx::Blocked);
 		Popup(TEXT("BLOCKED"), KSColors::Muted, 0.56f, 0.34f);
 		return;
@@ -2452,6 +2971,8 @@ void AKSGameMode::LandHit(const FPendingHit& Hit)
 	CamPunch(FVector(Hit.bCounter ? 150.f : 85.f, Hit.Arm == EKSArm::Left ? 45.f : -45.f, 0.f), (Hit.Arm == EKSArm::Left ? -1.f : 1.f) * (Hit.bCounter ? 26.f : 10.f), Hit.bCounter ? -7.f : -3.5f);
 	if (OppDummy) { OppDummy->Flash(Hit.bCounter ? KSColors::Yellow : FLinearColor::White, 0.08f); OppDummy->TakeHit(Hit.Type, Hit.Arm, Hit.bCounter ? 1.5f : 0.9f); OppDummy->HitStop(0.07f); }
 	if (PlayerDummy) PlayerDummy->HitStop(0.07f);
+	RingPush(false, Hit.bCounter ? 170.f : 90.f);      // each punch drives him back and the player's fighter follows in
+	HitSpark(OppDummy, Hit.bCounter ? KSColors::Yellow : FLinearColor(1.f, 0.85f, 0.5f), Hit.bCounter ? 0.8f : 0.4f, Hit.bCounter);
 	if (bHitShots) QueueHitShots(TEXT("landed"));
 	Shake = FMath::Max(Shake, Hit.bCounter ? 7.f : 4.f);
 	CrowdReact(true, Hit.bCounter ? 1.f : FMath::Min(1.f, 0.35f + 0.2f * Combo));
@@ -2464,6 +2985,9 @@ void AKSGameMode::LandHit(const FPendingHit& Hit)
 void AKSGameMode::EndFight(bool bWin, bool bDecision)
 {
 	bLastResultWin = bWin; bLastResultDecision = bDecision;
+	// The winner's celebration is a dance: on the floor, and where he stands (one that wandered off was partly out of
+	// the picture in 25 of 284 frames, and walks through the loser and the ropes).
+	if (AKSDummy* Winner = bWin ? PlayerDummy.Get() : OppDummy.Get()) { Winner->KeepOnFloor(true); Winner->StayOnSpot(Winner->BodyMiddle()); }
 	bSpecialOn = false;
 	// One line per bout for tools/check.sh. "travel" is how far the drawn hand moved: near zero means a frozen body.
 	UE_LOG(LogTemp, Display, TEXT("KSTEST bout=%d opponent=%s result=%s opp_hand_travel=%.0f player_hand_travel=%.0f landed=%d taken=%d spectators=%d"), FighterIndex, Fighter().Name,
@@ -2486,8 +3010,10 @@ void AKSGameMode::EndFight(bool bWin, bool bDecision)
 	CrowdReact(bWin, 1.f);
 	if (bWin && !bDecision) ConfettiBurst();
 	if (!bDecision) { Sfx(bWin ? EKSSfx::Roar : EKSSfx::Boo, 0.6f); NextCrowdVoiceAt = GetWorld()->GetTimeSeconds() + 3.f; }
-	UE_LOG(LogTemp, Display, TEXT("KSTEST camera bout=%d shots=%d span=%d travel=%d frames=%d opp_lost=%d opp_hidden=%d"), FighterIndex, OpShots, FMath::RoundToInt(FMath::Max(0.f, OpMaxAngle - OpMinAngle)), FMath::RoundToInt(OpTravel), OpFrames, OpLost, OpHidden);
-	OpShots = OpFrames = OpLost = OpHidden = 0; OpTravel = 0.f; OpMinAngle = 1000.f; OpMaxAngle = -1000.f;
+	UE_LOG(LogTemp, Display, TEXT("KSTEST ring bout=%d steps=%d travel=%d max_off=%d min_gap=%d max_gap=%d max_turn=%d"), FighterIndex, RingSteps, FMath::RoundToInt(RingTravel), FMath::RoundToInt(RingMaxOff),
+		FMath::RoundToInt(RingMinGap), FMath::RoundToInt(RingMaxGap), FMath::RoundToInt(RingMaxTurn));
+	UE_LOG(LogTemp, Display, TEXT("KSTEST camera bout=%d shots=%d span=%d travel=%d frames=%d opp_lost=%d opp_hidden=%d player_x=%d either_lost=%d turned_back=%d"), FighterIndex, OpShots, FMath::RoundToInt(FMath::Max(0.f, OpMaxAngle - OpMinAngle)), FMath::RoundToInt(OpTravel), OpFrames, OpLost, OpHidden, OpFrames ? FMath::RoundToInt(OpPlayerX / OpFrames) : 0, OpEitherLost, OpSaved);
+	OpShots = OpFrames = OpLost = OpHidden = OpEitherLost = OpSaved = 0; OpPlayerX = 0.0; OpTravel = 0.f; OpMinAngle = 1000.f; OpMaxAngle = -1000.f;
 	UE_LOG(LogTemp, Display, TEXT("KSTEST crowd bout=%d moves=%d poses=%d"), FighterIndex, FMath::CountBits((uint32)CrowdMovesSeen), FMath::CountBits((uint32)CrowdPosesSeen));
 	CrowdMovesSeen = CrowdPosesSeen = 0;
 	if (bDecision) { Sfx(EKSSfx::Bell2); Announce(TEXT("TIME!"), 1.8f); }
@@ -2515,15 +3041,24 @@ void AKSGameMode::TickFight(float Dt)
 				FramePunches.Add({ FMath::RandBool() ? EKSArm::Left : EKSArm::Right, (EKSPunch)FMath::RandRange(0, 2) });
 			}
 		}
-		if (bSpecialOn) TickSpecial(Dt);
+		if (bVfxTour) TickVfxTour();
+		else if (bSpecialOn) TickSpecial(Dt);
 		else
 		{
 			for (const TPair<EKSArm, EKSPunch>& Punch : FramePunches) PlayerPunch(Punch.Key, Punch.Value);
 			if (Phase == EKSPhase::Fight) OppAI();
 			// The meters. The opponent's creeps up by itself too, so every bout sees his special at least once.
 			OppMeter = FMath::Min(1.f, OppMeter + Dt * 0.012f);
+			if (bTestSpecials)
+			{
+				// The player's special two seconds in, the opponent's three seconds after that is over, then out.
+				if (SpecialsStarted == 0 && PhaseTime > 2.f) PlayerMeter = 1.f;
+				else if (SpecialsStarted == 1 && Clock > SpecialEnd + 3.f) { OppMeter = 1.f; if (OppState != EKSOppState::Idle) OppIdle(0.1f); }
+				else if (SpecialsStarted >= 2 && Clock > SpecialEnd + 3.f && PC) { bTestSpecials = false; PC->ConsoleCommand(TEXT("quit")); }
+				PlayerHP = 100.f; OppHP = OppMaxHP;
+			}
 			if (PlayerMeter >= 1.f && !bMeterFullSaid) { bMeterFullSaid = true; Sfx(EKSSfx::Score, 0.7f); }
-			if (Phase == EKSPhase::Fight && PlayerMeter >= 1.f && (Pressed(EKeys::S) || bShoutNow || (bAuto && !bGiveUp))) StartSpecial(true);
+			if (Phase == EKSPhase::Fight && PlayerMeter >= 1.f && (Pressed(EKeys::S) || bShoutNow || bTestSpecials || (bAuto && !bGiveUp))) StartSpecial(true);
 			else if (Phase == EKSPhase::Fight && OppMeter >= 1.f && OppState == EKSOppState::Idle && PhaseTime > 4.f) StartSpecial(false);
 		}
 		for (int32 i = Pending.Num() - 1; i >= 0 && Phase == EKSPhase::Fight; i--)

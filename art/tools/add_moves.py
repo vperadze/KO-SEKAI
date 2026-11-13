@@ -8,7 +8,8 @@ a special-ability move, a win celebration, and a stagger for an attacker whose p
 
 A clip is bought once, on Turbotron's rig, and kept in art/models/_moves/<action id>/. Every Meshy rig has the same
 26 bones, so art/tools/transplant_anim.py copies it onto each fighter (rotations only: proportions stay the fighter's).
-Writes art/models/<fighter>/extra/extra.glb with the clips named by key (Fun_A, Fun_B, Picked, Special, Win, Stagger);
+Writes art/models/<fighter>/extra/extra.glb with the clips named by key (Fun_A, Fun_B, Picked, Special, Win, Stagger,
+Shocked, Blown);
 art/tools/import_moves.py brings them into the game (headless), and KSDummy.cpp loads them by those names.
 """
 import json, os, struct, subprocess, sys
@@ -21,6 +22,8 @@ COST = 3
 
 # Meshy library action ids (meshy animation-catalog list). The names are Meshy's.
 STAGGER = 404                                         # Crouch and Step Back
+# Hit by a special ability (AKSGameMode::SpecialHitClip): jolted rigid by anything electric, thrown back by the rest.
+SHOCKED, BLOWN = 172, 178                             # Electrocution Reaction, Hit Reaction
 MOVES = {
     'sergeant-mullet-v2':   {'Fun_A': 385, 'Fun_B': 388, 'Picked': 51,  'Special': 127, 'Win': 403},   # Boxing Warm-up, Show Both Arm Muscles, Shouting Angrily, Charged Ground Slam, Victory Fist Pump
     'channel-zero':         {'Fun_A': 36,  'Fun_B': 79,  'Picked': 408, 'Special': 125, 'Win': 74},    # Confused Scratch, OMG Groove, Jazz Hands, Charged Spell Cast, Gangnam Groove
@@ -30,7 +33,7 @@ MOVES = {
     'turbotron':            {'Fun_A': 22,  'Fun_B': 73,  'Picked': 387, 'Special': 398, 'Win': 395},   # Funny Dancing 1, Fast Lightning, Half Squat with Thumb Up, Crouch Charge and Throw, Breakdance 1990
     'count-hairspray':      {'Fun_A': 48,  'Fun_B': 595, 'Picked': 411, 'Special': 130, 'Win': 592},   # Mirror Viewing, Jazz Dance, Neck Slashing Gesture, Mage Spell Cast 1, Hip Hop Dance 1
 }
-for table in MOVES.values(): table['Stagger'] = STAGGER
+for table in MOVES.values(): table.update(Stagger=STAGGER, Shocked=SHOCKED, Blown=BLOWN)
 
 
 def clip_path(action): return os.path.join(STORE, str(action), 'animation_glb.glb')

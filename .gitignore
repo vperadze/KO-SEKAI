@@ -36,3 +36,16 @@ art/arena/raw/
 art/arena/real_*.jpg
 art/arena/*.log
 art/ui/raw/av_*
+
+# Effect packs from Fab (docs/VFX.md lists them and where each is used). They are other people's assets under Fab's
+# licence, which does not allow handing them on in a public repository: everyone who builds the game adds them to
+# the project from his own Fab library (the editor's Fab window, "Add to Project"). Without them the game runs and
+# the special abilities and hit marks have no particle effects (tools/check.sh says which are missing).
+unreal/Content/MixedVFX/
+unreal/Content/FreeStylizedLaserBeamVFX/
+unreal/Content/PotaVFX_Smoke/
+unreal/Content/Vefects/
+unreal/Content/NiagaraExamples/
+
+# Made by the editor when it found the .ttf files beside them; the game reads the .ttf files themselves (docs/LESSONS.md).
+unreal/Content/KS/UI/Fonts/*.uasset

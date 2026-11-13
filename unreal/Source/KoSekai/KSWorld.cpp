@@ -102,9 +102,10 @@ ASpotLight* FKSBuilder::Spot(const FVector& Pos, const FVector& Aim, const FLine
 	return Actor;
 }
 
-UMaterialInstanceDynamic* FKSBuilder::Beam(const FLinearColor& Color, float Glow)
+UMaterialInstanceDynamic* FKSBuilder::Beam(const FLinearColor& Color, float Glow, UStaticMesh* Shape)
 {
-	static UStaticMesh* Cone = Keep(LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cone.Cone")));
+	static UStaticMesh* EngineCone = Keep(LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cone.Cone")));
+	UStaticMesh* Cone = Shape ? Shape : EngineCone;
 	UMaterialInterface* Base = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/KS/Arena/M_KS_Beam.M_KS_Beam"));
 	if (!Cone || !Base) return nullptr;
 	AStaticMeshActor* Actor = World->SpawnActor<AStaticMeshActor>(FVector::ZeroVector, FRotator::ZeroRotator);
@@ -130,7 +131,61 @@ void KSWorld::AimBeam(UMaterialInstanceDynamic* Cone, const FVector& From, const
 	const FVector Dir = (Aim - From).GetSafeNormal();
 	Actor->SetActorTransform(FTransform(FRotationMatrix::MakeFromZ(-Dir).Rotator(), From + Dir * Length * 0.5f, FVector(Radius / 50.f, Radius / 50.f, Length / 100.f)));
 	Cone->SetVectorParameterValue(TEXT("Tip"), FLinearColor(From.X, From.Y, From.Z, 0.f));
+	// The material shades the beam from its own axis: bright down the middle, nothing at the edge (make_beam_material.py).
+	Cone->SetVectorParameterValue(TEXT("Axis"), FLinearColor(Dir.X, Dir.Y, Dir.Z, 0.f));
 	Cone->SetScalarParameterValue(TEXT("Length"), Length);
+}
+
+// How a Meshy model has to be turned to stand the way Prop() promises: its depth along X with its front towards -X,
+// its width along Y. Meshy models face the viewer of their thumbnail, which Unreal's import makes +Y: a quarter turn
+// for all of them. The stage lamp is not stood but aimed: its lens has to look along +X.
+static FQuat PropFix(const TCHAR* Name)
+{
+	return FRotator(0.f, FCString::Stricmp(Name, TEXT("Lamp")) ? 90.f : -90.f, 0.f).Quaternion();
+}
+
+static UStaticMesh* PropMesh(const TCHAR* Name)
+{
+	return LoadObject<UStaticMesh>(nullptr, *FString::Printf(TEXT("/Game/KS/Props/%s/SM_%s.SM_%s"), Name, Name, Name), nullptr, LOAD_NoWarn | LOAD_Quiet);
+}
+
+AActor* FKSBuilder::Prop(const TCHAR* Name, const FVector& Base, const FVector& Size, float Yaw)
+{
+	UStaticMesh* Mesh = PropMesh(Name);
+	if (!Mesh) { PropsMissing++; return nullptr; }
+	const FQuat Fix = PropFix(Name);
+	const FBox Turned = Mesh->GetBoundingBox().TransformBy(FTransform(Fix));
+	const FVector Extent = Turned.GetSize().ComponentMax(FVector(1.f));
+	float Follow = BIG_NUMBER;
+	for (int32 i = 0; i < 3; i++) if (Size[i] > 0.f) Follow = FMath::Min(Follow, (float)(Size[i] / Extent[i]));
+	if (Follow == BIG_NUMBER) Follow = 1.f;
+	FVector Scale;
+	for (int32 i = 0; i < 3; i++) Scale[i] = Size[i] > 0.f ? Size[i] / Extent[i] : Follow;
+	const FQuat Turn = FRotator(0.f, Yaw, 0.f).Quaternion();
+	const FVector Foot(Turned.GetCenter().X, Turned.GetCenter().Y, Turned.Min.Z);
+	AStaticMeshActor* Actor = World->SpawnActor<AStaticMeshActor>(Base - Turn.RotateVector(Foot * Scale), (Turn * Fix).Rotator());
+	if (!Actor) return nullptr;
+	UStaticMeshComponent* Comp = Actor->GetStaticMeshComponent();
+	Comp->SetMobility(EComponentMobility::Movable);
+	Comp->SetStaticMesh(Mesh);
+	Comp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Comp->SetCastShadow(false);
+	// The scale is asked for in the turned frame and set in the model's own: the turns are quarter turns, so it is the same numbers in another order.
+	Actor->SetActorScale3D(Fix.UnrotateVector(Scale).GetAbs());
+	Out->Add(Actor);
+	Props++;
+	return Actor;
+}
+
+void KSWorld::AimLamp(const FKSArena::FBeam& Beam, const FVector& From, const FVector& Aim)
+{
+	const FVector Dir = (Aim - From).GetSafeNormal();
+	if (AActor* Body = Beam.Body.Get())
+	{
+		const FQuat Rot = Dir.ToOrientationQuat() * Beam.BodyFix;
+		Body->SetActorLocationAndRotation(From - Rot.RotateVector(Beam.BodyCentre), Rot);
+	}
+	if (AActor* Lens = Beam.Lens.Get()) Lens->SetActorLocation(From + Dir * Beam.LensOut);
 }
 
 ATextRenderActor* FKSBuilder::Text(const FVector& Pos, const FRotator& Rot, const FString& String, const FLinearColor& Color, float Size)
@@ -279,11 +334,14 @@ void KSWorld::BuildArena(FKSBuilder& B, FKSArena& Arena, const FKSArenaDef& Def)
 	{
 		const float A = i * 90.f, R = 330.f;
 		const FVector Corner(FMath::Cos(FMath::DegreesToRadians(A + 45)) * R * 1.414f, FMath::Sin(FMath::DegreesToRadians(A + 45)) * R * 1.414f, 0);
-		B.Shape(B.Cylinder, Corner + FVector(0, 0, 70), FVector(14, 14, 140), Yellow, 2.f);
+		// A steel corner post with its turnbuckles (Meshy), and a lit cap in the arena's colour.
+		if (B.Prop(TEXT("Post"), Corner, FVector(0, 0, 150), A + 45.f)) B.Shape(B.Sphere, Corner + FVector(0, 0, 153), FVector(17), Yellow, 6.f);
+		else B.Shape(B.Cylinder, Corner + FVector(0, 0, 70), FVector(14, 14, 140), Yellow, 2.f);
 		const FVector MidSide(FMath::Cos(FMath::DegreesToRadians(A)) * R, FMath::Sin(FMath::DegreesToRadians(A)) * R, 0);
 		for (float Z : { 55.f, 95.f, 130.f })
 		{
-			B.Box(MidSide + FVector(0, 0, Z), i % 2 ? FVector(2 * R, 3, 3) : FVector(3, 2 * R, 3), i % 2 ? Cyan : Magenta, 4.f);
+			if (UMaterialInstanceDynamic* Rope = B.Box(MidSide + FVector(0, 0, Z), i % 2 ? FVector(2 * R, 3, 3) : FVector(3, 2 * R, 3), i % 2 ? Cyan : Magenta, 4.f))
+				Arena.Ropes.Add(Cast<AActor>(Rope->GetOuter()));
 		}
 	}
 	// The ring canvas, and the stands full of people around the far side (both painted with Dreamina).
@@ -323,33 +381,107 @@ void KSWorld::BuildArena(FKSBuilder& B, FKSArena& Arena, const FKSArenaDef& Def)
 	Dry(B.Light(FVector(-420, 380, 260), Magenta, 900.f, 1500.f), 0.3f);
 	Dry(B.Light(FVector(700, 0, 300), Magenta, 1600.f, 1800.f), 0.3f);
 
-	// The stands: steps the crowd stands on (KSGameMode's SeatCrowd puts row N at height 40 N), each with a strip of
-	// neon along its edge, and a higher platform at the back for the giants.
+	// The stands (KSStands in KSWorld.h; AKSGameMode::SeatCrowd fills them): rows of stage risers (Meshy's Podium), each
+	// row a step higher than the one in front and with a strip of neon along its edge, a wide top platform at the back
+	// of each end and each side, a stepped block in every corner, and steel barriers between the front row and the ring.
+	using namespace KSStands;
 	const FLinearColor Step = bHall ? FLinearColor(0.022f, 0.014f, 0.045f) : FLinearColor(Def.Floor.R * 1.6f + 0.004f, Def.Floor.G * 1.6f + 0.004f, Def.Floor.B * 1.6f + 0.004f);
-	// Both ends alike (End +1 behind the opponent, -1 behind the player): the house goes all the way round the ring.
-	for (int32 End = -1; End <= 1; End += 2)
+	// The riser's deck is this far up the model; the rest is the mesh panel at its back, which becomes the rail in
+	// front of the next row's shins.
+	const float Deck = 0.375f;
+	// One step: the rectangle Lo..Hi with its top at Top. Yaw says where its back is (0: +X, 180: -X, 90: +Y, -90: -Y).
+	auto Tier = [&](FVector2D Lo, FVector2D Hi, float Top, float Yaw, const FLinearColor& Edge)
 	{
-		for (int32 Row = 1; Row <= 2; Row++)
+		const FVector2D Mid = (Lo + Hi) * 0.5f, Span = Hi - Lo;
+		if (Top > Rise + 1.f) B.Box(FVector(Mid.X, Mid.Y, (Top - Rise) * 0.5f), FVector(Span.X, Span.Y, Top - Rise), Step);
+		const bool bAlongY = FMath::Abs(FMath::Cos(FMath::DegreesToRadians(Yaw))) > 0.5f;      // the row runs along Y, its depth along X
+		const float Long = bAlongY ? Span.Y : Span.X, Deep = bAlongY ? Span.X : Span.Y;
+		const int32 Across = FMath::Max(1, FMath::RoundToInt(Long / 230.f)), Rows = FMath::Max(1, FMath::RoundToInt(Deep / 135.f));
+		bool bModel = true;
+		for (int32 r = 0; r < Rows && bModel; r++) for (int32 c = 0; c < Across && bModel; c++)
 		{
-			const float Half = 520.f + 70.f * Row, X = 465.f + 118.f * Row;
-			B.Box(FVector(End * (X + 59.f * (3 - Row) - 59.f), 0, 20.f * Row), FVector(118.f * (3 - Row), 2.f * Half, 40.f * Row), Step);
-			B.Box(FVector(End * (X - 59.f), 0, 40.f * Row), FVector(5, 2.f * Half, 5), Row % 2 ? Cyan : Magenta, 5.f);
+			const float U = (c + 0.5f) / Across - 0.5f, V = (r + 0.5f) / Rows - 0.5f;
+			const FVector Base(Mid.X + (bAlongY ? V * Span.X : U * Span.X), Mid.Y + (bAlongY ? U * Span.Y : V * Span.Y), Top - Rise);
+			bModel = B.Prop(TEXT("Podium"), Base, FVector(Deep / Rows, Long / Across, Rise / Deck), Yaw) != nullptr;
 		}
-		B.Box(FVector(End * 980.f, 0, 70), FVector(260, 1700, 140), Step);
-		B.Box(FVector(End * 850.f, 0, 140), FVector(5, 1700, 5), Yellow, 5.f);
-		// A stepped block in each corner, between the end stands and the side stands (SeatCrowd: height 60 + 30 per step back).
-		for (int32 Side = -1; Side <= 1; Side += 2) for (int32 Ring = 0; Ring < 3; Ring++)
+		if (!bModel) B.Box(FVector(Mid.X, Mid.Y, Top - Rise * 0.5f), FVector(Span.X, Span.Y, Rise), Step);
+		// The neon along the front edge.
+		const FVector2D Back(FMath::Cos(FMath::DegreesToRadians(Yaw)), FMath::Sin(FMath::DegreesToRadians(Yaw)));
+		B.Box(FVector(Mid.X - Back.X * Span.X * 0.5f, Mid.Y - Back.Y * Span.Y * 0.5f, Top + 1.f), bAlongY ? FVector(5, Span.Y, 5) : FVector(Span.X, 5, 5), Edge, 5.f);
+	};
+	// A run of crowd barriers from P to Q, their fronts towards the ring.
+	auto Fence = [&](FVector2D P, FVector2D Q, float Yaw)
+	{
+		const float Long = (Q - P).Size();
+		const int32 Count = FMath::Max(1, FMath::RoundToInt(Long / 125.f));
+		for (int32 c = 0; c < Count; c++)
 		{
-			const float Size = 104.f * (3 - Ring), Shift = 104.f * Ring + Size * 0.5f - 52.f;
-			B.Box(FVector(End * (500.f + Shift), Side * (655.f + Shift), 30.f + 15.f * Ring), FVector(Size, Size, 60.f + 30.f * Ring), Step);
+			const FVector2D At = FMath::Lerp(P, Q, (c + 0.5f) / Count);
+			B.Prop(TEXT("Barrier"), FVector(At.X, At.Y, 0), FVector(26, Long / Count, 62), Yaw);
+		}
+	};
+	const float E1 = EndFront + Depth * 0.5f, E2 = E1 + Depth, E3 = E2 + Depth, EBack = 1040.f;      // where each end's steps begin, and where the top platform ends
+	const float S1 = SideFront + Depth * 0.5f, S2 = S1 + Depth, SBack = 915.f;
+	const float EndHalf = 595.f, CornerFrom = 448.f, CornerSide = 603.f, Cell = 104.f;
+	for (int32 End = -1; End <= 1; End += 2)                 // +1 behind the opponent, -1 behind the player
+	{
+		const float Yaw = End > 0 ? 0.f : 180.f;
+		auto X = [End](float From, float To) { return FVector2D(End > 0 ? From : -To, End > 0 ? To : -From); };   // (lo, hi) of an X range on this end
+		// The near end is open in the middle: the wide shot that opens a bout looks along that aisle.
+		const float Halves[2][2] = { { -EndHalf, End > 0 ? EndHalf : -Aisle }, { Aisle, EndHalf } };
+		for (int32 Half = 0; Half < (End > 0 ? 1 : 2); Half++)
+		{
+			const float Y0 = Halves[Half][0], Y1 = Halves[Half][1], Wide = (Y1 > 0 ? SBack : Y1) , WideLo = (Y0 < 0 ? -SBack : Y0);
+			Tier(FVector2D(X(E1, E2).X, Y0), FVector2D(X(E1, E2).Y, Y1), Rise, Yaw, Cyan);
+			Tier(FVector2D(X(E2, E3).X, Y0), FVector2D(X(E2, E3).Y, Y1), 2.f * Rise, Yaw, Magenta);
+			Tier(FVector2D(X(E3, EBack).X, End > 0 ? -SBack : WideLo), FVector2D(X(E3, EBack).Y, End > 0 ? SBack : Wide), 3.f * Rise, Yaw, Yellow);
+			Fence(FVector2D(End * 436.f, FMath::Max(Y0, -480.f)), FVector2D(End * 436.f, FMath::Min(Y1, 480.f)), Yaw);
+		}
+		for (int32 Side = -1; Side <= 1; Side += 2)
+		{
+			// A stepped block in each corner, rising towards the corner of the hall.
+			for (int32 i = 0; i < 3; i++) for (int32 k = 0; k < 3; k++)
+			{
+				const FVector2D C(End * (CornerFrom + Cell * (i + 0.5f)), Side * (CornerSide + Cell * (k + 0.5f)));
+				Tier(C - FVector2D(Cell * 0.5f), C + FVector2D(Cell * 0.5f), Corner(i, k), Yaw, (i + k) % 2 ? Cyan : Magenta);
+			}
+			// A round podium on each back corner of the top platform: the biggest of the crowd stand on them.
+			B.Prop(TEXT("Tower"), FVector(End * TowerX, Side * TowerY, 3.f * Rise), FVector(230, 230, TowerTop), Yaw);
+			B.Shape(B.Cylinder, FVector(End * TowerX, Side * TowerY, 3.f * Rise + TowerTop + 1.f), FVector(150, 150, 2), Yellow, 3.f);
 		}
 	}
 	for (int32 Side = -1; Side <= 1; Side += 2)
 	{
-		B.Box(FVector(35, Side * 588.f, 20), FVector(820, 118, 40), Step);
-		B.Box(FVector(35, Side * 529.f, 40), FVector(820, 5, 5), Cyan, 5.f);
-		B.Box(FVector(35, Side * 850.f, 50), FVector(820, 240, 100), Step);
-		B.Box(FVector(35, Side * 730.f, 100), FVector(820, 5, 5), Yellow, 5.f);
+		const float Yaw = Side * 90.f;
+		auto Y = [Side](float From, float To) { return FVector2D(Side > 0 ? From : -To, Side > 0 ? To : -From); };
+		Tier(FVector2D(-375.f, Y(S1, S2).X), FVector2D(445.f, Y(S1, S2).Y), Rise, Yaw, Cyan);
+		Tier(FVector2D(-375.f, Y(S2, SBack).X), FVector2D(445.f, Y(S2, SBack).Y), 2.f * Rise, Yaw, Yellow);
+		Fence(FVector2D(-375.f, Side * 441.f), FVector2D(445.f, Side * 441.f), Yaw);
+	}
+	// Loudspeaker towers at the back of the near end, and in the plain hall at the far end too, where the other
+	// arenas have their landmark.
+	for (float Y : { -830.f, 830.f })
+	{
+		B.Prop(TEXT("Speakers"), FVector(-1130.f, Y, 0), FVector(0, 0, 640), 180.f);
+		if (bHall) B.Prop(TEXT("Speakers"), FVector(1230.f, Y * 0.84f, 0), FVector(0, 0, 780), 0.f);
+	}
+	// The place's landmark (Meshy, one model per arena, named like the arena): a pair behind the far stands, or one
+	// in the middle, tall enough to stand over the giants' heads, and lit from the front.
+	static const struct { const TCHAR* Key; float Height; bool bPair; } Landmarks[] = {
+		{ TEXT("Space"), 980.f, true }, { TEXT("Beach"), 660.f, true }, { TEXT("Bar"), 640.f, true }, { TEXT("Rooftop"), 900.f, true },
+		{ TEXT("Dojo"), 860.f, false }, { TEXT("Castle"), 900.f, true }, { TEXT("Gym"), 580.f, true }, { TEXT("Scrapyard"), 820.f, true },
+		{ TEXT("Volcano"), 860.f, true }, { TEXT("Studio"), 620.f, true } };
+	for (const auto& L : Landmarks)
+	{
+		if (FCString::Stricmp(L.Key, Def.Key)) continue;
+		for (float Y : { -690.f, 690.f })
+		{
+			const FVector At(L.bPair ? 1230.f : 1300.f, L.bPair ? Y : 0.f, 0.f);
+			if (!B.Prop(L.Key, At, FVector(0, 0, L.Height), L.bPair ? (Y > 0 ? 25.f : -25.f) : 0.f)) break;
+			if (APointLight* Lit = B.Light(At + FVector(-330.f, L.bPair ? -Y * 0.25f : 0.f, L.Height * 0.55f), FLinearColor(1.f, 0.93f, 0.85f), 1300.f, 1100.f))
+				Lit->PointLightComponent->SetVolumetricScatteringIntensity(0.05f);
+			if (!L.bPair) break;
+		}
 	}
 	// Soft house lights low over the stands, so the steps and the shadows at the crowd's feet can be seen.
 	Dry(B.Light(FVector(620, -380, 330), FLinearColor(0.55f, 0.45f, 1.f), 420.f, 1100.f), 0.15f);
@@ -359,44 +491,82 @@ void KSWorld::BuildArena(FKSBuilder& B, FKSArena& Arena, const FKSArenaDef& Def)
 	Dry(B.Light(FVector(-620, -420, 330), FLinearColor(1.f, 0.45f, 0.8f), 420.f, 1100.f), 0.15f);
 	Dry(B.Light(FVector(-620, 420, 330), FLinearColor(0.55f, 0.45f, 1.f), 420.f, 1100.f), 0.15f);
 
-	// The lighting rig: a square truss over the ring with lamp heads, and stage lamps on it that sweep the stands.
+	// The lighting rig: four truss gantries (Meshy's kit) standing round the ring and meeting at its corners, lamps hung
+	// under their beams, a scoreboard cube in the middle, and a wider gantry across the far end behind the stands that
+	// carries the two big white lamps.
 	const float RigZ = 640.f, RigHalf = 430.f;
 	const FLinearColor Metal(0.02f, 0.02f, 0.03f);
 	for (int32 i = 0; i < 4; i++)
 	{
 		const float A = FMath::DegreesToRadians(i * 90.f);
-		const FVector Mid(FMath::Cos(A) * RigHalf + 60.f, FMath::Sin(A) * RigHalf, RigZ);
-		B.Box(Mid, i % 2 ? FVector(2 * RigHalf + 24, 24, 24) : FVector(24, 2 * RigHalf + 24, 24), Metal);
-		B.Box(Mid + FVector(0, 0, 400), FVector(6, 6, 800), Metal);                     // what it hangs from
+		const FVector Mid(FMath::Cos(A) * RigHalf + 60.f, FMath::Sin(A) * RigHalf, 0.f);
+		if (!B.Prop(TEXT("Truss"), Mid, FVector(46, 2 * RigHalf + 46, RigZ + 24), i * 90.f))
+		{
+			B.Box(Mid + FVector(0, 0, RigZ), i % 2 ? FVector(2 * RigHalf + 24, 24, 24) : FVector(24, 2 * RigHalf + 24, 24), Metal);
+			B.Box(Mid + FVector(0, 0, RigZ + 400), FVector(6, 6, 800), Metal);
+		}
+	}
+	const float FarX = 1085.f, FarZ = 790.f;
+	if (!B.Prop(TEXT("Truss"), FVector(FarX, 0, 0), FVector(60, 1640, FarZ + 30), 0.f)) B.Box(FVector(FarX, 0, FarZ), FVector(24, 1640, 24), Metal);
+	if (B.Prop(TEXT("Scoreboard"), FVector(60, 0, 700), FVector(0, 0, 250), 45.f))
+	{
+		B.Box(FVector(60, 0, 950 + 300), FVector(8, 8, 600), Metal);
+		// Lit from below by the ring, and by a lamp of its own so that its screens are not black on black.
+		Dry(B.Light(FVector(60, 0, 640), Yellow, 700.f, 500.f), 0.02f);
 	}
 	const FLinearColor White(1.f, 0.95f, 0.9f);
 	const struct { FVector Pos, Aim; FLinearColor Color; float Candelas; } Lamps[] = {
-		{ FVector(60 + RigHalf, -300, RigZ - 20), FVector(700, -520, 120), Cyan,    9000.f },
-		{ FVector(60 + RigHalf, -100, RigZ - 20), FVector(820, -150, 150), Magenta, 9000.f },
-		{ FVector(60 + RigHalf,  100, RigZ - 20), FVector(820,  150, 150), Yellow,  8000.f },
-		{ FVector(60 + RigHalf,  300, RigZ - 20), FVector(700,  520, 120), Cyan,    9000.f },
-		{ FVector(100, -RigHalf, RigZ - 20),      FVector(120, -700, 100), Magenta, 8000.f },
-		{ FVector(100,  RigHalf, RigZ - 20),      FVector(120,  700, 100), Cyan,    8000.f },
+		{ FVector(60 + RigHalf, -300, RigZ - 52), FVector(700, -520, 120), Cyan,    9000.f },
+		{ FVector(60 + RigHalf, -100, RigZ - 52), FVector(820, -150, 150), Magenta, 9000.f },
+		{ FVector(60 + RigHalf,  100, RigZ - 52), FVector(820,  150, 150), Yellow,  8000.f },
+		{ FVector(60 + RigHalf,  300, RigZ - 52), FVector(700,  520, 120), Cyan,    9000.f },
+		{ FVector(100, -RigHalf, RigZ - 52),      FVector(120, -700, 100), Magenta, 8000.f },
+		{ FVector(100,  RigHalf, RigZ - 52),      FVector(120,  700, 100), Cyan,    8000.f },
 		// Two from high behind the stands, shining over the crowd's heads towards the ring: the shafts the crowd is seen against.
-		{ FVector(1350, -520, 760),               FVector(250, -120, 60),  White,   11000.f },
-		{ FVector(1350,  520, 760),               FVector(250,  120, 60),  White,   11000.f },
+		{ FVector(FarX - 10, -520, FarZ - 50),    FVector(250, -120, 60),  White,   11000.f },
+		{ FVector(FarX - 10,  520, FarZ - 50),    FVector(250,  120, 60),  White,   11000.f },
 		// Six on the floor between the ropes and the front row, pointing up and out over the crowd: these are the
 		// beams the fight camera sees, crossing in front of the stands.
-		{ FVector(415, -340, 12),                 FVector(700, -520, 900), Magenta, 3000.f },
-		{ FVector(415, -115, 12),                 FVector(720, -170, 900), Cyan,    3000.f },
-		{ FVector(415,  115, 12),                 FVector(720,  170, 900), Yellow,  3000.f },
-		{ FVector(415,  340, 12),                 FVector(700,  520, 900), Magenta, 3000.f },
-		{ FVector(160, -415, 12),                 FVector(200, -720, 900), Cyan,    3000.f },
-		{ FVector(160,  415, 12),                 FVector(200,  720, 900), Yellow,  3000.f },
+		{ FVector(408, -340, 50),                 FVector(700, -520, 900), Magenta, 3000.f },
+		{ FVector(408, -115, 50),                 FVector(720, -170, 900), Cyan,    3000.f },
+		{ FVector(408,  115, 50),                 FVector(720,  170, 900), Yellow,  3000.f },
+		{ FVector(408,  340, 50),                 FVector(700,  520, 900), Magenta, 3000.f },
+		{ FVector(160, -408, 50),                 FVector(200, -720, 900), Cyan,    3000.f },
+		{ FVector(160,  408, 50),                 FVector(200,  720, 900), Yellow,  3000.f },
 	};
 	for (const auto& L : Lamps)
 	{
-		B.Shape(B.Cylinder, L.Pos, FVector(34, 34, 40), Metal, 0.f, (L.Aim - L.Pos).Rotation() + FRotator(90, 0, 0));
-		B.Shape(B.Sphere, L.Pos + (L.Aim - L.Pos).GetSafeNormal() * 22.f, FVector(26), L.Color, 30.f);      // the glowing lens
+		const bool bFloor = L.Pos.Z < 100.f;                                          // the up-lights at ringside
 		// The lamp itself is weak on surfaces and only tints the haze; the beam you see is the glowing cone.
 		FKSArena::FBeam Beam; Beam.Lamp = B.Spot(L.Pos, L.Aim, L.Color, L.Candelas, 10.f, 2600.f, 25.f);
 		Beam.Aim = L.Aim; Beam.Candelas = L.Candelas;
-		const bool bFloor = L.Pos.Z < 100.f;                                          // the up-lights at ringside
+		// The housing (Meshy): a moving head standing on the floor, whose glowing lens alone follows the beam, or a
+		// stage lamp hung under the truss that turns with it. Without the models: the old tin can.
+		UStaticMesh* Can = bFloor ? nullptr : PropMesh(TEXT("Lamp"));
+		if (bFloor && B.Prop(TEXT("MovingHead"), FVector(L.Pos.X, L.Pos.Y, 0), FVector(0, 0, 58), (L.Aim - L.Pos).Rotation().Yaw)) Beam.LensOut = 4.f;
+		else if (Can)
+		{
+			const FBox Box = Can->GetBoundingBox();
+			const float Scale = 62.f / FMath::Max(1.f, (float)Box.GetSize().GetMax());
+			if (AStaticMeshActor* Body = B.World->SpawnActor<AStaticMeshActor>(L.Pos, FRotator::ZeroRotator))
+			{
+				Body->GetStaticMeshComponent()->SetMobility(EComponentMobility::Movable);
+				Body->GetStaticMeshComponent()->SetStaticMesh(Can);
+				Body->GetStaticMeshComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+				Body->GetStaticMeshComponent()->SetCastShadow(false);
+				Body->SetActorScale3D(FVector(Scale));
+				B.Out->Add(Body); B.Props++;
+				Beam.Body = Body; Beam.BodyFix = PropFix(TEXT("Lamp")); Beam.BodyCentre = Box.GetCenter() * Scale; Beam.LensOut = 16.f;
+			}
+		}
+		else
+		{
+			if (!bFloor) B.PropsMissing++;
+			B.Shape(B.Cylinder, L.Pos, FVector(34, 34, 40), Metal, 0.f, (L.Aim - L.Pos).Rotation() + FRotator(90, 0, 0));
+			Beam.LensOut = 22.f;
+		}
+		if (UMaterialInstanceDynamic* Lens = B.Shape(B.Sphere, L.Pos, FVector(Beam.Body.IsValid() ? 20.f : 26.f), L.Color, 30.f)) Beam.Lens = Cast<AActor>(Lens->GetOuter());      // the glowing lens
+		KSWorld::AimLamp(Beam, L.Pos, L.Aim);
 		Beam.Length = bFloor ? 950.f : (L.Aim - L.Pos).Size() * 1.05f; Beam.Radius = Beam.Length * (bFloor ? 0.09f : 0.07f); Beam.Glow = bFloor ? 1.1f : 0.4f;
 		Beam.Cone = B.Beam(L.Color, Beam.Glow);
 		KSWorld::AimBeam(Beam.Cone, L.Pos, L.Aim, Beam.Length, Beam.Radius);
@@ -407,8 +577,12 @@ void KSWorld::BuildArena(FKSBuilder& B, FKSArena& Arena, const FKSArenaDef& Def)
 	B.Box(Arena.LaserFrom, FVector(40, 70, 26), Metal);
 	for (int32 i = 0; i < 8; i++)
 	{
-		UMaterialInstanceDynamic* MID = B.Box(Arena.LaserFrom, FVector(FKSArena::LaserLength, 3.2f, 3.2f), i % 3 == 0 ? Green : i % 3 == 1 ? Magenta : Cyan, 14.f);
-		Arena.Lasers.Add(MID ? Cast<AActor>(MID->GetOuter()) : nullptr);
+		// A laser is the same glowing air as a lamp's beam, on a thin box: soft-edged, shimmering in the haze. (They were
+		// solid glowing rods.) AKSGameMode::TickArenaFx turns them and tells the material where they point.
+		UMaterialInstanceDynamic* MID = B.Beam(i % 3 == 0 ? Green : i % 3 == 1 ? Magenta : Cyan, 9.f, B.Cube);
+		AActor* Rod = MID ? Cast<AActor>(MID->GetOuter()) : nullptr;
+		if (Rod) { Rod->SetActorScale3D(FVector(FKSArena::LaserLength, 5.f, 5.f) / 100.f); MID->SetScalarParameterValue(TEXT("Length"), FKSArena::LaserLength * 1.6f); MID->SetScalarParameterValue(TEXT("Soft"), 1.f); MID->SetScalarParameterValue(TEXT("Haze"), 0.7f); }
+		Arena.Lasers.Add(Rod);
 	}
 
 	Arena.NameSign = B.Text(FVector(1100, 0, 520), FRotator(0, 180, 0), TEXT(""), Yellow, 150.f);
@@ -417,6 +591,7 @@ void KSWorld::BuildArena(FKSBuilder& B, FKSArena& Arena, const FKSArenaDef& Def)
 	if (Def.Pulse == EKSPulse::Lightning) Arena.PulseLights.Add(B.Light(FVector(900, 0, 1000), FLinearColor(0.75f, 0.85f, 1.f), 0.f, 4200.f));
 	if (Def.Pulse == EKSPulse::Lava) for (float Y : { -520.f, 520.f }) Arena.PulseLights.Add(B.Light(FVector(1050, Y, 80), Def.B, 3000.f, 1600.f));
 
+	Arena.Props = B.Props; Arena.PropsMissing = B.PropsMissing;
 	// The rest of the cut roster watches from outside the ring.
 	for (int32 i = 0; i < 9; i++)
 	{

@@ -9,6 +9,8 @@
 #include "KSAudio.h"
 #include "KSCrowdData.h"
 #include "KSMic.h"
+#include "KSVfx.h"
+#include "KSGesture.h"
 #include "KSGameMode.generated.h"
 
 class AKSDummy;
@@ -85,6 +87,12 @@ public:
 	// Choosing a fighter (after FIGHT on the menu): the one looked at stands in the hall, the seven portraits run along the bottom.
 	int32 SelectIndex = 0;
 	float SelectMovedAt = -10.f, SelectChosenAt = -1.f;   // game clock; SelectChosenAt < 0 until the player has chosen
+	bool bSelectTour = false;                 // -KSSelectTour: show every fighter's dance and "picked" move in turn, then quit (the framing check)
+	float SelectShownAt = 0.f, SelectTourUntil = 0.f, SelectWorst = 0.f;
+	int32 SelectTourStep = 0, SelectFrames = 0, SelectOut = 0;
+	FBox SelectSpace = FBox(ForceInit);       // the room the fighter on show has needed lately; the select camera frames this, not the fighter
+	void LogSelectFrame();                    // one line per fighter shown, for tools/check.sh
+	int32 CelebFrames = 0, CelebOut = 0;      // after the bell: frames, and frames with part of the winner outside the picture
 	bool bPortraits = false;                  // -KSPortraits: photographs every fighter's head for the portraits and quits
 	int32 MenuIndex = 0;                      // the chosen line of the start menu: fight, camera calibration, watch the intro, quit
 	bool bSpokenByOpp = false;                // who the speech bubble belongs to
@@ -149,6 +157,25 @@ private:
 	EKSDefense Defense() const;
 	bool Stance(EKSDefense D) const;
 
+	/* ---- where the fighters stand (TickRing) ----
+	   The fighters are not nailed to two marks: each has a place and a facing in the ring. They face each other and
+	   keep fighting distance; a dodge that is let go of is a step, a hit drives the one hit back and the other follows
+	   in, a special that carries its fighter across the ring leaves him there. Everything written for "the player at
+	   0,0 and the opponent 150 in front of him" (the fight camera above all) stays in that home frame and is carried
+	   into the world by RingToWorld, which follows the pair smoothly. */
+	struct FStand { FVector2D At = FVector2D::ZeroVector, Vel = FVector2D::ZeroVector; float Yaw = 0.f, HeldUntil = 0.f; };
+	FStand PlayerStand, OppStand;
+	FVector2D RingMid = FVector2D::ZeroVector;      // the middle of the pair as the camera sees it (eased)
+	float RingYaw = 0.f;                            // the way from the player to the opponent as the camera sees it (eased, degrees)
+	float RingDodgeSide = 0.f, OppFollowAt = 0.f;
+	int32 RingSteps = 0; float RingTravel = 0.f, RingMaxOff = 0.f, RingMinGap = 1000.f, RingMaxGap = 0.f, RingMaxTurn = 0.f;   // for the self-check
+	void ResetRing();
+	void TickRing(float Dt);
+	/** Drives a fighter away from the other (cm a second, dying away within a third of a second). */
+	void RingPush(bool bPlayer, float Speed);
+	FVector RingToWorld(const FVector& Home) const;
+	FVector WorldToRing(const FVector& World) const;
+
 	/* ---- special abilities and their effects ---- */
 	void StartSpecial(bool bByPlayer);
 	void TickSpecial(float Dt);
@@ -167,6 +194,24 @@ private:
 	void FxBeam(const FVector& From, const FVector& To, float Thick0, float Thick1, const FLinearColor& Color, float Glow, float Life, float Delay = 0.f);
 	void FxBurst(const FVector& At, int32 Count, float Speed, float Size, const FLinearColor& Color, float Glow, float Life, float Gravity = 500.f);
 	void TickFx(float Dt);
+	// The particle effects (Niagara) that the specials are made of, and -KSVfxTour, which plays every effect of the packs
+	// between the two fighters in turn, photographs each twice and quits (how they were chosen: docs/VFX.md).
+	FKSVfx Vfx;
+	bool bVfxTour = false;
+	int32 VfxTourIndex = 0;
+	float VfxTourNext = 2.5f;
+	void TickVfxTour();
+	void VfxTinted(const TCHAR* Path, const FVector& At, const FLinearColor& Color, float Size = 1.f, float Delay = 0.f, float Life = 0.f);
+	/** The burst where a punch lands on Whom's face: sparks in Color, and rings as well for a big one. */
+	void HitSpark(const class AKSDummy* Whom, const FLinearColor& Color, float Size, bool bBig = false);
+	/** A punch stopped by Whom's guard: pale rings off his gloves. */
+	void GuardRing(const class AKSDummy* Whom);
+	void VfxBeam(int32 Kind, const FVector& From, const FVector& To, const FLinearColor& Color, float Life, float Delay = 0.f);
+	// Hit by a special: the one hit acts it out (SpecialHitClip) until this time on the game clock.
+	float OppSpecialHitUntil = 0.f, PlayerSpecialHitUntil = 0.f;
+	const TCHAR* SpecialHitClip(const class AKSDummy* Whom) const;
+	bool bTestSpecials = false;               // -KSSpecials: the player's special at once, then the opponent's, then quit
+	int32 SpecialsStarted = 0;
 	float SelectClipUntil = 0.f; int32 SelectClipStep = 0;
 	// Between punches each fighter does his own thing instead of all holding the same stance (see DriveCharacters).
 	int32 OppIdleCount = 0, PlayerIdleCount = 0;
@@ -210,6 +255,19 @@ private:
 	bool Pressed(const FKey& Key) const;
 	bool Down(const FKey& Key) const;
 	bool ConfirmPressed();
+	/* ---- the webcam outside a fight ----
+	   Nothing is a button press that somebody standing in front of the camera does by accident (player, 2026-11-13: the
+	   film stopped, the menu moved and a fighter was picked on a slight movement). A menu is moved by a swipe of a hand
+	   (FKSGesture) and anything is confirmed, or the film skipped, by a jab with one hand and then the other. */
+	FKSGesture Gesture;
+	bool bDoubleJab = false;                  // this frame: a punch from each arm, 0.2 to 1.2 s apart
+	double LastWebPunch[2] = { -100.0, -100.0 };
+	int32 DoubleJabs = 0;                     // for the log
+	bool bWebPunchClean[2] = { false, false };   // nothing else was thrown in the moment before that punch
+	double LastAnyWebPunch = -100.0;
+	void NoteWebPunch(EKSArm Arm);
+	bool bNoRing = false;                     // -KSNoRing: the fighters stay on their marks, as before TickRing (to tell its bugs from others)
+	float PunchSensitivity = 1.f, SensitivitySent = -1.f;   // the player's own (calibration), and what the tracker was last told
 	FKSBuilder MakeBuilder();
 
 	UPROPERTY() TObjectPtr<UStaticMesh> CubeMesh;
@@ -281,9 +339,12 @@ private:
 	float OpAngle = 0.f, OpAngleVel = 0.f, OpRadius = 313.f, OpRadiusVel = 0.f, OpHeight = 212.f, OpHeightVel = 0.f, OpFov = 62.f, OpRoll = 0.f;
 	float OpWantAngle = 0.f, OpWantRadius = 313.f, OpWantHeight = 212.f, OpWantFov = 62.f, OpShotUntil = 0.f, OpHurry = 0.f, OpStep = 0.f, OpDir = 0.f;
 	FVector OpAim = FVector::ZeroVector;
-	bool bOpAimSet = false;
+	FVector2D OpCelebPush = FVector2D::ZeroVector;      // after the bell: how far he has stepped away from the winner to keep his distance
+	float OpSinceBell = 0.f;                  // seconds since the bout ended (the phase clock restarts between knockout and result)
+	float OpCelebFov = 0.f;                   // after the bell: how wide the lens must be to hold the whole winner
+	bool bOpAimSet = false, bOpWasBout = false;
 	EKSOppState OpSeenState = EKSOppState::Idle;
-	int32 OpShots = 0, OpFrames = 0, OpLost = 0, OpHidden = 0;                  // for the self-check
+	int32 OpShots = 0, OpFrames = 0, OpLost = 0, OpHidden = 0, OpEitherLost = 0, OpSaved = 0; double OpPlayerX = 0.0;                  // for the self-check
 	float OpTravel = 0.f, OpMinAngle = 1000.f, OpMaxAngle = -1000.f;
 	TArray<FSpectator> Spectators;
 	bool bCalFromMenu = false;                // calibration was chosen in the menu: go back there when it is done

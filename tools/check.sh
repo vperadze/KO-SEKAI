@@ -86,9 +86,23 @@ while read -r line; do
 	bout=$(field "$line" bout); frames=$(field "$line" frames); lost=$(field "$line" opp_lost); hidden=$(field "$line" opp_hidden)
 	[ "$(field "$line" shots)" -ge 3 ] && [ "$(field "$line" span)" -ge 60 ] && pass "bout $bout: the cameraman took $(field "$line" shots) shots across $(field "$line" span) degrees of the ring" || fail "bout $bout: the cameraman hardly moved ($line)"
 	[ "${frames:-0}" -gt 0 ] && [ $((lost * 100 / frames)) -le 7 ] && pass "bout $bout: the opponent's head stayed in the picture ($lost of $frames frames out)" || fail "bout $bout: the cameraman lost the opponent in $lost of ${frames:-0} frames"
+	# Both fighters are in the picture, always (player report, 2026-11-13: "the cameraman sometimes loses one player and he
+	# goes off the screen"). Counted on the picture as shown: the head and the middle of the body of each of them.
+	gone=$(field "$line" either_lost)
+	[ -n "$gone" ] && [ "${frames:-0}" -gt 0 ] && [ $((gone * 200 / frames)) -lt 1 ] && pass "bout $bout: both fighters were in the picture ($gone of $frames frames with one of them out; the camera was turned back $(field "$line" turned_back) times)" || fail "bout $bout: a fighter was out of the picture in ${gone:-?} of ${frames:-0} frames"
+	# The player's fighter stands at his own end of the ring. The bug this guards: the hold that keeps a winner's dance on
+	# the spot was not released, and he fought the next bout from where he had landed the knockout, inside his opponent.
+	px=$(field "$line" player_x)
+	[ -n "$px" ] && [ "$px" -ge -40 ] && [ "$px" -le 45 ] && pass "bout $bout: the player's fighter fought from his own mark (on average $px cm from it)" || fail "bout $bout: the player's fighter stood ${px:-?} cm from his mark on average (held where he celebrated the last bout?)"
 	# Seen in stills of the first version: he stood straight behind the player, whose back covered the opponent.
 	[ "${frames:-0}" -gt 0 ] && [ $((hidden * 100 / frames)) -le 6 ] && pass "bout $bout: the player's head was in front of the opponent's in $hidden of $frames frames" || fail "bout $bout: the player's own head hid the opponent in ${hidden:-?} of ${frames:-0} frames (cameraman straight behind his back)"
 done <<< "$(grep "KSTEST camera bout=" "$LOG" 2> /dev/null)"
+# After the bell the winner celebrates, and the player asked that he is always in the picture (2026-11-13).
+while read -r line; do
+	[ -z "$line" ] && { fail "no KSTEST celebration line: nobody counted the frames after the bell"; continue; }
+	frames=$(field "$line" frames); out=$(field "$line" winner_out)
+	[ "${frames:-0}" -gt 30 ] && [ $((out * 100 / frames)) -le 1 ] && pass "bout $(field "$line" bout): the celebrating winner stayed in the picture ($out of $frames frames out)" || fail "bout $(field "$line" bout): the celebrating winner was partly out of the picture in $out of ${frames:-0} frames"
+done <<< "$(grep "KSTEST celebration bout=" "$LOG" 2> /dev/null | tr -d "\r")"
 for snd in Cheer Gasp Shout; do
 	n=$(grep "KSTEST sound=$snd " "$LOG" 2> /dev/null | head -1 | tr -d "\r" | sed -n 's/.*recorded_variants=\([0-9]*\).*/\1/p')
 	# These have no synthesised fallback: without the recordings the crowd is silent.
@@ -121,6 +135,11 @@ bad=$(grep -nE "static U[A-Za-z]+\* *[A-Za-z]+ *= *LoadObject" "$ROOT"/unreal/So
 [ -z "$bad" ] && pass "no asset is cached in a static without being kept alive" || fail "asset cached in a static and never rooted (wrap it in Keep() or call AddToRoot): $bad"
 # Arenas: -KSArenaTour builds every arena once before the first bout. One whose backdrop, ring canvas or music is
 # missing would show a bare wall or fall silent, and only on the day that arena comes up.
+# The stands, rig, lamps and landmarks are Meshy models placed by name (KSWorld.cpp, FKSBuilder::Prop). A model that
+# is not in the game falls back to a plain box or is left out without a word: every arena must report none missing.
+n=$(grep "KSTEST arena_built " "$LOG" 2> /dev/null | tr -d "\r" | grep "props_missing=0$" | sed 's/.*key=\([^ ]*\).*/\1/' | sort -u | wc -l)
+few=$(grep "KSTEST arena_built " "$LOG" 2> /dev/null | tr -d "\r" | sed -n 's/.*key=\([^ ]*\) .* props=\([0-9]*\) .*/\2 \1/p' | sort -n | head -1)
+[ "$n" -ge 11 ] && [ "${few%% *}" -ge 120 ] && pass "all $n arenas stand on their Meshy set pieces (the fewest: $few)" || fail "arena set pieces missing in $((11 - n)) arena(s), fewest pieces: ${few:-none}: $(grep "KSTEST arena_built " "$LOG" 2> /dev/null | tr -d "\r" | grep -v "props_missing=0$" | sed 's/.*KSTEST //' | head -3 | tr "\n" "; "); run art/tools/import_props.py"
 n=$(grep "KSTEST arena_built " "$LOG" 2> /dev/null | tr -d "\r" | grep "backdrop=1 mat=1 music=1" | sed 's/.*key=\([^ ]*\).*/\1/' | sort -u | wc -l)
 [ "$n" -ge 11 ] && pass "all $n arenas build with their backdrop, ring canvas and music" || fail "only $n of 11 arenas built complete: $(grep "KSTEST arena_built " "$LOG" 2> /dev/null | grep -v "backdrop=1 mat=1 music=1" | sed 's/.*KSTEST //' | head -3 | tr "\n\r" "; ")"
 # Faces and voices. The bug this guards: fighters stood through a whole bout with one expression (the Count with his
@@ -131,7 +150,7 @@ while read -r line; do
 	[ "$(field "$line" faces)" -ge 4 ] && pass "$who: $(field "$line" faces) face expressions loaded" || fail "$who: only $(field "$line" faces) face expressions loaded"
 	[ "$(field "$line" voice_lines)" -ge 8 ] && pass "$who: $(field "$line" voice_lines) voice lines loaded" || fail "$who: only $(field "$line" voice_lines) voice lines loaded"
 	# The extra moves: without them the fighter stands in his stance on the select screen and pounds his chest for a special.
-	[ "$(field "$line" moves)" -ge 6 ] && pass "$who: all $(field "$line" moves) extra moves loaded (idles, picked, special, win, stagger)" || fail "$who: only $(field "$line" moves) of 6 extra moves loaded; run art/tools/add_moves.py build, then art/tools/import_moves.py"
+	[ "$(field "$line" moves)" -ge 8 ] && pass "$who: all $(field "$line" moves) extra moves loaded (idles, picked, special, win, stagger, shocked, blown)" || fail "$who: only $(field "$line" moves) of 8 extra moves loaded; run art/tools/add_moves.py build, then art/tools/import_moves.py"
 done <<< "$(grep "KSTEST fighter=" "$LOG" 2> /dev/null | sed 's/.*KSTEST/KSTEST/' | sort -u)"
 while read -r line; do
 	[ -z "$line" ] && continue
@@ -139,12 +158,30 @@ while read -r line; do
 	[ "$(field "$line" shown)" -ge 3 ] && pass "bout $bout: the opponent's face changed ($(field "$line" shown) expressions shown)" || fail "bout $bout: the opponent showed only $(field "$line" shown) expression(s)"
 	[ "$(field "$line" mouth_opens)" -ge 1 ] && pass "bout $bout: the opponent's mouth moved while speaking ($(field "$line" mouth_opens) times)" || fail "bout $bout: the opponent's mouth never moved"
 done <<< "$(grep "KSTEST faces bout=" "$LOG" 2> /dev/null)"
+# The fighters move about the ring (AKSGameMode::TickRing): a dodge that is let go of is a step, hits drive the one
+# hit back and the other follows. The bugs this guards: fighters nailed to their marks again (no steps, no travel),
+# the two drifting apart or into each other for good, and the pair walking off towards the ropes.
+while read -r line; do
+	[ -z "$line" ] && continue
+	bout=$(field "$line" bout)
+	[ "$(field "$line" steps)" -ge 1 ] && [ "$(field "$line" travel)" -ge 40 ] && pass "bout $bout: the player's fighter moved about the ring ($(field "$line" steps) dodge steps, $(field "$line" travel) cm in all)" || fail "bout $bout: the fighters stood on their marks ($line)"
+	[ "$(field "$line" max_gap)" -le 320 ] && [ "$(field "$line" max_off)" -le 230 ] && pass "bout $bout: the two stayed together and in the middle (at most $(field "$line" max_gap) cm apart, $(field "$line" max_off) cm from the centre)" || fail "bout $bout: the fighters came apart or left the middle of the ring ($line)"
+done <<< "$(grep "KSTEST ring" "$LOG" 2> /dev/null | tr -d "\r")"
+[ "$(grep -c "KSTEST ring" "$LOG" 2> /dev/null)" -ge 1 ] && pass "the ring reported where the fighters went" || fail "no report of the fighters' movement (KSTEST ring)"
+
 # Special abilities: the bot sets its special off as soon as the meter is full. The bugs this guards: a special that
 # never starts, one played with the stand-in chest pound, and one whose effect has no pieces.
 line=$(grep "KSTEST special by=player" "$LOG" 2> /dev/null | head -1 | tr -d "\r")
 [ -n "$line" ] && [ "$(field "$line" own_clip)" = 1 ] && pass "the player's special ability went off with its own move ($(field "$line" fighter))" || fail "no special ability with its own move (${line:-the meter never filled or it never started})"
-pieces=$(field "$(grep "KSTEST special landed" "$LOG" 2> /dev/null | head -1)" pieces)
-[ "${pieces:-0}" -ge 40 ] && pass "the special's effect was drawn ($pieces pieces by the time it landed)" || fail "the special's effect is missing (${pieces:-0} pieces)"
+# The effects are particle systems from the Fab packs under Content (docs/VFX.md), loaded by path: a pack that was
+# moved, renamed or left out of a checkout shows as "missing", and the special would be a shout with nothing to see.
+line=$(grep "KSTEST special landed" "$LOG" 2> /dev/null | head -1)
+effects=$(field "$line" effects); missing=$(field "$line" missing)
+[ "${effects:-0}" -ge 4 ] && [ "${missing:-1}" = 0 ] && pass "the special's effect was drawn ($effects particle effects by the time it landed, none missing)" || fail "the special's effect is missing (${effects:-0} effects played, ${missing:-?} not found: $(grep -m1 "KSTEST vfx missing" "$LOG" | sed 's/.*KSTEST //'))"
+# Whoever a special lands on acts it out with a clip of its own. The bug this guards: the clips not imported, and
+# the victim standing in the middle of the lightning with a small flinch.
+react=$(field "$line" reaction)
+[ "$react" = Shocked ] || [ "$react" = Blown ] && pass "the one hit by the special acted it out ($react)" || fail "no reaction clip for a special (${react:-none}); run art/tools/add_moves.py build, then art/tools/import_moves.py"
 # A blocked punch throws the attacker back and ends his attack.
 n=$(grep -c "KSTEST stagger" "$LOG" 2> /dev/null); n=${n:-0}; bad=$(grep "KSTEST stagger" "$LOG" 2> /dev/null | grep -c "clip=0")
 if [ "$n" = 0 ]; then echo "  --    block stagger: no punch was blocked in this run"
@@ -193,13 +230,38 @@ asked=$(grep -c "KSTEST announcer line=" "$LOG" 2> /dev/null); asked=${asked:-0}
 silent=$(grep "KSTEST announcer line=" "$LOG" 2> /dev/null | grep -c "sound=0")
 [ "$asked" -ge 3 ] && [ "$silent" = 0 ] && pass "the announcer spoke $asked times, every line with its recording" || fail "the announcer: $asked lines asked for, $silent without a recording; run art/tools/announcer.py, then art/tools/import_voice_faces.py"
 
-echo "== the film is skipped by a jab only (fake webcam punches: hooks and uppercuts for five seconds, then a jab)"
-# The bug this guards: any punch the webcam called skipped the film, so it stopped whenever the player moved.
+echo "== every fighter on the select screen (his dance, then his \"picked\" move; no camera)"
+# The bugs this guards (player report, 2026-11-13): Turbotron's dance carried him out of the picture, and the title
+# band cut off Count Hairspray's hair. For every fighter in the roster the game counts the frames in which anything
+# drawn of him (bones, flesh and gloves round them, hair above the face) is outside the part of the screen left for
+# him. A new fighter is toured like the others; his hair is measured from his model and must be in the table.
+LOG="$OUT/select.log"
+run_until 1 "KSTEST select_tour done" 150 "$LOG" -KSStart=select -KSSelectTour -KSNoCamera
+shown=$(grep -c "KSTEST select_frame " "$LOG" 2> /dev/null); roster=$(field "$(grep "KSTEST select_tour done" "$LOG" 2> /dev/null | head -1)" fighters)
+[ -n "$roster" ] && [ "$shown" = "$roster" ] && pass "all $roster fighters were shown on the select screen" || fail "the select tour showed ${shown:-0} of ${roster:-?} fighters"
+while read -r line; do
+	[ -z "$line" ] && continue
+	who=$(field "$line" fighter); frames=$(field "$line" frames); out=$(field "$line" out)
+	[ "${frames:-0}" -gt 100 ] && [ "$out" = 0 ] && pass "$who stays inside his part of the select screen ($frames frames)" || fail "$who is cut off or out of the picture on the select screen in $out of ${frames:-0} frames (worst by $(field "$line" worst) of the screen)"
+done <<< "$(grep "KSTEST select_frame " "$LOG" 2> /dev/null | tr -d "\r")"
+while read -r line; do
+	[ -z "$line" ] && continue
+	who=$(field "$line" fighter); room=$(field "$line" head_room); table=$(field "$line" table)
+	if [ "$(field "$line" listed)" != 1 ]; then fail "$who is not in the head-room table (KSHeadRooms in KSDummy.cpp); his model measures $room cm above the face"
+	elif [ "$room" -gt "$table" ]; then fail "$who's model reaches $room cm above the face, the table says $table: cameras will cut his hair (KSHeadRooms in KSDummy.cpp)"
+	else pass "$who: $room cm of hair above the face, $table allowed for"; fi
+done <<< "$(grep "KSTEST shape " "$LOG" 2> /dev/null | tr -d "\r" | sort -u -t= -k2,2)"
+
+echo "== the film is skipped by a left jab and then a right jab only (fake webcam punches)"
+# The bug this guards: any punch the webcam called skipped the film, so it stopped whenever the player moved; and then
+# one jab did, which a player settling in front of the camera also sets off. The fake player punches with one arm
+# for five seconds, throws a lone jab at 5.5 s, a left and a right in the same instant at 7.5 s (the body shifting),
+# and a left then a right at 9.5 and 9.9 s: only the last may end it.
 LOG="$OUT/filmskip.log"
 run_until 1 "KSTEST intro ended" 90 "$LOG" -KSFakePunch -KSNoCamera
 line=$(grep "KSTEST intro ended" "$LOG" 2> /dev/null | head -1 | tr -d "\r")
 secs=$(field "$line" seconds)
-if [ "$(field "$line" by_jab)" = 1 ] && awk "BEGIN{exit !(${secs:-0} >= 5.5)}"; then pass "hooks and uppercuts did not stop the film; the jab at 6 s did (ended at ${secs} s)"
+if [ "$(field "$line" by_jab)" = 1 ] && awk "BEGIN{exit !(${secs:-0} >= 9.8)}"; then pass "one-armed punches, a lone jab and a both-at-once did not stop the film; left then right did (ended at ${secs} s)"
 else fail "the film ended on the wrong punch (${line:-it never ended})"; fi
 
 echo "== Esc returns to the menu; a lost bout whose count runs out returns to the menu"

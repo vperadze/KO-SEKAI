@@ -15,6 +15,8 @@ public class KoSekai : ModuleRules
 		PrivateDependencyModuleNames.AddRange(new string[] { "SlateCore" });
 		// The microphone (KSMic): a shout sets off a special ability.
 		PrivateDependencyModuleNames.AddRange(new string[] { "AudioCaptureCore" });
+		// The particle effects of the special abilities (KSVfx): Niagara systems from the Fab packs, docs/VFX.md.
+		PrivateDependencyModuleNames.AddRange(new string[] { "Niagara" });
 		// Its back end is loaded by name in KSMic.cpp; named here so a packaged build carries it.
 		DynamicallyLoadedModuleNames.Add(Target.Platform == UnrealTargetPlatform.Win64 ? "AudioCaptureWasapi" : "AudioCaptureRtAudio");
 	}

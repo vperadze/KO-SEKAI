@@ -4,7 +4,18 @@ namespace
 {
 	// Tuning knobs, the same as TUNE in tracker.js. Distances are in shoulder widths, speeds in shoulder widths per second.
 	// StrokeEnd is 0.5 here (0.35 in tracker.js): a punch is called as soon as the arm has clearly slowed, not when it has stopped.
-	const float StrokeStart = 2.0f, StrokePeak = 3.5f, StrokeEnd = 0.5f, MinScore = 0.55f, TwoHand = 0.6f;
+	// StrokePeak was 3.5: in the player's recorded sessions the punches he meant peaked at 8 to 12, and what he did not
+	// mean (settling, shifting his weight) at 4 to 5. At 5.0 nine in ten of everything called before still count.
+	const float StrokeStart = 2.0f, StrokePeak = 5.0f, StrokeEnd = 0.5f, MinScore = 0.55f, TwoHand = 0.6f;
+	// One arm cannot punch within this long of the other. A shift of the whole body moves both wrists and was called as
+	// a left and a right in the same instant (0 to 170 ms apart in the recordings). Only the clearest of those are
+	// thrown out here: at 200 ms one punch in seven went, and some of those will have been fast one-twos. The menus,
+	// where a left-then-right means "yes", ask for 200 ms themselves (AKSGameMode::NoteWebPunch).
+	const double CrossArmMs = 120;
+	// The bar follows the player: 60% of his typical punch (the median of the last PeakMemory called), never lower than
+	// the fixed bar and never above it by more than 1 / AutoFloor. Calibration still lowers it for a soft hitter.
+	const int32 PeakMemory = 15, PeakNeeded = 8;
+	const float AutoShare = 0.6f, AutoFloor = 0.8f;      // at 0.7 (a bar of up to 7.1) nearly half the punches in the recordings were gone: too much to do unseen
 	const double StrokeMaxMs = 450, RefractoryMs = 120, HoldMs = 60, CalMs = 800;
 	// A punch is called while the arm is still on its way out, as soon as the kind of punch is clear, not after it stops.
 	const double EarlyMs = 60;
@@ -23,6 +34,7 @@ void FKSDetector::Reset()
 	bHasBase = bCalibrating = bWantCal = false;
 	CalSamples.Reset();
 	Ss = 0; LastT = 0; LastFireT = -1e9; CoverSince = 0;
+	LastPunchT = -1e9; LastPunchArm = -1; PunchPeaks.Reset(); AutoK = 1.f;
 }
 
 float FKSDetector::CalibrationProgress() const
@@ -145,13 +157,32 @@ bool FKSDetector::Process(const FKSPoseFrame& Frame, TArray<FKSDetectedPunch>& O
 	for (int32 i = 0; i < 2; i++)
 	{
 		FVerdict V;
-		if (StrokeStep(i, ArmSample(Arms[i], Frame, P, Mid, Nose), T, Sensitivity, V)) Results[NumResults++] = V;
+		if (StrokeStep(i, ArmSample(Arms[i], Frame, P, Mid, Nose), T, Sensitivity * AutoK, V)) Results[NumResults++] = V;
 	}
 	// If both arms claim a punch on the same frame, the clearer one wins.
 	if (NumResults == 2 && Results[0].bPunch && Results[1].bPunch) Results[Results[0].Score >= Results[1].Score ? 1 : 0].bPunch = false;
 	for (int32 i = 0; i < NumResults; i++)
 	{
 		if (!Results[i].bPunch) continue;
+		if (Results[i].Arm != LastPunchArm && T - LastPunchT < CrossArmMs)
+		{
+			if (Trace) Trace(FString::Printf(TEXT("%.0f arm %d stroke: rejected, the other arm punched %.0f ms ago"), T, Results[i].Arm, T - LastPunchT));
+			Arms[Results[i].Arm].Cool = T + RefractoryMs;
+			continue;
+		}
+		LastPunchT = T; LastPunchArm = Results[i].Arm;
+		if (Results[i].Peak > 0.f)
+		{
+			if (PunchPeaks.Num() >= PeakMemory) PunchPeaks.RemoveAt(0, EAllowShrinking::No);
+			PunchPeaks.Add(Results[i].Peak);
+			if (PunchPeaks.Num() >= PeakNeeded)
+			{
+				TArray<float> Sorted = PunchPeaks; Sorted.Sort();
+				const float NewK = FMath::Clamp(StrokePeak / (AutoShare * Sorted[Sorted.Num() / 2]), AutoFloor, 1.f);
+				if (Trace && FMath::Abs(NewK - AutoK) > 0.05f) Trace(FString::Printf(TEXT("%.0f bar now %.1f (typical punch %.1f)"), T, StrokePeak / (Sensitivity * NewK), Sorted[Sorted.Num() / 2]));
+				AutoK = NewK;
+			}
+		}
 		Arms[Results[i].Arm].Cool = T + RefractoryMs; LastFireT = T;
 		OutPunches.Add({ Results[i].Arm == 0 ? EKSArm::Left : EKSArm::Right, Results[i].Type });
 	}
@@ -257,7 +288,7 @@ bool FKSDetector::Judge(int32 ArmIndex, double StrokeT0, float Peak, double T, f
 {
 	auto Say = [&](const TCHAR* What) { if (Trace && !bEarly) Trace(FString::Printf(TEXT("%.0f arm %d stroke %.0f ms peak %.1f: %s"), T, ArmIndex, T - StrokeT0, Peak, What)); };
 	FArm& A = Arms[ArmIndex];
-	Out = FVerdict(); Out.Arm = ArmIndex;
+	Out = FVerdict(); Out.Arm = ArmIndex; Out.Peak = Peak;
 	const TArray<FSample> Win = WindowOf(A, StrokeT0);
 	if (Win.Num() < 3) { Say(TEXT("rejected, too short")); return false; }
 	if (Peak < StrokePeak / K) { Say(TEXT("rejected, too slow")); return false; }

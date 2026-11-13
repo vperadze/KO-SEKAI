@@ -431,7 +431,7 @@ void AKSHUD::DrawIntro(const AKSGameMode& G)
 	// Steady, and worded by whether a camera is plugged in, not by whether it sees a body this frame: the first version
 	// blinked on a timer and swapped its words whenever the tracker lost or found the player ("jab, enter, jab, enter").
 	const bool bJabSkips = G.Tracking() && G.Tracking()->IsConnected();
-	Label(bJabSkips ? TEXT("ENTER  or  JAB  skip") : TEXT("ENTER  skip"), 0.985f, 0.957f, 0.7f, Lilac, 1);
+	Label(bJabSkips ? TEXT("ENTER  or  JAB LEFT + RIGHT  skip") : TEXT("ENTER  skip"), 0.985f, 0.957f, 0.7f, Lilac, 1);
 	// The tape itself: scan lines and a band of noise that wanders up the picture.
 	for (float Y = 0.f; Y < SH; Y += 4.f * Unit) DrawRect(FLinearColor(0.f, 0.f, 0.f, 0.16f), 0.f, Y, SW, 1.5f * Unit);
 	Fill(0.f, 1.f - FMath::Frac(Now * 0.11f), 1.f, 0.014f, FLinearColor(1.f, 1.f, 1.f, 0.06f));
@@ -690,7 +690,7 @@ void AKSHUD::DrawMenu(const AKSGameMode& G)
 
 	const UKSTrackingSubsystem* Tr = G.Tracking();
 	const bool bPunches = Tr && Tr->IsTracking();
-	Label(bPunches ? TEXT("UP / DOWN  or  LEFT PUNCH  choose          ENTER  or  RIGHT PUNCH  select")
+	Label(bPunches ? TEXT("UP / DOWN  or  SWEEP A HAND UP / DOWN  choose          ENTER  or  JAB LEFT + RIGHT  select")
 		: TEXT("UP / DOWN  choose          ENTER  select"), 0.5f, 0.905f, 0.8f, Faded(Lilac, In), 0, 0.94f);
 	if (FMath::Frac(Now * 0.8f) < 0.62f) Label(TEXT("INSERT YOURSELF"), 0.5f, 0.955f, 0.95f, Faded(Yellow, In));
 	Label(TEXT("(C) 1987   CANCELLED BEFORE LAUNCH"), 0.015f, 0.975f, 0.6f, Faded(Muted, In), -1);
@@ -714,10 +714,11 @@ void AKSHUD::DrawSelect(const AKSGameMode& G)
 
 	// The fighter stands on the right; the left is shaded so the writing reads, with a band above and below.
 	for (int32 i = 0; i < 18; i++) Fill(i * 0.032f, 0.f, 0.0325f, 1.f, Faded(Dark, 0.78f * FMath::Pow(1.f - i / 18.f, 1.3f)));
-	Fill(0.f, 0.f, 1.f, 0.15f, Faded(Dark, 0.85f));
-	Fill(0.f, 0.148f, 1.f, 0.005f, Magenta);
-	Fill(0.f, 0.715f, 1.f, 0.285f, Faded(Dark, 0.85f));
-	Fill(0.f, 0.713f, 1.f, 0.005f, Cyan);
+	// (The bands end where KSSelectFrame says the fighter's part of the picture begins; TickSelect frames him into it.)
+	Fill(0.f, 0.f, 1.f, KSSelectFrame::Top, Faded(Dark, 0.85f));
+	Fill(0.f, KSSelectFrame::Top - 0.002f, 1.f, 0.005f, Magenta);
+	Fill(0.f, KSSelectFrame::Bottom, 1.f, 1.f - KSSelectFrame::Bottom, Faded(Dark, 0.85f));
+	Fill(0.f, KSSelectFrame::Bottom - 0.002f, 1.f, 0.005f, Cyan);
 
 	PushSpin(0.5f, 0.076f, SlamScale(T), -1.5f);
 	Text(TEXT("CHOOSE YOUR FIGHTER"), 0.5f, 0.076f, 62.f, Yellow, 0, EKSFont::Comic, 3.f, FLinearColor::Black, 0.9f);
@@ -775,7 +776,7 @@ void AKSHUD::DrawSelect(const AKSGameMode& G)
 	}
 
 	const UKSTrackingSubsystem* Tr = G.Tracking();
-	Label(Tr && Tr->IsTracking() ? TEXT("LEFT / RIGHT  or  LEFT PUNCH  choose      ENTER  or  RIGHT PUNCH  select      ESC  menu")
+	Label(Tr && Tr->IsTracking() ? TEXT("LEFT / RIGHT  or  SWEEP A HAND  choose      ENTER  or  JAB LEFT + RIGHT  select      ESC  menu")
 		: TEXT("LEFT / RIGHT  choose          ENTER  select          ESC  menu"), 0.5f, 0.968f, 0.72f, Lilac, 0, 0.52f);
 	for (float Y = 0.f; Y < SH; Y += 4.f * Unit) DrawRect(FLinearColor(0.f, 0.f, 0.f, 0.10f), 0.f, Y, SW, 1.5f * Unit);
 	if (!bLoggedSelect) { bLoggedSelect = true; UE_LOG(LogTemp, Display, TEXT("KSTEST ui select shown fighters=%d avatars=%d"), Count, Avatars); }   // for tools/check.sh
@@ -940,7 +941,7 @@ void AKSHUD::DrawFight(const AKSGameMode& G)
 		const bool bLast = G.FighterIndex + 1 >= G.NumFights();
 		Plate(0.27f, 0.632f, 0.46f, 0.07f);
 		Label(bLast ? TEXT("The screen cracks. There is a way out.") : FString::Printf(TEXT("NEXT: %s"), G.LadderFighter(G.FighterIndex + 1).Name), 0.5f, 0.666f, 1.05f, Yellow, 0, 0.36f);
-		if (FMath::Frac(Now * 0.9f) < 0.65f) Label(TEXT("Press ENTER or throw a punch"), 0.5f, 0.733f, 0.9f, Lilac, 0, 0.58f);
+		if (FMath::Frac(Now * 0.9f) < 0.65f) Label(TEXT("Press ENTER or jab left + right"), 0.5f, 0.733f, 0.9f, Lilac, 0, 0.58f);
 	}
 	if (G.Phase == EKSPhase::Continue)
 	{
@@ -959,7 +960,7 @@ void AKSHUD::DrawFight(const AKSGameMode& G)
 		Pic(TEXT("burst_hurt"), 0.74f, 0.63f, 0.25f);
 		Text(FString::FromInt(Count), 0.74f, 0.625f, 78.f, FLinearColor(0.85f, 0.f, 0.25f), 0, EKSFont::Comic, 3.f, FLinearColor::Black);
 		PopSpin();
-		if (FMath::Frac(Now * 0.9f) < 0.65f) Label(TEXT("Press ENTER or throw a punch"), 0.5f, 0.775f, 1.0f, Lilac);
+		if (FMath::Frac(Now * 0.9f) < 0.65f) Label(TEXT("Press ENTER or jab left + right"), 0.5f, 0.775f, 1.0f, Lilac);
 	}
 	if (G.bPaused)
 	{

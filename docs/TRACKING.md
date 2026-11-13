@@ -64,6 +64,28 @@ Every decision is logged, for example:
 
 `arm 0` is the player's left. Stances: 1 block, 2 evade left, 3 evade right, 4 duck.
 
+## Outside a fight: swipes and the left-right jab
+
+On the film, the menu and the select screen nothing a person does by accident is a button press (player,
+2026-11-13: "the slight movement of mine interrupts the cinematic, moves the menu or picks a character").
+
+| The player does | It means | Where |
+|---|---|---|
+| Sweeps a hand down / up (a shoulder's width in a quarter second) | next / previous line | menu |
+| Sweeps a hand to his right / left | next / previous fighter | select |
+| Jabs with one hand, then the other (0.2 to 1.2 s apart, the first out of 0.8 s of stillness) | choose, continue, skip the film | everywhere but a bout |
+
+`KSGesture.cpp` reads the swipes from the wrists in the camera picture; the way back with the same hand within 0.9 s
+does not count, nor anything for 0.45 s after a swipe. `AKSGameMode::NoteWebPunch` pairs the jabs. Outside a bout the
+detector is also run at 0.7 of the player's sensitivity (a bar of 7 and more), so the jabs have to be meant.
+
+Measured on the player's session of 22:17 (first 30 s, in front of the film and the menu): the old rule took 12 punches
+as button presses; the new one sees no left-right jab at all, and the swipe rule (tried in Python on the same
+recording) fires once. **Nobody has used them yet**: whether a deliberate swipe is always seen is untested.
+
+Phase changes are now written into the recording (`# MARK phase N ...`), so the next session can be cut into menu and
+bout.
+
 ## Recordings
 
 Every webcam session is saved to `unreal/Saved/KSTrack/rec_<date>_<time>.csv`. Numbers only, no pictures:
@@ -100,7 +122,9 @@ Recordings are git-ignored: they are measurements of a person's body.
 | Knob | Now | Effect of raising it |
 |---|---|---|
 | `StrokeStart` | 2.0 | Fewer strokes start; slower punches are ignored. |
-| `StrokePeak` | 3.5 | A punch must be faster to count. Fewer phantom punches, more missed ones. |
+| `StrokePeak` | 5.0 (was 3.5) | A punch must be faster to count. Fewer phantom punches, more missed ones. |
+| `CrossArmMs` | 120 | One arm cannot punch within this long of the other (the body shifting moves both wrists). At 200 one punch in seven was thrown out. |
+| `AutoShare`, `AutoFloor` | 0.6, 0.8 | The bar follows the player: 60% of the median of his last 15 punches, at most 1/0.8 above `StrokePeak` (6.25). At 0.7 nearly half the recorded punches were gone. |
 | `StrokeEnd` | 0.5 | End-of-stroke verdict comes sooner. |
 | `EarlyScore`, `EarlyLead` | 0.38, 0.12 | Early calls need more evidence: later but safer. |
 | `MinScore` | 0.55 | End-of-stroke calls need more evidence. |

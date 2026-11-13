@@ -55,7 +55,7 @@ private:
 		double StrokeT0 = 0, Cool = 0;
 		float StrokePeak = 0, Act = 0;
 	};
-	struct FVerdict { int32 Arm = 0; bool bPunch = false; EKSPunch Type = EKSPunch::Straight; float Score = 0; };
+	struct FVerdict { int32 Arm = 0; bool bPunch = false; EKSPunch Type = EKSPunch::Straight; float Score = 0, Peak = 0; };
 	struct FCalSnap { FVector2f Nose, Mid, WL, WR; float S = 0; };
 
 	static TArray<FSample> WindowOf(const FArm& Arm, double T0);
@@ -81,4 +81,10 @@ private:
 	// running state
 	float Ss = 0;                 // slow average of the shoulder width, the yardstick for everything else
 	double LastT = 0, LastFireT = -1e9, CoverSince = 0;
+	// Less twitchy (player, 2026-11-13): the other arm may not punch straight after this one, and the bar a stroke has
+	// to clear follows how hard this player's punches really are.
+	double LastPunchT = -1e9;
+	int32 LastPunchArm = -1;
+	TArray<float> PunchPeaks;     // the last few punches called
+	float AutoK = 1.f;            // 1, or less for a hard hitter: multiplies the sensitivity
 };

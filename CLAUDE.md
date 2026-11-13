@@ -38,9 +38,10 @@ Packaged build under 1 GB, plus a 30–60 s gameplay video. Windows packaging ne
 | Path | What |
 |---|---|
 | `unreal/` | The game. C++ only, everything spawned from code, no level files. |
-| `unreal/Source/KoSekai/` | `KSGameMode` (rules, phases, crowd, special abilities and their effects), `KSMic` (hears a shout), `KSDummy` (a fighter), `KSWorld` (street and arena), `KSHUD`, `KSAudio`, `KSTracking` + `KSCameraTracker` + `KSDetector` (webcam). |
+| `unreal/Source/KoSekai/` | `KSGameMode` (rules, phases, crowd, special abilities, where the fighters stand), `KSVfx` (particle effects), `KSMic` (hears a shout), `KSDummy` (a fighter), `KSWorld` (street and arena), `KSHUD`, `KSAudio`, `KSTracking` + `KSCameraTracker` + `KSDetector` (webcam). |
 | `unreal/Content/KoSekai/Characters/` | Seven fighters, 17 shared clips each plus six of their own (`Fun_A`, `Fun_B`, `Picked`, `Special`, `Win`, `Stagger`), face materials. |
 | `unreal/Content/KS/` | Materials, arena pictures and spectator pictures (`Arena/T_KS_Crowd_*`, eight poses each), sounds (`Audio/`), the pose model (`Tracker/`). |
+| `unreal/Content/KS/Props/` | The arena's Meshy models, `<Name>/SM_<Name>`: the kit every arena is built from and one landmark per arena. |
 | `unreal/Content/KS/UI/` | Interface pictures `T_UI_<name>` and the two fonts (`F_RussoOne`, `F_Bangers`); `KSHUD` falls back to plain boxes without them. |
 | `unreal/Content/KS/Voice/` | Spoken lines `V_<Fighter>_<line>`; text and mouth timing are in the generated `KSVoiceData.h`. The ring announcer is `V_Announcer_<line>` (`KSAnnouncerData.h`). |
 | `art/` | Source art and the tools that make it (`art/tools`, `art/arena`, `art/tracker-model`). Mostly untracked. |
@@ -71,6 +72,7 @@ Test flags (all optional):
 | `-KSCamera=N` | Use camera index N. |
 | `-KSReplay=<file>` `-KSReplayExit` | Run the move detector over a recording and log its decisions. |
 | `-KSStart=menu` | Skip the opening film. No `-KSStart`: film, then menu. `-KSStart=street`: the old street walk, which nothing in the game leads to any more. |
+| `-KSSelectTour` | With `-KSStart=select`: shows every fighter's dance and "picked" move in turn, logs whether he stayed in his part of the picture, and quits. |
 | `-KSPortraits` | Photograph every fighter's head to `unreal/Saved/Screenshots/avatar_<Folder>.png` and quit. |
 | `-KSGiveUp` | With `-KSAuto`: the bot neither defends, punches nor continues, so the count runs out. |
 | `-KSEscAt=N` | As if Esc were pressed N seconds into the first bout. |
@@ -78,6 +80,9 @@ Test flags (all optional):
 | `-KSArena=N` `-KSArenaTour` | Fight every bout in arena N (0-10, `KSArenaData.h`) / build every arena once at the start. |
 | `-KSCalDemo` | Enter calibration without a camera and step through it automatically. |
 | `-KSCalJitter` | With `-KSCalDemo`: one framing reading flips every frame, to test that the text stays steady. |
+| `-KSVfxTour` | Plays 123 effects of the Fab packs between the fighters in turn, photographs each twice, and quits (`docs/VFX.md`). |
+| `-KSSpecials` | The player's special two seconds into the bout, the opponent's three seconds later, then quit. With `-KSHitShots`: five stills of each. |
+| `-KSNoRing` | The fighters stay on their two marks, as before they could move about the ring: tells a bug of the movement from any other. |
 | `-KSMirrorArms` | Experimental: fighter's arms copy the webcam arms directly. Off by default, it looks bad. |
 | `-KSFakeArms` | Feed a fixed arm pose into the arm copying, to test it without a person. |
 
@@ -105,7 +110,19 @@ New interface art (menu, bars, badges, bubbles): `python3 art/ui/gen_ui.py quote
 2 credits a picture), `art/tracker-model/venv/bin/python art/ui/cut_ui.py` (rewrites `KSUIData.h`: rebuild), then
 `art/ui/import_ui.py` headless. It also imports the fonts (`art/ui/fonts`) and the interface sounds from `prep_audio.py`.
 
-The arena's beam material `M_KS_Beam` is made by `art/tools/make_beam_material.py` (headless; no rebuild needed).
+New arena set pieces (stands, truss, lamps, barriers, landmarks; Meshy text-to-3D, 30 credits a model): add a prompt to
+`PROPS` in `art/arena/gen_props.py`, `python3 art/arena/gen_props.py quote|run <ceiling> [Name]` (`redo <ceiling> <Name>`
+buys one again), look at `art/models/_props/<Name>/thumbnail.png`, `art/tracker-model/venv/bin/python art/tools/slim_props.py [Name]`
+(cuts a million triangles down to a few thousand), then `art/tools/import_props.py` headless (log in
+`unreal/Saved/import_props.txt`). `KSWorld.cpp` places them by name with `FKSBuilder::Prop`; a
+model that faces the wrong way gets a turn in `PropFix`. No rebuild for a model bought again under the same name.
+
+Particle effects for the specials come from free Fab packs under `unreal/Content` (untracked; `docs/VFX.md` lists
+them, which are used and what went wrong). A new effect is named in `namespace Vx` in `KSGameMode.cpp` and added to
+`Vx::All`; look at it with `-KSVfxTour` or `-KSSpecials` first.
+
+The beam material `M_KS_Beam` (stage lamps and lasers) is made by `art/tools/make_beam_material.py` (headless; no rebuild
+needed; it writes `unreal/Saved/beam_material.txt` when it has succeeded). Whatever aims a beam sets its `Tip` and `Axis`.
 
 New announcer lines: `art/voice-model/venv/bin/python art/tools/announcer.py [key ...]` (local models, about two
 minutes a line; rewrites `KSAnnouncerData.h`: rebuild), then `art/tools/import_voice_faces.py -KSReimport` headless.

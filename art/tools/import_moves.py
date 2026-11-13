@@ -13,7 +13,7 @@ import unreal
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 FOLDERS = {'sergeant-mullet-v2': 'SergeantMulletV2', 'sir-lasercorn': 'SirLasercorn', 'aerobics-annihilator': 'AerobicsAnnihilator',
            'grandma-thunder': 'GrandmaThunder', 'count-hairspray': 'CountHairspray', 'turbotron': 'Turbotron', 'channel-zero': 'ChannelZero'}
-KEYS = ('Fun_A', 'Fun_B', 'Picked', 'Special', 'Win', 'Stagger')
+KEYS = ('Fun_A', 'Fun_B', 'Picked', 'Special', 'Win', 'Stagger', 'Shocked', 'Blown')
 REIMPORT = 'ksreimport' in unreal.SystemLibrary.get_command_line().lower()
 EAL = unreal.EditorAssetLibrary
 

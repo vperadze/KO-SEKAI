@@ -3,6 +3,12 @@
 Written 2026-11-13. **All ten are built** (`KSArenaData.h`, `KSWorld::BuildArena`, `AKSGameMode::UseArena`), with
 the original hall as arena 0. State and what is unverified: `docs/RESUME.md`.
 
+Since 2026-11-13 the hall itself is built from Meshy models: a kit shared by all eleven arenas (risers, barriers,
+truss gantries, lamps, posts, scoreboard, loudspeakers, round podiums) and one landmark per themed arena, named like
+the arena's key (`/Game/KS/Props/<Key>/SM_<Key>`), placed by the `Landmarks` table in `KSWorld::BuildArena`. A new
+arena therefore also needs one model (30 Meshy credits) and a row in that table; without it the arena simply has no
+landmark.
+
 ## What an arena is, so that ten are affordable
 
 An arena is the same ring with five things swapped. No new geometry, no new fighters, no new rules.
