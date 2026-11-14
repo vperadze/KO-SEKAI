@@ -396,6 +396,12 @@ Updated 2026-11-14. Deadline 2026-11-16 02:59 CET.
   made again with the vampire in it (25 credits, prepared on the canvas) were refused: **the Dreamina
   account is out of credits** (nothing was spent).
 
+- **The film's second shot has all seven fighters (2026-11-14, night)**: Dreamina drew six in "the fighters walk out of
+  the fire" (no vampire). Made again from a still with the seven in one row (`art/trailer/shot_nodes.json`,
+  `cover_final` and `fighters7v`; 39 credits with the tries), it replaces `art/cinematic/raw/fighters.mp4`, sheet
+  `T_KS_Cine_1`; same 61 frames, so `KSCineData.h` did not change. Seen in stills of the game's film; `tools/check.sh`
+  150 ok, all passed, on the code merged with the match server. The trailer and the cover use the same shot.
+
 ## Built but not verified with a person
 
 - **VS card shows the whole arena (2026-11-14, night)**: the opening shot is taken from high behind the player's
