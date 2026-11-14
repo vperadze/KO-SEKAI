@@ -419,3 +419,8 @@ One entry per bug that cost time: what happened, the cause, the rule. Add to it 
   video frames, coded and stretched from 1600 to 1920 and sharpened, of the brightest arenas. Rule: a still comes from
   the game itself (`-KSHitShots`, drawn at twice the size with `r.ScreenPercentage 200`: `art/trailer/stills.sh`), is
   never enlarged, and is taken in an arena whose lamps do not burn out (space, castle, rooftop, beach).
+- **A server's last words arrive with the closed door** (2026-11-14, found while writing the lobby, before it bit).
+  `FKSNet::Tick` gave up the moment `Recv` reported the connection closed and threw away what had been read in the
+  same frame, so "REFUSED: that name is taken" followed by a close would have shown as "The connection was closed".
+  Rule: on a closed connection, hand over the lines already read first, then report the failure; and the game reads
+  its lines before it looks at the link's state.

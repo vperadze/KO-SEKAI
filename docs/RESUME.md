@@ -274,6 +274,16 @@ Updated 2026-11-14. Deadline 2026-11-16 02:59 CET.
   (244 MiB cooked), the engine's shaders (81). Built again at 12:45 with the new opponent and the menu jab fix in it: the same size, and the packaged game
   ran (15 effects, both specials, no crash). `Packaged/Linux/KoSekai/Saved` holds 60 MB of test stills from those
   runs: leave it out of anything that is shipped.
+- **Windows package under 1 GB, 2026-11-14** (`unreal/package_windows.bat`, now Shipping by default and without the
+  `.pdb`): the folder is **841 MB (802.5 MiB)**. As a Development build it was 1050 MB without the `.pdb` (1001 MiB):
+  the program fell from 318 to 159 MiB and the 34 MiB of Vulkan debugging layers are no longer staged. The content
+  (`.ucas`, 513.5 MiB) is unchanged: it was already compressed (Oodle, 38% saved), so `-compressed` gains nothing.
+  The package was run by itself (`-KSStart=fight -KSAuto -KSSpecials -KSHitShots`): exit 0 after 37 s, and the stills
+  show the arena, the crowd, the interface with its fonts and both specials with their effects. A Shipping build
+  **writes no log**, so no `KSTEST` lines can be read from it (`set KS_CONFIG=Development` for a build that logs), and
+  it keeps its settings, stills and tracking recordings in `%LOCALAPPDATA%\KoSekai\Saved`, not beside the program.
+  It contains the lobby code, but `OnlineServer` is still not set. **Not verified** in it: webcam, microphone, sound,
+  the menus by hand, online play. The Linux script still builds Development.
 
 - **Badges and the fighters (2026-11-14)**: the one failed line of the night before ("badges cover the fighters")
   is explained and fixed; the note that stood here blamed the wrong thing. The measure used a box round each
@@ -422,6 +432,34 @@ Updated 2026-11-14. Deadline 2026-11-16 02:59 CET.
   online** (a special takes health off the other side locally, and online each game judges only its own health); the
   meters are not drawn there. A packaged Windows build was made on the Windows PC and two copies of it played an
   online bout on that one machine.
+- **The match server is deployed** (2026-11-14 evening): an AWS EC2 `t3.micro` (Ubuntu 24.04, Stockholm, instance
+  `ko-sekai-server`, free-plan account with 100 dollars of credit until 2027-05-14), `13.60.232.190:7777`, set as
+  `[KoSekai] OnlineServer` in `DefaultGame.ini`. `ko_relay.py` is in `/opt/ko-sekai`, runs as the service `ko-sekai`
+  (`tools/ko-sekai.service`; user `kosekai`, restarts by itself, starts at boot), ratings in
+  `/var/lib/ko-sekai/ko_players.json`, log with `journalctl -u ko-sekai`. The SSH key is the owner's `ko-sekai.pem`
+  (not in the repository). To update the server: copy `tools/ko_relay.py` over `/opt/ko-sekai/ko_relay.py` and
+  `sudo systemctl restart ko-sekai`. Tested from this PC with no `-KSServer` flag: two editor copies (`-KSLobby=CHECKA`
+  and `CHECKB`) met, fought and were rated 1016 and 984 (ping about 170 ms through the server); two copies of the
+  Shipping package did the same (seen in the server's log, the package writes none). The test players were removed
+  from the ratings file afterwards. **Not verified**: two people on two machines in two networks; the lobby by hand
+  or by webcam; a restart of the machine. **Limits**: the address is not an Elastic IP, so stopping and starting the
+  machine changes it and every shipped build then points nowhere (allocate an Elastic IP, or never stop it); no
+  NetApp volume (it was a sponsor's offer of a session, not a requirement).
+- **Match server: lobby, ratings, leaderboard** (2026-11-14; `tools/ko_relay.py`, `EKSLobby::Naming` and `Server`).
+  PLAY ONLINE now has a first line FIND A MATCH: the player types a name once (kept with a random key in the user
+  settings; the server refuses the name to any other key), then sees who else is on the server, his own rating, rank
+  title and place, and the ten best. ENTER or a jab pair challenges the player under the glove; the other is asked
+  and accepts or declines. The bout is the same as any online bout, with the server passing the lines on; both games
+  report the result and the server moves the ratings (Elo, K 32, start 1000) when they agree. Leaving a bout in
+  progress loses it. After a bout the result screens show the new rating; when the opponent leaves, the game goes
+  back to the lobby by itself. Ratings live in one JSON file (`--data`), rewritten whole through a temporary file,
+  so it can sit on a network volume. `tools/ko_relay_test.py` (22 checks, fake players) and a two-bot lobby match are
+  in `tools/check.sh`. **Not verified**: a server anywhere but 127.0.0.1 (none is deployed: no AWS account or CLI on
+  this PC, and `OnlineServer` in `DefaultGame.ini` is still not set, so FIND A MATCH in a shipped build says so and
+  does nothing); the ratings file on a NetApp volume; the name box and the list used by hand or by webcam (seen in
+  stills only: list, leaderboard, challenge prompt); the rating line on the result screens (logged, not seen).
+  **Known limits**: the server trusts the two games' reports (two who collude can trade wins); there is no way in the
+  game to change a name once typed (delete `PlayerName` from `GameUserSettings.ini`); nothing is encrypted.
 
 ## Next
 

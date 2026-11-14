@@ -809,32 +809,36 @@ void AKSHUD::DrawOnline(const AKSGameMode& G)
 {
 	const float T = G.PhaseTime;
 	Backdrop();
+	const bool bServer = G.Lobby == EKSLobby::Server;   // the match server's lobby takes the whole screen
 	const float LogoY = 0.175f + 0.006f * FMath::Sin(Now * 1.7f);
-	if (!Pic(TEXT("logo"), 0.5f, LogoY, 0.25f)) Text(TEXT("KO-SEKAI"), 0.5f, LogoY, 96.f, Magenta, 0, EKSFont::Comic, 4.f);
-	Text(TEXT("PLAY ONLINE"), 0.5f, 0.345f, 46.f, Yellow, 0, EKSFont::Comic, 2.6f, FLinearColor::Black);
-	// What went wrong last time (nobody answered, the opponent left) stays up until the next attempt.
-	if (!G.LobbyNote.IsEmpty()) Label(G.LobbyNote, 0.5f, 0.415f, 1.0f, FLinearColor(1.f, 0.45f, 0.35f), 0, 0.9f);
+	if (!bServer)
+	{
+		if (!Pic(TEXT("logo"), 0.5f, LogoY, 0.25f)) Text(TEXT("KO-SEKAI"), 0.5f, LogoY, 96.f, Magenta, 0, EKSFont::Comic, 4.f);
+		Text(TEXT("PLAY ONLINE"), 0.5f, 0.345f, 46.f, Yellow, 0, EKSFont::Comic, 2.6f, FLinearColor::Black);
+		// What went wrong last time (nobody answered, the opponent left) stays up until the next attempt.
+		if (!G.LobbyNote.IsEmpty()) Label(G.LobbyNote, 0.5f, 0.415f, 1.0f, FLinearColor(1.f, 0.45f, 0.35f), 0, 0.9f);
+	}
 
 	if (G.Lobby == EKSLobby::Choose)
 	{
 		if (G.LobbyIndex != SeenLobby) { SeenLobby = G.LobbyIndex; MenuAt = Now; }
-		static const TCHAR* Items[] = { TEXT("HOST A MATCH"), TEXT("JOIN A MATCH"), TEXT("BACK") };
+		static const TCHAR* Items[] = { TEXT("FIND A MATCH"), TEXT("HOST A MATCH"), TEXT("JOIN A MATCH"), TEXT("BACK") };
 		for (int32 i = 0; i < UE_ARRAY_COUNT(Items); i++)
 		{
 			const bool bOn = i == G.LobbyIndex;
 			const float Slide = 1.f - FMath::Clamp((T - 0.05f - 0.07f * i) / 0.22f, 0.f, 1.f);
-			const float Y = 0.515f + 0.100f * i, X = 0.5f + Slide * Slide * (i % 2 ? 0.7f : -0.7f);
+			const float Y = 0.500f + 0.088f * i, X = 0.5f + Slide * Slide * (i % 2 ? 0.7f : -0.7f);
 			PushSpin(X, Y, bOn ? PopScale(Now - MenuAt) * (1.06f + 0.012f * FMath::Sin(Now * 6.f)) : 0.92f, 0.f);
-			Plate(X - 0.21f, Y - 0.041f, 0.42f, 0.082f, bOn ? 1.f : 0.8f, bOn ? FLinearColor::White : FLinearColor(0.42f, 0.36f, 0.6f));
-			Text(Items[i], X, Y - 0.002f, 29.f, bOn ? FLinearColor(1.f, 0.95f, 0.45f) : Lilac, 0, EKSFont::Hud, 2.2f);
+			Plate(X - 0.21f, Y - 0.037f, 0.42f, 0.074f, bOn ? 1.f : 0.8f, bOn ? FLinearColor::White : FLinearColor(0.42f, 0.36f, 0.6f));
+			Text(Items[i], X, Y - 0.002f, 27.f, bOn ? FLinearColor(1.f, 0.95f, 0.45f) : Lilac, 0, EKSFont::Hud, 2.2f);
 			if (bOn)
 			{
 				const float Jab = FMath::Abs(FMath::Sin(Now * 5.f)) * 0.012f;
-				if (!Pic(TEXT("glove"), X - 0.255f + Jab, Y, 0.09f)) Text(TEXT(">"), X - 0.24f + Jab, Y, 34.f, Yellow);
+				if (!Pic(TEXT("glove"), X - 0.255f + Jab, Y, 0.085f)) Text(TEXT(">"), X - 0.24f + Jab, Y, 34.f, Yellow);
 			}
 			PopSpin();
 		}
-		Label(TEXT("HOST: a friend joins by your address.     JOIN: type a friend's address, or a relay server's."), 0.5f, 0.845f, 0.78f, Lilac, 0, 0.94f);
+		Label(TEXT("FIND: the lobby, ratings and leaderboard.     HOST: a friend joins by your address.     JOIN: type an address."), 0.5f, 0.850f, 0.74f, Lilac, 0, 0.94f);
 		Label(TEXT("UP / DOWN  choose          ENTER  select          ESC  back"), 0.5f, 0.905f, 0.8f, Lilac, 0, 0.94f);
 	}
 	else if (G.Lobby == EKSLobby::Hosting)
@@ -862,6 +866,90 @@ void AKSHUD::DrawOnline(const AKSGameMode& G)
 		Label(TEXT("for example   192.168.1.20   or   myserver.net:7777#ourroom"), 0.5f, 0.705f, 0.76f, Muted, 0, 0.6f);
 		Label(TEXT("#room on a relay server meets only the friend who types the same word"), 0.5f, 0.745f, 0.76f, Muted, 0, 0.6f);
 		Label(TEXT("ENTER  connect          CTRL+V  paste          DEL  clear          ESC  back"), 0.5f, 0.905f, 0.8f, Lilac, 0, 0.94f);
+	}
+	else if (G.Lobby == EKSLobby::Naming)
+	{
+		Panel(0.17f, 0.45f, 0.66f, 0.36f);
+		Label(TEXT("YOUR NAME IN THE RING"), 0.5f, 0.515f, 0.95f, Lilac, 0, 0.6f);
+		Plate(0.30f, 0.565f, 0.40f, 0.095f);
+		const bool bCursor = FMath::Frac(Now * 1.6f) < 0.55f;
+		Text(G.PlayerName + (bCursor ? TEXT("_") : TEXT(" ")), 0.5f, 0.610f, 34.f, FLinearColor(1.f, 0.95f, 0.45f), 0, EKSFont::Hud, 2.f, FLinearColor(0.04f, 0.f, 0.10f, 0.95f), 0.34f);
+		Label(TEXT("2 to 12 letters or digits. The leaderboard shows it,"), 0.5f, 0.705f, 0.76f, Muted, 0, 0.6f);
+		Label(TEXT("and it stays yours on this computer."), 0.5f, 0.745f, 0.76f, Muted, 0, 0.6f);
+		Label(TEXT("ENTER  go on          DEL  clear          ESC  back"), 0.5f, 0.905f, 0.8f, Lilac, 0, 0.94f);
+	}
+	else if (bServer)
+	{
+		const FLinearColor Edge(0.04f, 0.f, 0.10f, 0.95f), Gold(1.f, 0.95f, 0.45f);
+		Fill(0.f, 0.f, 1.f, 1.f, FLinearColor(0.02f, 0.f, 0.06f, 0.55f));
+		Text(TEXT("THE LOBBY"), 0.5f, 0.070f, 44.f, Yellow, 0, EKSFont::Comic, 2.6f, FLinearColor::Black);
+		// This player: name, rating, what the rating is called, the place on the board.
+		Plate(0.14f, 0.125f, 0.72f, 0.080f);
+		if (G.MyRating > 0)
+		{
+			const FString Place = G.MyPlace > 0 ? FString::Printf(TEXT("PLACE %d"), G.MyPlace) : FString(TEXT("NO RATED BOUT YET"));
+			Text(FString::Printf(TEXT("%s     %d     %s     %s     %d W  %d L"), *G.PlayerName, G.MyRating, AKSGameMode::RankTitle(G.MyRating), *Place, G.MyWins, G.MyLosses),
+				0.5f, 0.163f, 22.f, Gold, 0, EKSFont::Hud, 2.f, Edge, 0.66f);
+		}
+		else Text(G.LobbyStatus + FString::ChrN((int32)(Now * 2.f) % 4, TEXT('.')), 0.5f, 0.163f, 22.f, Gold, 0, EKSFont::Hud, 2.f, Edge, 0.66f);
+		if (!G.LobbyNote.IsEmpty()) Label(G.LobbyNote, 0.5f, 0.240f, 0.95f, FLinearColor(1.f, 0.45f, 0.35f), 0, 0.9f);
+
+		// Who is here: the line under the glove is the one a challenge goes to.
+		Panel(0.04f, 0.275f, 0.50f, 0.585f);
+		Label(TEXT("WHO IS HERE"), 0.29f, 0.328f, 1.0f, Cyan, 0, 0.44f);
+		const int32 Rows = 7, Count = G.LobbyPlayers.Num(), First = FMath::Max(0, FMath::Min(G.ServerIndex - Rows + 1, Count - Rows));
+		for (int32 i = First; i < Count && i < First + Rows; i++)
+		{
+			const FKSLobbyRow& Row = G.LobbyPlayers[i];
+			const bool bOn = i == G.ServerIndex;
+			const float Y = 0.392f + 0.056f * (i - First);
+			if (bOn)
+			{
+				Plate(0.075f, Y - 0.028f, 0.445f, 0.056f);
+				const float Jab = FMath::Abs(FMath::Sin(Now * 5.f)) * 0.008f;
+				if (!Pic(TEXT("glove"), 0.070f + Jab, Y, 0.062f)) Text(TEXT(">"), 0.070f + Jab, Y, 26.f, Yellow);
+			}
+			const FLinearColor Ink = Row.bBusy ? Muted : bOn ? Gold : Lilac;
+			Text(Row.Name, 0.105f, Y - 0.002f, 19.f, Ink, -1, EKSFont::Hud, 2.f, Edge, 0.17f);
+			Text(FString::FromInt(Row.Rating), 0.335f, Y - 0.002f, 19.f, Ink, 1, EKSFont::Hud, 2.f, Edge, 0.06f);
+			Text(Row.bBusy ? TEXT("IN A BOUT") : AKSGameMode::RankTitle(Row.Rating), 0.505f, Y - 0.002f, 14.f, Row.bBusy ? Muted : Cyan, 1, EKSFont::Hud, 2.f, Edge, 0.15f);
+		}
+		if (Count > First + Rows && G.Asked.IsEmpty()) Label(FString::Printf(TEXT("and %d more below"), Count - First - Rows), 0.29f, 0.782f, 0.7f, Muted, 0, 0.44f);
+		if (Count == 0 && G.MyRating > 0)
+		{
+			Label(TEXT("Nobody else is here yet."), 0.29f, 0.50f, 0.95f, Lilac, 0, 0.44f);
+			Label(TEXT("Stay: whoever comes in appears here."), 0.29f, 0.55f, 0.8f, Muted, 0, 0.44f);
+		}
+		if (!G.Asked.IsEmpty()) Label(FString::Printf(TEXT("WAITING FOR %s TO ANSWER"), *G.Asked) + FString::ChrN((int32)(Now * 2.f) % 4, TEXT('.')), 0.29f, 0.782f, 0.8f, Gold, 0, 0.44f);
+
+		// The ten best.
+		Panel(0.57f, 0.275f, 0.39f, 0.585f);
+		Label(TEXT("LEADERBOARD"), 0.765f, 0.328f, 1.0f, Magenta, 0, 0.33f);
+		for (int32 i = 0; i < G.LobbyTop.Num() && i < 10; i++)
+		{
+			const FKSLobbyRow& Row = G.LobbyTop[i];
+			const float Y = 0.380f + 0.046f * i;
+			const FLinearColor Ink = Row.Name == G.PlayerName ? Gold : i == 0 ? Yellow : Lilac;
+			Text(FString::FromInt(i + 1), 0.615f, Y, 15.f, Ink, 1, EKSFont::Hud, 2.f, Edge, 0.03f);
+			Text(Row.Name, 0.635f, Y, 15.f, Ink, -1, EKSFont::Hud, 2.f, Edge, 0.14f);
+			Text(FString::FromInt(Row.Rating), 0.835f, Y, 15.f, Ink, 1, EKSFont::Hud, 2.f, Edge, 0.05f);
+			Text(FString::Printf(TEXT("%d-%d"), Row.Wins, Row.Losses), 0.925f, Y, 13.f, Muted, 1, EKSFont::Hud, 2.f, Edge, 0.07f);
+		}
+		if (G.LobbyTop.Num() == 0 && G.MyRating > 0) Label(TEXT("No rated bout yet. Win the first."), 0.765f, 0.50f, 0.8f, Muted, 0, 0.33f);
+
+		if (!G.Challenger.IsEmpty())
+		{
+			// A challenge is a question: it covers the lists until it is answered.
+			Fill(0.f, 0.f, 1.f, 1.f, FLinearColor(0.02f, 0.f, 0.06f, 0.6f));
+			Panel(0.22f, 0.36f, 0.56f, 0.32f);
+			PushSpin(0.5f, 0.445f, 1.f + 0.02f * FMath::Sin(Now * 7.f), 0.f);
+			Text(FString::Printf(TEXT("%s CHALLENGES YOU"), *G.Challenger), 0.5f, 0.445f, 34.f, Yellow, 0, EKSFont::Comic, 2.6f, FLinearColor::Black, 0.50f);
+			PopSpin();
+			Label(FString::Printf(TEXT("%s     rating %d"), AKSGameMode::RankTitle(G.ChallengerRating), G.ChallengerRating), 0.5f, 0.525f, 1.0f, Cyan, 0, 0.5f);
+			Label(TEXT("ENTER or jab left + right: fight          ESC: not now"), 0.5f, 0.610f, 0.85f, Lilac, 0, 0.5f);
+		}
+		else Label(TEXT("UP / DOWN  choose          ENTER or jab left + right  challenge          ESC  leave"), 0.5f, 0.905f, 0.8f, Lilac, 0, 0.94f);
+		if (!bLoggedServerLobby && G.MyRating > 0) { bLoggedServerLobby = true; UE_LOG(LogTemp, Display, TEXT("KSTEST ui server lobby shown")); }   // for tools/check.sh
 	}
 	else
 	{
@@ -998,7 +1086,8 @@ void AKSHUD::DrawFight(const AKSGameMode& G)
 		PushSpin(0.115f, 0.865f, SlamScale(FMath::Max(0.f, T - 0.15f)) * (1.f + 0.03f * FMath::Sin(Now * 9.f)), -8.f);
 		if (T > 0.15f) Pic(TEXT("vs"), 0.115f, 0.865f, 0.19f, A);
 		PopSpin();
-		Label(G.bOnline ? TEXT("Another player. Nobody knows what they will do.") : F.Tagline, 0.60f, 0.872f, 1.0f, Faded(Lilac, A), 0, 0.72f);
+		Label(!G.bOnline ? FString(F.Tagline) : G.OppName.IsEmpty() ? FString(TEXT("Another player. Nobody knows what they will do."))
+			: FString::Printf(TEXT("%s     %s     rating %d"), *G.OppName, AKSGameMode::RankTitle(G.OppRating), G.OppRating), 0.60f, 0.872f, 1.0f, Faded(Lilac, A), 0, 0.72f);
 		Label(FString::Printf(TEXT("YOU FIGHT AS %s"), G.PlayerFighter().Name), 0.60f, 0.912f, 0.95f, Faded(Cyan, A), 0, 0.72f);
 		const bool bTracked = G.Tracking() && G.Tracking()->IsConnected();
 		Label(bTracked ? TEXT("PUNCH, BLOCK, LEAN AND DUCK FOR REAL - THE CABINET IS WATCHING")
@@ -1013,6 +1102,9 @@ void AKSHUD::DrawFight(const AKSGameMode& G)
 	const FString Rematch = G.bOnlineReady ? (G.bOnlineOppReady ? TEXT("HERE WE GO AGAIN") : TEXT("WAITING FOR THE OTHER PLAYER"))
 		: (G.bOnlineOppReady ? TEXT("THE OTHER PLAYER WANTS A REMATCH") : TEXT("REMATCH?"));
 	const TCHAR* const RematchKeys = TEXT("ENTER or jab left + right: rematch          ESC: leave");
+	// A bout found through the match server is rated: the new rating, when the server has counted it.
+	const FString RatingLine = !G.bLobbyLink ? FString() : !G.bRated ? FString(TEXT("the server is counting the bout"))
+		: FString::Printf(TEXT("RATING %d  (%s%d)          %s          PLACE %d"), G.MyRating, G.RatedChange >= 0 ? TEXT("+") : TEXT(""), G.RatedChange, AKSGameMode::RankTitle(G.MyRating), G.MyPlace);
 	if (G.bOnline) Label(G.OnlinePingMs >= 0.f ? FString::Printf(TEXT("ONLINE   %d ms"), FMath::RoundToInt(G.OnlinePingMs)) : FString(TEXT("ONLINE")), 0.015f, 0.975f, 0.6f, Muted, -1);
 
 	/* health, names, clock */
@@ -1027,7 +1119,7 @@ void AKSHUD::DrawFight(const AKSGameMode& G)
 		HealthBar(0.025f, 0.405f, G.PlayerHP / 100.f, G.PlayerTrail / 100.f, Cyan, false, Jolt(PlayerJoltAt));
 		HealthBar(0.57f, 0.405f, G.OppHP / G.OppMaxHP, G.OppTrail / G.OppMaxHP, Magenta, true, Jolt(OppJoltAt));
 		Text(FString::Printf(TEXT("YOU  -  %s"), G.PlayerFighter().Name), 0.07f, 0.150f, 19.f, Cyan, -1, EKSFont::Hud, 2.f, Edge, 0.36f);
-		Text(G.bOnline ? FString::Printf(TEXT("%s  -  RIVAL"), F.Name) : FString(F.Name), 0.93f, 0.150f, 19.f, Magenta, 1, EKSFont::Hud, 2.f, Edge, 0.36f);
+		Text(G.bOnline ? FString::Printf(TEXT("%s  -  %s"), F.Name, G.OppName.IsEmpty() ? TEXT("RIVAL") : *G.OppName) : FString(F.Name), 0.93f, 0.150f, 19.f, Magenta, 1, EKSFont::Hud, 2.f, Edge, 0.36f);
 		// Special abilities are not played online yet (each game judges only its own health), so no meters there.
 		if (!G.bOnline)
 		{
@@ -1133,6 +1225,7 @@ void AKSHUD::DrawFight(const AKSGameMode& G)
 		Plate(0.27f, 0.632f, 0.46f, 0.07f);
 		Label(G.bOnline ? Rematch : bLast ? FString(TEXT("The screen cracks. There is a way out.")) : FString::Printf(TEXT("NEXT: %s"), G.LadderFighter(G.FighterIndex + 1).Name), 0.5f, 0.666f, 1.05f, Yellow, 0, 0.36f);
 		if (FMath::Frac(Now * 0.9f) < 0.65f) Label(G.bOnline ? RematchKeys : TEXT("Press ENTER or jab left + right"), 0.5f, 0.733f, 0.9f, Lilac, 0, 0.58f);
+		if (G.bOnline && !RatingLine.IsEmpty()) Label(RatingLine, 0.5f, 0.778f, 0.85f, G.bRated ? Green : Muted, 0, 0.58f);
 	}
 	if (G.Phase == EKSPhase::Continue)
 	{
@@ -1148,6 +1241,7 @@ void AKSHUD::DrawFight(const AKSGameMode& G)
 			Label(G.bLastResultDecision ? TEXT("Lost on points, to another player.") : TEXT("Put down by another player."), 0.5f, 0.475f, 1.1f, Lilac, 0, 0.94f);
 			Plate(0.27f, 0.585f, 0.46f, 0.085f);
 			Label(Rematch, 0.5f, 0.626f, 1.05f, Yellow, 0, 0.38f);
+			if (!RatingLine.IsEmpty()) Label(RatingLine, 0.5f, 0.715f, 0.95f, G.bRated ? FLinearColor(1.f, 0.45f, 0.35f) : Muted, 0, 0.94f);
 			if (FMath::Frac(Now * 0.9f) < 0.65f) Label(RematchKeys, 0.5f, 0.775f, 1.0f, Lilac, 0, 0.94f);
 			DrawTracker(G, true);
 			return;

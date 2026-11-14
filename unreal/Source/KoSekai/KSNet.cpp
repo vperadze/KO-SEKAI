@@ -65,10 +65,11 @@ bool FKSNet::Host(int32 Port)
 	return true;
 }
 
-void FKSNet::Join(const FString& Address)
+void FKSNet::Join(const FString& Address, const FString& LobbyHello)
 {
 	Close();
 	Problem.Reset();
+	Hello = LobbyHello;
 	FString Name = Address.TrimStartAndEnd();
 	Room = TEXT("-");
 	int32 Hash;
@@ -160,7 +161,7 @@ void FKSNet::Tick(TArray<FString>& OutLines)
 		if (!Result.Socket) { Fail(Result.Error.IsEmpty() ? TEXT("Could not connect.") : Result.Error); return; }
 		Adopt(Result.Socket);
 		// The relay reads this line to learn the room. A hosting game ignores it.
-		Send(FString::Printf(TEXT("HELLO 1 %s"), *Room));
+		Send(Hello.IsEmpty() ? FString::Printf(TEXT("HELLO 1 %s"), *Room) : Hello);
 		Now = EState::Waiting;
 		UE_LOG(LogKSNet, Display, TEXT("Connected; waiting to be given a role."));
 	}
@@ -168,11 +169,13 @@ void FKSNet::Tick(TArray<FString>& OutLines)
 
 	Flush();
 	uint8 Buffer[2048];
+	bool bClosed = false;
 	for (;;)
 	{
 		int32 Read = 0;
 		// False means the other side closed the connection (or it broke); true with nothing read means nothing has come.
-		if (!Socket->Recv(Buffer, sizeof(Buffer), Read)) { Fail(Now == EState::Connected ? TEXT("The opponent left.") : TEXT("The connection was closed.")); return; }
+		// What came before it closed is still read out below: the server says why before it shuts the door.
+		if (!Socket->Recv(Buffer, sizeof(Buffer), Read)) { bClosed = true; break; }
 		if (Read <= 0) break;
 		In.Append(Buffer, Read);
 		LastHeard = FPlatformTime::Seconds();
@@ -195,9 +198,11 @@ void FKSNet::Tick(TArray<FString>& OutLines)
 			continue;
 		}
 		if (Line == TEXT("WAIT") || Line.StartsWith(TEXT("HELLO "))) continue;
-		if (Now == EState::Connected) OutLines.Add(MoveTemp(Line));
+		// In the server's lobby there is something to hear before there is an opponent.
+		if (Now == EState::Connected || !Hello.IsEmpty()) OutLines.Add(MoveTemp(Line));
 	}
 	if (Start > 0) In.RemoveAt(0, Start, EAllowShrinking::No);
+	if (bClosed) { Fail(Now == EState::Connected ? TEXT("The opponent left.") : TEXT("The connection was closed.")); return; }
 	if (In.Num() > 65536) Fail(TEXT("The connection sent nonsense."));
 }
 

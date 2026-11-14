@@ -113,7 +113,7 @@ private:
 	float BubbleStart = 0.f, AnnounceStart = 0.f, AnnounceEnd = 0.f;
 	float SeenPlayerHP = -1.f, SeenOppHP = -1.f, PlayerJoltAt = -10.f, OppJoltAt = -10.f;
 	int32 SeenLobby = -1;
-	bool bLoggedLobby = false;
+	bool bLoggedLobby = false; bool bLoggedServerLobby = false;
 	int32 SeenCombo = 0, SeenMenu = -1, SeenCount = -1;
 	float ComboAt = -10.f, MenuAt = -10.f, CountAt = -10.f;
 };
