@@ -49,3 +49,14 @@ unreal/Content/NiagaraExamples/
 
 # Made by the editor when it found the .ttf files beside them; the game reads the .ttf files themselves (docs/LESSONS.md).
 unreal/Content/KS/UI/Fonts/*.uasset
+
+# The trailer's takes (11 recordings of the game playing itself, 2.8 GB), what the cutter builds from them, the
+# short clips sent to the Dreamina canvas, and the trailer itself (68 MB): made again by art/trailer/takes.sh and
+# make_trailer.py. The scripts, the script of the trailer, the voice-over and the stills are kept.
+art/trailer/raw/
+art/trailer/build/
+art/trailer/selects/
+art/trailer/dreamina/
+art/trailer/*.mp4
+art/trailer/*.out
+art/trailer/vo/*.take*.wav

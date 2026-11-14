@@ -366,6 +366,26 @@ Updated 2026-11-14. Deadline 2026-11-16 02:59 CET.
     add the four Fab packs, run `unreal\package_windows.bat`, and measure `Packaged\Windows` without `.pdb` files.
     The content file will be about the Linux one (564 MiB); the rest is unmeasured.
 
+- **The jam trailer and the page's stills (2026-11-14, night)**: `art/trailer/KO-SEKAI_trailer.mp4`, 40.0 s,
+  1920x1080, 68 MB, cut by `art/trailer/make_trailer.py` after `art/trailer/SCRIPT.md`: the film's six shots, then
+  the select screen, four arenas, six pieces of bouts, three specials, a knockout, the logo; five new voice-over lines
+  in the announcer's voice (`art/trailer/vo.py`, local), the fight music under them, words slammed on in the game's
+  fonts, a worn-tape look. The gameplay is eleven takes of the game playing itself, recorded with sound by
+  `art/trailer/record.sh` (`takes.sh` runs them all, 13 minutes; 1600x900, stretched to 1080). Stills in
+  `art/trailer/shots`: `cover.png` (the fighters walking out of the fire, with the logo; `cover_plain.png` without)
+  `cover_seven.png` (the game's seven painted portraits: the film frame has only six fighters, no vampire)
+  and six screenshots saved by the game itself (`art/trailer/stills.sh`, lossless; the first set, cut from the
+  video, was rejected as pixelated and overbright). The tagline is WEBCAM BOXING; the jam theme's name is used
+  nowhere (player, 2026-11-14). All of it, and the script as a text note, is on the Dreamina canvas "KO-SEKAI trailer".
+  **Seen in stills only (one picture a second, and three at full size); nobody has watched it or heard it.**
+  Unjudged: the mix (the takes carry each arena's own music under the trailer's, thinned but not gone), the voice-over's
+  acting (four takes of each line are in `art/trailer/vo`), the pace of the cuts, and
+  whether the words cover too much of the fight. The takes show "WEBCAM OFF - KEYBOARD" in a corner; it is smeared
+  out, which leaves a soft patch at the bottom right. Nobody boxes at a webcam in it: the words say so, no picture does.
+  Three Dreamina shots that would show it (`art/trailer/gen_shots.py`, 70 credits) and the film's fighters shot
+  made again with the vampire in it (25 credits, prepared on the canvas) were refused: **the Dreamina
+  account is out of credits** (nothing was spent).
+
 ## Built but not verified with a person
 
 - **VS card shows the whole arena (2026-11-14, night)**: the opening shot is taken from high behind the player's
@@ -409,7 +429,7 @@ Updated 2026-11-14. Deadline 2026-11-16 02:59 CET.
    3 hooks and 3 uppercuts each side, 3 blocks of 2 s. Turn it into `tests/tracking/` cases and tune from it.
 2. The player tries the harder opponent, the dizzy, the WEBCAM line and the CONTROLS screen (see "Not verified" above).
 3. Windows package: build, size under 1 GB, test the webcam there (the OpenCV camera backend differs on Windows).
-4. The 30–60 s gameplay video.
+4. Watch and listen to the trailer (below) and say what to change; upload it and the stills to the jam page.
 
 ## Known gaps
 

@@ -401,3 +401,21 @@ One entry per bug that cost time: what happened, the cause, the rule. Add to it 
   stops being a turn of the camera once the lens is wide; and a check that fails "by chance" twice is a bug.
 - **A comment after an opening brace on one line ate the closing brace** (`if (...) {   // note` in front of code on
   the same line, put there by a scripted edit). Rule: a scripted edit never appends `//` in the middle of a line.
+
+- **A recording of the game's window showed the desktop for three seconds (2026-11-14).** `ximagesrc xid=` does not
+  film the window, it films the part of the screen the window covers, and Unreal's window is there before it is
+  painted: the first take opened on the terminal. A game that quits by itself leaves the same hole at the end. Rule:
+  never cut from a take's first four seconds, stop the recorder when the game goes (`art/trailer/record.sh` does),
+  keep the window uncovered, and look at a take before it leaves the machine.
+- **Joined shots vanished: 13 seconds of film were in the file and not in the picture.** The film's clips carry no
+  colour labels and the takes say bt709, so shots joined without coding again had two kinds of stream and the
+  decoder dropped the first kind. Rule: every piece that is joined by copying gets the same labels, size and rate
+  (`make_trailer.py`, `segments`), and the joined file is looked at from its first second.
+- **A window asked for at 1920x1080 on a 1920x1200 screen is not 1920 wide**: the desktop's dock leaves 1854, and the
+  recorder waited for a window that never came. The takes are 1600x900.
+- **Dreamina's error 20005 is "insufficient credits"**, and `node run` only says "rejected, invalid input";
+  `operation status <submitId>` gives the words. A quote succeeds on an empty account, so a quote is not a balance.
+- **Stills cut from a recording were rejected** (player, 2026-11-14: "too pixelated, too much overbright"). They were
+  video frames, coded and stretched from 1600 to 1920 and sharpened, of the brightest arenas. Rule: a still comes from
+  the game itself (`-KSHitShots`, drawn at twice the size with `r.ScreenPercentage 200`: `art/trailer/stills.sh`), is
+  never enlarged, and is taken in an arena whose lamps do not burn out (space, castle, rooftop, beach).

@@ -1,0 +1,24 @@
+{
+ "project": "9ac117b1-ada3-4e49-be31-62dafc35b95f",
+ "nodes": {
+  "tape": "node_gegef994kz",
+  "webcam": "node_q3vjzv4cpa",
+  "flex": "node_wef2sbx7za",
+  "fighters7": "node_rst6vf460e",
+  "cover7": "node_hav09dmt9g",
+  "cover7b": "node_rnhex3kkjg",
+  "cover7c": "node_6p8n0w1mmx",
+  "cover7d": "node_7am0wykvfg",
+  "cover_bg": "node_57rj15q650",
+  "cover_vamp": "node_fcjb7js2zz",
+  "cover_final": "node_gjc20f2k66",
+  "fighters7v": "node_cgj1kd9zc7"
+ },
+ "prompts": {
+  "tape": "seedance_2.0_mini|4|A shot from an over-the-top 1980s action movie, filmed on 35 mm and seen on a worn VHS tape: heavy film grain, soft focus, tape tracking lines and colour bleed, anamorphic lens flares, smoke, hard backlight in magenta and cyan neon, wet streets. Dramatic, fast, a little ridiculous, completely serious. No text, no titles, no subtitles, no logos, no watermark. Extreme close-up in a dark wood-panelled living room, 1987. A hand pushes a black video cassette with a blank label into a chunky silver video recorder; the machine swallows it with a jolt, its green display lights up, and the big television above bursts into static and then blinding magenta and cyan light that floods the room. The camera pushes fast into the glowing screen.",
+  "webcam": "seedance_2.0_mini|5|A shot from an over-the-top 1980s action movie, filmed on 35 mm and seen on a worn VHS tape: heavy film grain, soft focus, tape tracking lines and colour bleed, anamorphic lens flares, smoke, hard backlight in magenta and cyan neon, wet streets. Dramatic, fast, a little ridiculous, completely serious. No text, no titles, no subtitles, no logos, no watermark. A teenager's bedroom at night in 1987, lit only by a huge glowing television. A muscular young man in a red headband and a sleeveless denim jacket stands in front of the television and throws fast boxing punches at the air, grinning. A small video camera sits on top of the television, pointed at him, its red light on. On the screen a cartoon boxer in a neon ring throws exactly the same punches at the same instant. Sparks fly out of the screen with every punch. The camera circles him quickly, low to the floor.",
+  "flex": "seedance_2.0_mini|5|A shot from an over-the-top 1980s action movie, filmed on 35 mm and seen on a worn VHS tape: heavy film grain, soft focus, tape tracking lines and colour bleed, anamorphic lens flares, smoke, hard backlight in magenta and cyan neon, wet streets. Dramatic, fast, a little ridiculous, completely serious. No text, no titles, no subtitles, no logos, no watermark. Seven video game fighters stand in a row on a chrome stage and flex their muscles like bodybuilders, striking one proud pose after another: a huge soldier with a blond mullet and a red headband, a muscular knight with a white unicorn's head, a woman in a neon aerobics leotard with enormous hair, a tiny furious grandmother in boxing gloves, a chrome robot, a pale vampire with a towering black hairdo, and a man with a television set for a head. Fireworks and columns of flame go off behind them, laser beams sweep the smoke, a crowd's hands wave in the foreground. The camera cranes up from the floor and pushes in.",
+  "fighters7": "A shot from an over-the-top 1980s action movie, filmed on 35 mm and seen on a worn VHS tape: heavy film grain, soft focus, tape tracking lines and colour bleed, anamorphic lens flares, smoke, hard backlight in magenta and cyan neon, wet streets. Dramatic, fast, a little ridiculous, completely serious. No text, no titles, no subtitles, no logos, no watermark. The shot in {{res:8d25cc18-d577-4d8a-9df0-415cc1af71ea}}, made again with one more fighter: the same six video game fighters walk side by side towards the camera in slow motion out of a wall of fire and exploding arcade machines, and a seventh walks with them at the right end of the row, next to the man with the television head: the vampire of {{res:64e5abc3-51f4-4020-ab4c-b9e31882e950}} and {{res:d842882b-3125-4880-ae6f-681ae0c744aa}}, a tall pale glam-rock vampire with a towering mane of teased black hair, purple eye shadow and fangs, a black leather jacket with silver spikes, leopard-print trousers, silver boots and purple boxing gloves. All seven are fully in the picture from head to foot, none hidden behind another. Sparks rain down, their coats and hair blow in the blast."
+ },
+ "cover_final_resource": "5726025c-728f-47df-9edc-c76c2a2e03d9"
+}
