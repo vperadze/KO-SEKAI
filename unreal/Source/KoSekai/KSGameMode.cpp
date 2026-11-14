@@ -1274,9 +1274,11 @@ void AKSGameMode::UpdateFightCamera(float Dt)
 		// Before that, a second and a half of the place itself: a wide look over the ring at the painted wall. The
 		// fight camera sits low over the player's shoulder and never shows more of an arena than its crowd.
 		const float Wide = 1.f - FMath::SmoothStep(1.5f, 2.3f, PhaseTime);
-		Pos = FMath::Lerp(Pos, FVector(-560.f + 60.f * PhaseTime, -90.f + 50.f * PhaseTime, 250.f), Wide);
-		Aim = FMath::Lerp(Aim, FVector(1200.f, 0.f, 430.f), Wide);
-		Fov = FMath::Lerp(Fov, 84.f, Wide);
+		// From high behind the player's corner, so the whole place is in it: ring, stands, wall and rig (player,
+		// 2026-11-14: "the arena looks cut - place the camera from where we can see the full arena").
+		Pos = FMath::Lerp(Pos, FVector(-860.f + 60.f * PhaseTime, -110.f + 50.f * PhaseTime, 430.f), Wide);
+		Aim = FMath::Lerp(Aim, FVector(500.f, 0.f, 150.f), Wide);
+		Fov = FMath::Lerp(Fov, 88.f, Wide);
 	}
 	/* ---- the cameraman ----
 	   A Steadicam operator inside the ropes. He walks round the two fighters and chooses his own shots: over either of

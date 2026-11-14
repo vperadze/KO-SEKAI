@@ -257,8 +257,8 @@ void AKSHUD::BeginLayout(const AKSGameMode& G)
 {
 	Heads.Reset(); Taken.Reset();
 	// Below the health bars and above the bottom edge; on the VS card only the strip the fighters are seen through.
-	Region = G.Phase == EKSPhase::Card ? FBox2D(FVector2D(0.01f * SW, 0.16f * SH), FVector2D(0.99f * SW, 0.59f * SH))
-		: FBox2D(FVector2D(0.01f * SW, 0.185f * SH), FVector2D(0.99f * SW, 0.93f * SH));
+	Region = G.Phase == EKSPhase::Card ? FBox2D(FVector2D(0.01f * SW, 0.11f * SH), FVector2D(0.99f * SW, 0.74f * SH))
+		: FBox2D(FVector2D(0.01f * SW, 0.235f * SH), FVector2D(0.99f * SW, 0.93f * SH));   // from 0.235: a bubble's name tag lay on the names under the health bars
 	Cell = FMath::Max(4.f, SH / 48.f);
 	GridW = FMath::CeilToInt(SW / Cell); GridH = FMath::CeilToInt(SH / Cell);
 	TArray<uint8> On;
@@ -609,8 +609,10 @@ void AKSHUD::DrawAnnouncement(const AKSGameMode& G)
 	const float T = G.Clock - AnnounceStart, Left = G.AnnounceUntil - G.Clock;
 	const float Alpha = FMath::Clamp(Left / 0.25f, 0.f, 1.f);
 	const float Shiver = T < 0.45f ? (0.45f - T) * 0.02f : 0.f;
-	const float X = 0.5f + FMath::Sin(Now * 95.f) * Shiver, Y = 0.40f + FMath::Cos(Now * 80.f) * Shiver;
-	PushSpin(X, Y, SlamScale(T) * (1.f + 0.015f * FMath::Sin(Now * 7.f)), -3.f);
+	// Before the bell ("FIGHT 1 OF 3") it is smaller and sits above the fighters' heads: it used to lie across both of them.
+	const bool bCard = G.Phase == EKSPhase::Card;
+	const float X = 0.5f + FMath::Sin(Now * 95.f) * Shiver, Y = (bCard ? 0.27f : 0.40f) + FMath::Cos(Now * 80.f) * Shiver;
+	PushSpin(X, Y, (bCard ? 0.6f : 1.f) * SlamScale(T) * (1.f + 0.015f * FMath::Sin(Now * 7.f)), -3.f);
 	const TCHAR* Art = ArtFor(G.Announcement);
 	if (!Art || !Pic(Art, X, Y, 0.30f, Alpha))
 	{
@@ -983,26 +985,26 @@ void AKSHUD::DrawFight(const AKSGameMode& G)
 	{
 		PlaceBubble(G);
 		const float T = G.PhaseTime, A = FMath::Clamp(FMath::Min(T / 0.3f, (2.6f - T) / 0.3f), 0.f, 1.f);
-		Fill(0.f, 0.f, 1.f, 0.15f, FLinearColor(0.02f, 0.f, 0.06f, 0.85f * A));
-		Fill(0.f, 0.146f, 1.f, 0.005f, Faded(Magenta, A));
-		Fill(0.f, 0.60f, 1.f, 0.40f, FLinearColor(0.02f, 0.f, 0.06f, 0.85f * A));
-		Fill(0.f, 0.598f, 1.f, 0.005f, Faded(Cyan, A));
-		Plate(0.33f, 0.035f, 0.34f, 0.085f, A);
-		Label(G.bOnline ? FString(TEXT("ONLINE MATCH")) : FString::Printf(TEXT("CUT FIGHTER %d OF %d"), G.FighterIndex + 1, G.NumFights()), 0.5f, 0.076f, 1.15f, Faded(FLinearColor::White, A), 0, 0.25f);
+		// The arena is the picture here (player, 2026-11-14: "the arena looks cut"): two dark bands used to leave a
+		// strip of it, 44% of the screen. Now there is one band, the bottom quarter, and a small plate at the top.
+		Fill(0.f, 0.75f, 1.f, 0.25f, FLinearColor(0.02f, 0.f, 0.06f, 0.85f * A));
+		Fill(0.f, 0.748f, 1.f, 0.005f, Faded(Cyan, A));
+		Plate(0.36f, 0.02f, 0.28f, 0.07f, A);
+		Label(G.bOnline ? FString(TEXT("ONLINE MATCH")) : FString::Printf(TEXT("CUT FIGHTER %d OF %d"), G.FighterIndex + 1, G.NumFights()), 0.5f, 0.054f, 0.95f, Faded(FLinearColor::White, A), 0, 0.21f);
 		// The name slides in from the right, the VS badge bangs in on the left.
 		const float Slide = 1.f - FMath::Clamp(T / 0.28f, 0.f, 1.f);
 		// Everything on the card's lower band stays right of the VS badge.
-		Text(F.Name, 0.60f + Slide * Slide * 0.8f, 0.705f, 92.f, Faded(Yellow, A), 0, EKSFont::Comic, 3.f, FLinearColor::Black, 0.72f);
-		PushSpin(0.115f, 0.71f, SlamScale(FMath::Max(0.f, T - 0.15f)) * (1.f + 0.03f * FMath::Sin(Now * 9.f)), -8.f);
-		if (T > 0.15f) Pic(TEXT("vs"), 0.115f, 0.71f, 0.24f, A);
+		Text(F.Name, 0.60f + Slide * Slide * 0.8f, 0.812f, 66.f, Faded(Yellow, A), 0, EKSFont::Comic, 3.f, FLinearColor::Black, 0.72f);
+		PushSpin(0.115f, 0.865f, SlamScale(FMath::Max(0.f, T - 0.15f)) * (1.f + 0.03f * FMath::Sin(Now * 9.f)), -8.f);
+		if (T > 0.15f) Pic(TEXT("vs"), 0.115f, 0.865f, 0.19f, A);
 		PopSpin();
-		Label(G.bOnline ? TEXT("Another player. Nobody knows what they will do.") : F.Tagline, 0.60f, 0.805f, 1.15f, Faded(Lilac, A), 0, 0.72f);
-		Label(FString::Printf(TEXT("YOU FIGHT AS %s"), G.PlayerFighter().Name), 0.60f, 0.862f, 1.05f, Faded(Cyan, A), 0, 0.72f);
+		Label(G.bOnline ? TEXT("Another player. Nobody knows what they will do.") : F.Tagline, 0.60f, 0.872f, 1.0f, Faded(Lilac, A), 0, 0.72f);
+		Label(FString::Printf(TEXT("YOU FIGHT AS %s"), G.PlayerFighter().Name), 0.60f, 0.912f, 0.95f, Faded(Cyan, A), 0, 0.72f);
 		const bool bTracked = G.Tracking() && G.Tracking()->IsConnected();
 		Label(bTracked ? TEXT("PUNCH, BLOCK, LEAN AND DUCK FOR REAL - THE CABINET IS WATCHING")
 			: *FString::Printf(TEXT("%s/%s/%s left jab/hook/uppercut   %s/%s/%s right   %s block   %s/%s evade   %s duck   %s pause   ESC menu"),
 				*KSKeys::Label(EKSKey::JabLeft), *KSKeys::Label(EKSKey::HookLeft), *KSKeys::Label(EKSKey::UppercutLeft), *KSKeys::Label(EKSKey::JabRight), *KSKeys::Label(EKSKey::HookRight), *KSKeys::Label(EKSKey::UppercutRight),
-				*KSKeys::Label(EKSKey::Block), *KSKeys::Label(EKSKey::EvadeLeft), *KSKeys::Label(EKSKey::EvadeRight), *KSKeys::Label(EKSKey::Duck), *KSKeys::Label(EKSKey::Pause)), 0.5f, 0.94f, 0.78f, Faded(Muted, A), 0, 0.80f);
+				*KSKeys::Label(EKSKey::Block), *KSKeys::Label(EKSKey::EvadeLeft), *KSKeys::Label(EKSKey::EvadeRight), *KSKeys::Label(EKSKey::Duck), *KSKeys::Label(EKSKey::Pause)), 0.5f, 0.952f, 0.72f, Faded(Muted, A), 0, 0.80f);
 		DrawTracker(G, true);
 		return;
 	}
