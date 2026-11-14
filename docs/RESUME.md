@@ -368,6 +368,11 @@ Updated 2026-11-14. Deadline 2026-11-16 02:59 CET.
 
 ## Built but not verified with a person
 
+- **Special by hand (2026-11-14, late evening)**: both hands thrown up or brought down together set off the special
+  when the meter is full, next to the shout and the key; calibration has a tenth step that teaches it (a shout counts
+  there too), the bout's hint and the CONTROLS screen say it. The check runs made-up moves through the reader only:
+  no person has done the move in front of the camera. See `docs/TRACKING.md`, "The special ability by hand".
+
 - Early punch call (punch starts while the arm is still extending).
 - Absolute block rule (both fists at face height).
 - STEP BACK warning and the fist-below-picture rejection.

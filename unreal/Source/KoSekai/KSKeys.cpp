@@ -18,7 +18,7 @@ namespace
 			{ TEXT("EvadeLeft"),     TEXT("EVADE LEFT"),      TEXT("lean your body to the left"),           EKeys::Left },
 			{ TEXT("EvadeRight"),    TEXT("EVADE RIGHT"),     TEXT("lean your body to the right"),          EKeys::Right },
 			{ TEXT("Duck"),          TEXT("DUCK"),            TEXT("bend your knees and go down"),          EKeys::Down },
-			{ TEXT("Special"),       TEXT("SPECIAL ABILITY"), TEXT("shout into the microphone (meter full)"), EKeys::S },
+			{ TEXT("Special"),       TEXT("SPECIAL ABILITY"), TEXT("throw both hands up or down, or shout (meter full)"), EKeys::S },
 			{ TEXT("Pause"),         TEXT("PAUSE"),           TEXT("keyboard only"),                        EKeys::P },
 		};
 		return Defs[FMath::Clamp(Index, 0, KSKeys::Num - 1)];

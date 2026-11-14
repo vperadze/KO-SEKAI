@@ -471,9 +471,13 @@ LOG="$OUT/calibration.log"
 # guards: every line of text on the calibration screen flickered (1594 changes of the hint in one calibration).
 run_until 1 "KSTEST calibration done" 120 "$LOG" -KSStart=fight -KSCalDemo -KSCalJitter -KSNoCamera
 n=$(grep "KSTEST calibration hint_changes=" "$LOG" 2> /dev/null | head -1 | tr -d "\r" | sed -n 's/.*hint_changes=\([0-9]*\).*/\1/p')
-[ -n "$n" ] && [ "$n" -le 40 ] && pass "calibration text is steady with a jittering camera reading ($n changes of the hint in nine steps)" || fail "calibration text flickers: the hint changed ${n:-?} times in nine steps"
+[ -n "$n" ] && [ "$n" -le 40 ] && pass "calibration text is steady with a jittering camera reading ($n changes of the hint in ten steps)" || fail "calibration text flickers: the hint changed ${n:-?} times in nine steps"
 grep -q "KSTEST ui calibration text_outside_box=0" "$LOG" 2> /dev/null && pass "calibration writing stays inside its panels" || fail "calibration writing runs out of its panel ($(grep "KSTEST ui calibration" "$LOG" 2> /dev/null | head -1 | sed 's/.*KSTEST/KSTEST/'))"
-grep -q "KSTEST calibration done completed=1" "$LOG" 2> /dev/null && pass "all nine calibration steps run and hand over to the first bout" || fail "calibration did not reach its end"
+grep -q "KSTEST calibration done completed=1" "$LOG" 2> /dev/null && pass "all ten calibration steps run and hand over to the first bout" || fail "calibration did not reach its end"
+# Player, 2026-11-14: the special must also answer to both hands thrown up or brought down. Made-up moves are run
+# through the reader: both ways count; a duck, one hand, guard-to-block and hands going opposite ways do not.
+grep -q "KSTEST hands up=1 down=1 duck=0 one_hand=0 guard_to_block=0 opposite=0" "$LOG" 2> /dev/null && pass "both hands up or down is read as the special's move, and a duck, one hand or a block is not" || fail "the both-hands move is read wrongly ($(grep -o "KSTEST hands .*" "$LOG" 2> /dev/null | head -1 | tr -d "\r"))"
+grep -q "KSTEST calibration special_step=1 steps=10" "$LOG" 2> /dev/null && pass "calibration teaches the special (step 9 of 10)" || fail "calibration has no step for the special"
 
 echo "== online match (two copies on this machine, one hosting and one joining)"
 run_pair 2 480 "$OUT/online_host.log" "$OUT/online_guest.log" "-KSHost -KSPort=17777" "-KSJoin=127.0.0.1:17777" "Hosting on port"

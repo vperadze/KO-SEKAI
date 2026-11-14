@@ -103,7 +103,7 @@ Test flags (all optional):
 | `-KSFakeJabSwipe` | On the menu: a fake left jab that is also read as a swipe down, then a right jab (the first line must be chosen). |
 | `-KSFakePunch` | During the film: fake webcam punches, a lone jab, a both-at-once and a left-right jab; none may end it. |
 | `-KSArena=N` `-KSArenaTour` | Fight every bout in arena N (0-10, `KSArenaData.h`) / build every arena once at the start. |
-| `-KSCalDemo` | Enter calibration without a camera and step through it automatically. |
+| `-KSCalDemo` | Enter calibration without a camera and step through it automatically; also logs what the both-hands reader (the special) makes of made-up moves. |
 | `-KSCalJitter` | With `-KSCalDemo`: one framing reading flips every frame, to test that the text stays steady. |
 | `-KSVfxTour` | Plays 123 effects of the Fab packs between the fighters in turn, photographs each twice, and quits (`docs/VFX.md`). |
 | `-KSSpecials` | The player's special two seconds into the bout, the opponent's three seconds later, then quit. With `-KSHitShots`: five stills of each. |

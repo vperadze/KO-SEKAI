@@ -36,7 +36,8 @@ Webcam players get it before the first bout (`AKSGameMode::TickCalibrate`, drawn
 | 5 Block | Both fists to the face, three times | Each held 0.6 s, lowered in between |
 | 6, 7 Dodge | Leans left three times, then right three times | Each recognised for 0.2 s, back to the middle in between |
 | 8 Duck | Bends the knees three times | Each recognised for 0.2 s |
-| 9 Ready | | 2 s |
+| 9 Special | Throws both hands up, or brings both down, three times; a shout counts too | Each seen by `FKSBothHands` (or heard by the microphone) |
+| 10 Ready | | 2 s |
 
 Every move step starts with 2.2 s to read the instruction, during which nothing counts, shows a large `n / 3`
 counter, and ends with GOOD! for 0.9 s.
@@ -63,6 +64,15 @@ Every decision is logged, for example:
 ```
 
 `arm 0` is the player's left. Stances: 1 block, 2 evade left, 3 evade right, 4 duck.
+
+## The special ability by hand
+
+Since 2026-11-14 the special (meter full) is set off by a shout, its key, or **both hands thrown up or brought down
+together** (`FKSBothHands` in `KSGesture.cpp`, fed in bouts and in calibration). Each wrist has to travel 0.9 of a
+shoulder's width the same way within 0.4 s, measured from the shoulders, so a duck (the whole body goes down), one
+punching hand and guard-to-block are not it. `-KSCalDemo` runs made-up moves through it (`KSTEST hands ...`).
+**No person has tried it yet**: whether 0.9 is comfortable, and whether a hurried block from low hands sets it off,
+is unknown. The knobs are `HandsWindow`, `HandsTravel`, `HandsQuiet`.
 
 ## Outside a fight: swipes and the left-right jab
 

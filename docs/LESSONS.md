@@ -394,3 +394,10 @@ One entry per bug that cost time: what happened, the cause, the rule. Add to it 
   to 110-150 cm, the two fighters over two metres apart because he is knocked back more often now, lens at its
   widest. He now steps straight back until a 90 degree lens holds both. Rule: a rule change is checked against the
   camera too, more than once (the first run passed by luck); and the lost frames are in the log before anyone guesses.
+- **The camera's last correction worked in tangents (2026-11-14, late).** The check failed again on "a fighter was out
+  of the picture" (18 of 2482 frames), in a change that did not touch the camera. The logged frames showed the lens at
+  90 degrees and a fighter 2 to 6% over the edge: the code turned the camera by the arctangent of the overshoot, which
+  is only right for a narrow lens. It now measures the spread and the turn in angles. Rule: arithmetic on tangents
+  stops being a turn of the camera once the lens is wide; and a check that fails "by chance" twice is a bug.
+- **A comment after an opening brace on one line ate the closing brace** (`if (...) {   // note` in front of code on
+  the same line, put there by a scripted edit). Rule: a scripted edit never appends `//` in the middle of a line.

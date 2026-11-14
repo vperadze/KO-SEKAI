@@ -1046,13 +1046,16 @@ void AKSHUD::DrawFight(const AKSGameMode& G)
 				PushSpin(0.07f, 0.225f, Beat, 0.f);
 				Text(FString::Printf(TEXT("%s  %s"), G.bMicOpen ? TEXT("SHOUT") : *(FString(TEXT("PRESS ")) + KSKeys::Label(EKSKey::Special)), *G.PlayerCry()), 0.07f, 0.225f, 30.f, Yellow, -1, EKSFont::Comic, 2.5f, FLinearColor::Black, 0.40f);
 				PopSpin();
+				// A webcam player can also throw both hands up or bring both down.
+				const bool bHands = G.Tracking() && G.Tracking()->IsBodySeen();
+				if (bHands && !G.bMicOpen) Label(TEXT("or throw both hands up"), 0.07f, 0.262f, 0.55f, Muted, -1);
 				if (G.bMicOpen)
 				{
 					// How loud the microphone hears the room, so a player whose shout does nothing can see why.
 					Label(TEXT("MIC"), 0.07f, 0.262f, 0.55f, Lilac, -1);
 					Fill(0.105f, 0.257f, 0.12f, 0.009f, FLinearColor(0.02f, 0.f, 0.06f, 0.85f));
 					Fill(0.105f, 0.257f, 0.12f * G.MicLevel, 0.009f, Green);
-					Label(FString(TEXT("or press ")) + KSKeys::Label(EKSKey::Special), 0.235f, 0.262f, 0.55f, Muted, -1);
+					Label(bHands ? FString(TEXT("or throw both hands up")) : FString(TEXT("or press ")) + KSKeys::Label(EKSKey::Special), 0.235f, 0.262f, 0.55f, Muted, -1);
 				}
 			}
 			else Label(TEXT("SPECIAL"), 0.07f, 0.2f, 0.5f, Muted, -1);
@@ -1240,7 +1243,7 @@ void AKSHUD::DrawCalibrate(const AKSGameMode& G)
 
 	// For tools/check.sh: writing that does not fit its panel even at the smallest size.
 	bCalTextOutside |= !bFits;
-	if (!bLoggedCal && G.CalStep >= 3) { bLoggedCal = true; UE_LOG(LogTemp, Display, TEXT("KSTEST ui calibration text_outside_box=%d"), bCalTextOutside ? 1 : 0); }
+	/* at the last step, so every step before it has been drawn */ if (!bLoggedCal && G.CalStep >= AKSGameMode::CalSteps - 1) { bLoggedCal = true; UE_LOG(LogTemp, Display, TEXT("KSTEST ui calibration text_outside_box=%d"), bCalTextOutside ? 1 : 0); }
 }
 
 void AKSHUD::DrawHUD()

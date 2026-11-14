@@ -195,6 +195,7 @@ void AKSGameMode::BeginPlay()
 	FParse::Value(Cmd, TEXT("KSEnterAt="), TestEnterAt);
 	FParse::Value(Cmd, TEXT("KSMenuPick="), TestMenuPick);
 	bKeysTest = FParse::Param(Cmd, TEXT("KSKeysTest"));
+	if (FParse::Param(Cmd, TEXT("KSCalDemo"))) UE_LOG(LogTemp, Display, TEXT("KSTEST hands %s"), *FKSBothHands::SelfTest());
 	// For tools/check.sh: the webcam is shut when the game starts (the player switches it on in the menu).
 	UE_LOG(LogTemp, Display, TEXT("KSTEST webcam at_start on=%d"), TrackingSubsystem && TrackingSubsystem->IsCameraOn() ? 1 : 0);
 	bFakeFilmPunches = FParse::Param(Cmd, TEXT("KSFakePunch"));
@@ -447,7 +448,7 @@ void AKSGameMode::Tick(float Dt)
 	if (bLookDirty) { bLookDirty = false; Pawn->SetLook(ArenaIndex >= 0 ? KSArenas[ArenaIndex].Tint : FLinearColor::White, ArenaIndex > 0 ? 0.6f : 0.f); }
 
 	// A shout into the microphone. Not while the announcer is booming out of the loudspeakers: that is him, not the player.
-	bShoutNow = false;
+	bShoutNow = bHandsNow = false;
 	if (Mic) { Mic->Poll(); MicLevel = Mic->Level(); bShoutNow = Mic->TakeShout() && Clock >= AnnouncerUntil; }
 
 	// Collect this frame's punches: the webcam tracker always, the keyboard only while fighting (A and D walk in the street).
@@ -460,6 +461,10 @@ void AKSGameMode::Tick(float Dt)
 		const bool bFighting = Phase == EKSPhase::Fight || Phase == EKSPhase::Card || Phase == EKSPhase::Calibrate;
 		static const TArray<FVector2f> Nobody;
 		Gesture.Update(!bFighting && TrackingSubsystem->IsBodySeen() ? TrackingSubsystem->GetImageLandmarks() : Nobody, 4.f / 3.f, FPlatformTime::Seconds());
+		// Both hands up or down sets off the special in a bout, and is practised in calibration.
+		const bool bHandsWatched = (Phase == EKSPhase::Fight || Phase == EKSPhase::Calibrate) && TrackingSubsystem->IsBodySeen();
+		bHandsNow = BothHands.Update(bHandsWatched ? TrackingSubsystem->GetImageLandmarks() : Nobody, 4.f / 3.f, FPlatformTime::Seconds());
+		if (bHandsNow) { TrackingSubsystem->Mark(TEXT("both hands: special")); UE_LOG(LogTemp, Display, TEXT("KSTEST hands seen phase=%d meter=%.2f"), (int32)Phase, PlayerMeter); }
 		const float Want = PunchSensitivity * (bFighting ? 1.f : 0.7f);
 		if (Want != SensitivitySent) { SensitivitySent = Want; TrackingSubsystem->SetSensitivity(Want); }
 	}
@@ -1541,7 +1546,8 @@ void AKSGameMode::UpdateFightCamera(float Dt)
 				Lo = FMath::Min(Lo, (float)(Local.Z / Local.X)); Hi = FMath::Max(Hi, (float)(Local.Z / Local.X));
 				Depth += Local.X; Seen++;
 			}
-			const float Need = FMath::Max((R - L) / (2.f * Safe), (Hi - Lo) / (2.f * Safe * Tall));
+			// In angles, not tangents: two fighters off to one side take up less of a turned lens than their tangents say.
+			const float Need = FMath::Max(FMath::Tan((FMath::Atan(R) - FMath::Atan(L)) * 0.5f) / Safe, FMath::Tan((FMath::Atan(Hi) - FMath::Atan(Lo)) * 0.5f) / (Safe * Tall));
 			if (Seen == UE_ARRAY_COUNT(Must) && Need > 1.f) { Pos -= Level.Vector() * FMath::Min(220.f, Depth / Seen * (Need - 1.f)); OpSteppedBack++; }
 		}
 		float Left = BIG_NUMBER, Right2 = -BIG_NUMBER, Low = BIG_NUMBER, High = -BIG_NUMBER;
@@ -1556,12 +1562,15 @@ void AKSGameMode::UpdateFightCamera(float Dt)
 		if (!bBehind)
 		{
 			float Tan = FMath::Tan(FMath::DegreesToRadians(FinalFov * 0.5f));
-			Tan = FMath::Min(FMath::Max3(Tan, (Right2 - Left) / (2.f * Safe), (High - Low) / (2.f * Safe * Tall)), 1.3f);
-			const float Wide = Safe * Tan, Up = Safe * Tan * Tall;
+			// All of it in angles. It used to be done in tangents (turn by atan of the overshoot), which is only right
+			// for a narrow lens: at 90 degrees a fighter was left 2 to 6% over the edge (check of 2026-11-14, 18 frames).
+			const float AL = FMath::Atan(Left), AR = FMath::Atan(Right2), ALo = FMath::Atan(Low), AHi = FMath::Atan(High);
+			Tan = FMath::Min(FMath::Max3(Tan, FMath::Tan((AR - AL) * 0.5f) / Safe, FMath::Tan((AHi - ALo) * 0.5f) / (Safe * Tall)), 1.3f);
+			const float Wide = FMath::Atan(Safe * Tan), Up = FMath::Atan(Safe * Tan * Tall);
 			float Turn = 0.f, Tilt = 0.f;
-			if (Right2 > Wide) Turn = Right2 - Wide; else if (Left < -Wide) Turn = Left + Wide;
-			if (High > Up) Tilt = High - Up; else if (Low < -Up) Tilt = Low + Up;
-			Rot.Yaw += FMath::RadiansToDegrees(FMath::Atan(Turn)); Rot.Pitch += FMath::RadiansToDegrees(FMath::Atan(Tilt));
+			if (AR > Wide) Turn = AR - Wide; else if (AL < -Wide) Turn = AL + Wide;
+			if (AHi > Up) Tilt = AHi - Up; else if (ALo < -Up) Tilt = ALo + Up;
+			Rot.Yaw += FMath::RadiansToDegrees(Turn); Rot.Pitch += FMath::RadiansToDegrees(Tilt);
 			FinalFov = 2.f * FMath::RadiansToDegrees(FMath::Atan(Tan));
 			if (Turn != 0.f || Tilt != 0.f) OpSaved++;
 		}
@@ -1719,7 +1728,7 @@ void AKSGameMode::BeginLadder()
 
 void AKSGameMode::SetCalStep(int32 Step)
 {
-	static const TCHAR* Names[CalSteps] = { TEXT("framing"), TEXT("guard"), TEXT("left jabs"), TEXT("right jabs"), TEXT("block"), TEXT("lean left"), TEXT("lean right"), TEXT("duck"), TEXT("ready") };
+	static const TCHAR* Names[CalSteps] = { TEXT("framing"), TEXT("guard"), TEXT("left jabs"), TEXT("right jabs"), TEXT("block"), TEXT("lean left"), TEXT("lean right"), TEXT("duck"), TEXT("special"), TEXT("ready") };
 	CalStep = FMath::Clamp(Step, 0, CalSteps - 1);
 	CalStepTime = 0.f; CalHold = 0.f; CalCount = 0; CalProgress = 0.f; CalDoneAt = -1.f; bCalRepCounted = false; CalCountNow = CalCountNeed = 0;
 	if (TrackingSubsystem)
@@ -1739,6 +1748,7 @@ void AKSGameMode::SetCalStep(int32 Step)
 			UE_LOG(LogTemp, Display, TEXT("KSTEST calibration sensitivity=%.2f strokes=%d median_peak=%.1f"), Sensitivity, CalPeaks.Num(), Median);
 		}
 	}
+	if (CalStep == 8) UE_LOG(LogTemp, Display, TEXT("KSTEST calibration special_step=1 steps=%d"), CalSteps);
 	if (CalStep > 0) Sfx(EKSSfx::Coin, 0.6f);
 }
 
@@ -1835,7 +1845,7 @@ void AKSGameMode::TickCalibrate(float Dt)
 	/* ---- the steps ---- */
 	// Every move is done three times, and every step starts with a moment to read it before anything counts.
 	const float ReadSeconds = 2.2f, GoodSeconds = 0.9f;
-	const bool bReading = CalStep >= 2 && CalStep <= 7 && CalStepTime < ReadSeconds;
+	const bool bReading = CalStep >= 2 && CalStep <= 8 && CalStepTime < ReadSeconds;
 	bool bDone = false;
 	auto Hold = [&](bool bHeld, float Seconds) { CalHold = bHeld ? CalHold + Dt : FMath::Max(0.f, CalHold - Dt * 2.f); CalProgress = FMath::Clamp(CalHold / Seconds, 0.f, 1.f); return CalHold >= Seconds; };
 	// One repetition of a held move: hold it for Seconds, then let go before the next one counts.
@@ -1895,6 +1905,15 @@ void AKSGameMode::TickCalibrate(float Dt)
 		CalCountNeed = 3;
 		bDone = Rep(T && T->IsHeld(EKSDefense::Duck), 0.2f);
 		break;
+	case 8:
+		// The special ability: both hands thrown up or brought down together, or a shout. In a bout it needs a full meter.
+		CalTitle = TEXT("SPECIAL  x 3");
+		Tip = TEXT("throw both hands up, or bring both down, fast - or shout! In a bout: when your meter is full");
+		CalCountNeed = 3;
+		if (!bReading && (bHandsNow || bShoutNow)) { CalCount++; Sfx(EKSSfx::Blocked, 0.5f); }
+		CalProgress = FMath::Min(1.f, CalCount / 3.f);
+		bDone = CalCount >= 3;
+		break;
 	default:
 		CalTitle = TEXT("READY!");
 		Tip = TEXT("first fighter coming up");
@@ -1906,7 +1925,7 @@ void AKSGameMode::TickCalibrate(float Dt)
 	// Bad framing is always the first thing to fix; then a moment to read, the tip, and the way out if it will not register.
 	if (!Framing.IsEmpty()) CalHint = Framing;
 	else if (bReading) CalHint = TEXT("get ready...   ") + Tip;
-	else if (CalStep >= 2 && CalStep <= 7 && CalStepTime > ReadSeconds + 12.f) CalHint = TEXT("not registering?  press SPACE to skip this move");
+	else if (CalStep >= 2 && CalStep <= 8 && CalStepTime > ReadSeconds + 12.f) CalHint = TEXT("not registering?  press SPACE to skip this move");
 	else CalHint = Tip;
 	if (CalHint != CalHintWas) { CalHintWas = CalHint; CalHintChanges++; }
 
@@ -3495,7 +3514,7 @@ void AKSGameMode::TickFight(float Dt)
 			// special takes health off the other side here. The meters stay empty and the HUD does not draw them.
 			if (bOnline) PlayerMeter = OppMeter = 0.f;
 			if (PlayerMeter >= 1.f && !bMeterFullSaid) { bMeterFullSaid = true; Sfx(EKSSfx::Score, 0.7f); }
-			if (Phase == EKSPhase::Fight && PlayerMeter >= 1.f && (Pressed(KSKeys::Get(EKSKey::Special)) || bShoutNow || bTestSpecials || (bAuto && !bGiveUp))) StartSpecial(true);
+			if (Phase == EKSPhase::Fight && PlayerMeter >= 1.f && (Pressed(KSKeys::Get(EKSKey::Special)) || bShoutNow || bHandsNow || bTestSpecials || (bAuto && !bGiveUp))) StartSpecial(true);
 			else if (Phase == EKSPhase::Fight && OppMeter >= 1.f && OppState == EKSOppState::Idle && PhaseTime > 4.f) StartSpecial(false);
 		}
 		for (int32 i = Pending.Num() - 1; i >= 0 && Phase == EKSPhase::Fight; i--)

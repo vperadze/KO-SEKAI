@@ -55,7 +55,7 @@ public:
 	EKSPhase Phase = EKSPhase::Street;
 	float PhaseTime = 0.f;        // seconds in the current phase
 	// Calibration, the screen before the first bout (webcam players only): where to stand, then each move once.
-	static constexpr int32 CalSteps = 9;
+	static constexpr int32 CalSteps = 10;
 	int32 CalStep = 0;            // 0 framing, 1 guard, 2 left jabs, 3 right jabs, 4 block, 5 lean left, 6 lean right, 7 duck, 8 ready
 	float CalStepTime = 0.f, CalProgress = 0.f;
 	FString CalTitle, CalHint;
@@ -317,6 +317,8 @@ private:
 	   film stopped, the menu moved and a fighter was picked on a slight movement). A menu is moved by a swipe of a hand
 	   (FKSGesture) and anything is confirmed, or the film skipped, by a jab with one hand and then the other. */
 	FKSGesture Gesture;
+	FKSBothHands BothHands;               // both hands up or down during a bout: the special ability
+	bool bHandsNow = false;
 	bool bDoubleJab = false;                  // this frame: a punch from each arm, 0.2 to 1.2 s apart
 	double LastWebPunch[2] = { -100.0, -100.0 };
 	int32 DoubleJabs = 0;                     // for the log
