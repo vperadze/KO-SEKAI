@@ -1,6 +1,6 @@
 # Where things stand
 
-Updated 2026-11-13. Deadline 2026-11-16 02:59 CET.
+Updated 2026-11-14. Deadline 2026-11-16 02:59 CET.
 
 ## Works (checked by `tools/check.sh` or seen in a self-playing fight)
 
@@ -232,6 +232,9 @@ Updated 2026-11-13. Deadline 2026-11-16 02:59 CET.
     (at most 6.25), and a left and a right in the same instant (the body shifting) count as one. Replayed over three
     of the player's recorded sessions the detector now calls about 30% fewer punches (308 -> 204, 434 -> 283,
     398 -> 282).
+  - **A left-right jab no longer picks the neighbouring line** (player, 2026-11-14): a jab was also read as a swipe,
+    so the list moved between the two jabs. The pair now takes back the swipe steps made during it (menu, select,
+    lobby). Checked with a fake player only; a lone jab can still move the list by one.
   **Not verified**: nothing here has been tried by a person. Whether real punches are now missed, whether a swipe is
   always seen, and whether left-then-right is comfortable are all open; a calibration from the menu still adapts the
   bar to a soft hitter.
@@ -260,16 +263,48 @@ Updated 2026-11-13. Deadline 2026-11-16 02:59 CET.
   crowd, the arena models, the effects), the game binary 286 MB. The packaged game was run: it loads all 15
   effects and plays both specials. **Just over 1 GB unpacked**: if the jam counts the unpacked folder, the crowd
   pictures are the first thing to shrink, or a Shipping build of the binary. Windows not built.
-  **Left for 2026-11-14 (the player's decision)**: the crowd at half resolution (179 sheets, 255 MB cooked, to about
-  65 MB: roughly 190 MB saved, the package near 835 MB). Re-import the crowd, package, and look at stills of the
-  front rows, which the cameraman passes close to. Nothing about the crowd has been changed yet.
+  **Crowd at half resolution, done 2026-11-14** (`art/tools/import_crowd.py`, `SHRINK = 2`: the engine caps each
+  sheet at 512, or 1024 for the eleven wide ones; the drawn pictures are untouched and `SHRINK = 1` undoes it). The
+  cooked crowd went from 255 MB to 65 MB as expected, **but the package shrank by only 22 MB**: the content file is
+  compressed and the crowd compressed well already (`.ucas` 587 -> 565 MiB). Measured: the folder 1536 MiB, without
+  debug symbols and Vulkan debugging layers **1003 MiB = 1052 MB, so still just over 1 GB unpacked** (it was 1026
+  MiB). The packaged game was run: 15 effects loaded, both specials played, 179 spectators seated; the crowd looks
+  the same in fight-view stills. **Not seen**: the front rows close up, where the cameraman passes them. What is
+  left to shrink, biggest first: the game binary (299 MB, a Development build; Shipping is smaller), the fighters
+  (244 MiB cooked), the engine's shaders (81). Built again at 12:45 with the new opponent and the menu jab fix in it: the same size, and the packaged game
+  ran (15 effects, both specials, no crash). `Packaged/Linux/KoSekai/Saved` holds 60 MB of test stills from those
+  runs: leave it out of anything that is shipped.
 
-- **Known, open (2026-11-13, last check of the night)**: `tools/check.sh` failed one line once, "badges cover the
-  fighters" (`worst_body_cover=0.39`; other runs the same evening read 0.00 to 0.07, and one log 0.79). A badge
-  stays where it was first put, and the fighters now move about the ring and the camera turns to keep both in the
-  picture, so a fighter can step under a badge. It comes and goes with the fighters and the camera of the run.
-  Not fixed: the placer (`KSHUD`: `BeginLayout`, `Reserve`, `FindSpot`) needs to follow a moving fighter or let go
-  of a badge sooner.
+- **Badges and the fighters (2026-11-14)**: the one failed line of the night before ("badges cover the fighters")
+  is explained and fixed; the note that stood here blamed the wrong thing. The measure used a box round each
+  fighter, which is mostly air when an arm is out, and it looked only at the moment a badge was placed. What a
+  player could really see was the hit fighter falling back into the badge at his shoulder. Now the HUD knows the
+  bodies themselves (`BodyCover` in `KSHUD`, points along every bone from `AKSDummy::BodyPoints`), leaves a little
+  room round them, and a badge slides away when a fighter moves under it. Over four self-played ladders each: a
+  third of a badge lay on a fighter in 36 to 41% of the frames before (`-KSBadgesStay` brings that back), 3 to 8%
+  now. **Seen in stills and numbers only**: whether a sliding badge looks right in motion nobody has watched.
+
+- Opponent made harder and bouts made longer (player, 2026-11-14: "I can act really fast, his movements are slow and
+  I win easy... make battles last like 3 times more"). `OppAI`, `OppAttack`, `PlayerPunch`, `ResolveStrike`:
+  - Wind-ups 0.50 / 0.66 / 0.76 s (were 0.65 / 0.85 / 0.95), times 0.9 and 0.8 on the second and third opponent,
+    each a little different, never under 0.34 s; shorter rests.
+  - A punch that lands may be followed by one or two more; a block or dodge ends the combination.
+  - He fakes from the first bell and most after being countered; a punch into a fake meets his gloves and gets a
+    quick answer (it used to be a counter). Punching his guard gets an answer too, often at the first punch.
+  - He reads the stance held in front of him and the defence the player used most lately, and throws what beats it
+    (how often is `Skill` in `LadderTiers`: 0.40, 0.62, 0.85). A counter is worth 2 times, was 2.5.
+  - Length: every punch takes about a third of what it did, specials 12 and 11 (were 24 and 22), meters fill at 40%,
+    the clock is 5:00. Online damage is half what it was.
+  Measured in `tools/check.sh` (132 ok, all passed, three runs): the bot that makes no mistake wins in 59-62 and
+  67-69 s (was 24 and 20); a player who does nothing is knocked out in 35-38 s (was 17) and takes 4-7 follow-up
+  punches; two online bots finish in 47 and 33 s (was 15). A bot that punches all the time (`-KSSpam`, new) got 13
+  quick punches back and was drawn by 2 fakes in 36 s.
+  **Known**: that last bot also defends everything, and it won in 36 s, quicker than the patient bot: each answer it
+  blocks is another opening. A person cannot block an answer that comes 0.35 s after his own punch, but if punching
+  all the time still turns out to pay, make a blocked answer not open him (`ResolveStrike`).
+  **Not verified**: everything a person would feel. Whether the quickest punches can still be dodged through the
+  webcam's delay, whether stray webcam punches now get punished unfairly, whether a real bout is three times as long
+  (a person is not the bot), whether the third opponent is beatable, and whether fakes and answers read on screen.
 
 ## Built but not verified with a person
 

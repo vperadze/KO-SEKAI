@@ -30,19 +30,26 @@
 
 namespace
 {
-	const float RoundSeconds = 120.f;
+	// Bouts last about three times as long as they did (player request, 2026-11-14): every punch takes about a third of
+	// what it took (the tables below), the meters fill more slowly (MeterPace) and the clock allows for it.
+	const float RoundSeconds = 300.f;
 	const float Grace = 0.14f;            // a dodge this late after his punch arrives still counts (camera delay)
 	const float OppDistance = 150.f;      // cm between the two fighters (the real models lunge further than the dummies did)
-	const float WindupSeconds[] = { 0.65f, 0.85f, 0.95f };   // jab, hook, uppercut
-	const float AttackDamage[] = { 7.f, 12.f, 16.f };
-	const float PunchDamage[] = { 3.f, 4.f, 5.f };            // straight, hook, uppercut
+	const float WindupSeconds[] = { 0.50f, 0.66f, 0.76f };   // jab, hook, uppercut (they were 0.65, 0.85, 0.95: "slow")
+	const float MinWindup = 0.34f;        // no punch is quicker than this: with Grace it leaves a person half a second
+	const float AttackDamage[] = { 2.4f, 4.0f, 5.2f };
+	const float PunchDamage[] = { 0.8f, 1.0f, 1.3f };         // straight, hook, uppercut
+	const float CounterMult = 2.f;        // a punch into his wind-up
+	const float MeterPace = 0.4f;         // on everything that fills a special meter
 
 	// How hard each fight on the ladder is, whoever the opponent turns out to be.
-	struct FLadderTier { float Health, WindupScale, DamageScale, FeintChance, IdleScale; int32 MaxHitsOpen; };
+	// Skill is how often he reads the player instead of guessing (OppAttack, and the answers in PlayerPunch); OpenScale
+	// shortens the time he stands open after missing.
+	struct FLadderTier { float Health, WindupScale, DamageScale, FeintChance, IdleScale; int32 MaxHitsOpen; float Skill, OpenScale; };
 	const FLadderTier LadderTiers[] = {
-		{ 100.f, 1.00f, 1.00f, 0.20f, 1.00f, 3 },
-		{ 120.f, 0.88f, 1.15f, 0.28f, 0.85f, 3 },
-		{ 140.f, 0.74f, 1.22f, 0.38f, 0.65f, 3 },
+		{ 100.f, 1.00f, 1.00f, 0.14f, 1.00f, 3, 0.40f, 1.00f },
+		{ 120.f, 0.90f, 1.12f, 0.20f, 0.85f, 3, 0.62f, 0.92f },
+		{ 140.f, 0.80f, 1.22f, 0.26f, 0.70f, 3, 0.85f, 0.84f },
 	};
 	const int32 LadderLength = UE_ARRAY_COUNT(LadderTiers);
 
@@ -68,7 +75,7 @@ namespace
 		{ TEXT("TURBO BLAST!"),   EFxKind::Blast,    FLinearColor(1.0f, 0.35f, 0.05f), 0.66f },
 		{ TEXT("HAIRSPRAY!"),     EFxKind::Cloud,    FLinearColor(0.65f, 0.2f, 1.0f),  0.60f },
 	};
-	const float SpecialDamage = 24.f, OppSpecialDamage = 22.f;
+	const float SpecialDamage = 12.f, OppSpecialDamage = 11.f;
 
 	// The particle effects the specials are built from (Fab packs, docs/VFX.md; chosen from stills of -KSVfxTour).
 	namespace Vx
@@ -166,9 +173,11 @@ void AKSGameMode::BeginPlay()
 	const TCHAR* Cmd = FCommandLine::Get();
 	bAuto = FParse::Param(Cmd, TEXT("KSAuto"));
 	bGiveUp = FParse::Param(Cmd, TEXT("KSGiveUp"));
+	bAutoSpam = FParse::Param(Cmd, TEXT("KSSpam"));
 	bAutoNoGuard = bGiveUp || FParse::Param(Cmd, TEXT("KSNoGuard"));
 	FParse::Value(Cmd, TEXT("KSEscAt="), TestEscAt);
 	bFakeFilmPunches = FParse::Param(Cmd, TEXT("KSFakePunch"));
+	bFakeJabSwipe = FParse::Param(Cmd, TEXT("KSFakeJabSwipe"));
 	bFakeArms = FParse::Param(Cmd, TEXT("KSFakeArms"));
 	bCalDemo = FParse::Param(Cmd, TEXT("KSCalDemo"));
 	bCalJitter = FParse::Param(Cmd, TEXT("KSCalJitter"));
@@ -330,8 +339,33 @@ void AKSGameMode::NoteWebPunch(EKSArm Arm)
 	// left-right (the self-check's fake player did exactly that and stopped the film with it).
 	const bool bClean = Now - LastAnyWebPunch > 0.8;
 	LastAnyWebPunch = Now;
-	if (Gap > 0.2 && Gap < 1.2 && bWebPunchClean[1 - Mine]) { bDoubleJab = true; DoubleJabs++; LastWebPunch[0] = LastWebPunch[1] = -100.0; bWebPunchClean[0] = bWebPunchClean[1] = false; }
+	if (Gap > 0.2 && Gap < 1.2 && bWebPunchClean[1 - Mine]) { bDoubleJab = true; DoubleJabs++; DoubleJabFrom = LastWebPunch[1 - Mine]; LastWebPunch[0] = LastWebPunch[1] = -100.0; bWebPunchClean[0] = bWebPunchClean[1] = false; }
 	else { LastWebPunch[Mine] = Now; bWebPunchClean[Mine] = bClean; }
+}
+
+int32 AKSGameMode::WebStep(int32& Index, int32 Swipe, bool& bChoose)
+{
+	const double Now = FPlatformTime::Seconds();
+	if (bDoubleJab)
+	{
+		// Measured on the recordings of 2026-11-13: the swipe a jab sets off comes from 0.35 s before the detector calls
+		// the punch to 0.5 s after it. So everything since just before the first jab was the jabs, not the player's wish.
+		int32 Back = 0;
+		for (const FKSSwipeStep& S : SwipeSteps)
+		{
+			if (S.Index != &Index || S.At < DoubleJabFrom - 0.4) continue;
+			if (Back++ == 0) Index = S.Before;      // the oldest of them holds the line the player was on
+		}
+		if (Swipe != 0) Back++;                       // and one in this very frame is not made at all
+		SwipesTakenBack += Back;
+		UE_LOG(LogTemp, Display, TEXT("KSTEST jab pair taken_back=%d index=%d"), Back, Index);   // for tools/check.sh
+		SwipeSteps.Reset();
+		bChoose = true;
+		return 0;
+	}
+	while (SwipeSteps.Num() && SwipeSteps[0].At < Now - 2.0) SwipeSteps.RemoveAt(0, EAllowShrinking::No);
+	if (Swipe != 0) SwipeSteps.Add({ Now, &Index, Index });
+	return Swipe;
 }
 
 void AKSGameMode::Popup(const FString& Text, const FLinearColor& Color, float X, float Y, bool bBig)
@@ -401,6 +435,19 @@ void AKSGameMode::Tick(float Dt)
 		Gesture.Update(!bFighting && TrackingSubsystem->IsBodySeen() ? TrackingSubsystem->GetImageLandmarks() : Nobody, 4.f / 3.f, FPlatformTime::Seconds());
 		const float Want = PunchSensitivity * (bFighting ? 1.f : 0.7f);
 		if (Want != SensitivitySent) { SensitivitySent = Want; TrackingSubsystem->SetSensitivity(Want); }
+	}
+	if (bFakeJabSwipe && Phase == EKSPhase::Menu)
+	{
+		// What the webcam makes of a left-right jab: the left jab, the same hand read as a swipe down, the right jab.
+		// On its own clock that no frame moves far: the menu's first frame after loading is seconds long, and both
+		// jabs then fell into it together, which is the body shifting and not a pair (the check's first run of this).
+		static float Fake = 0.f;
+		const float Before = Fake;
+		Fake += FMath::Min(Dt, 0.05f);
+		const auto At = [&](float T) { return Before < T && Fake >= T; };
+		if (At(3.0f)) NoteWebPunch(EKSArm::Left);
+		Gesture.StepY = At(3.15f) ? 1 : 0;
+		if (At(3.4f)) NoteWebPunch(EKSArm::Right);
 	}
 	if (Phase == EKSPhase::Fight || Phase == EKSPhase::Card || Phase == EKSPhase::Calibrate)
 	{
@@ -484,10 +531,10 @@ void AKSGameMode::TickMenu(float Dt)
 	// The webcam works here too, once it has found the player: a hand swept down or up moves down or up the list, and
 	// a jab with one hand and then the other chooses. (It was "left punch next, right punch choose": the menu moved
 	// and chose by itself whenever the player shifted his weight.)
-	const bool bTracked = TrackingSubsystem && TrackingSubsystem->IsTracking() && PhaseTime > 1.5f;
+	const bool bTracked = ((TrackingSubsystem && TrackingSubsystem->IsTracking()) || bFakeJabSwipe) && PhaseTime > 1.5f;
 	bool bNext = Pressed(EKeys::Down) || Pressed(EKeys::S) || Pressed(EKeys::Gamepad_DPad_Down), bChoose = false;
 	bool bBack = Pressed(EKeys::Up) || Pressed(EKeys::W) || Pressed(EKeys::Gamepad_DPad_Up);
-	if (bTracked) { bNext |= Gesture.StepY > 0; bBack |= Gesture.StepY < 0; bChoose = bDoubleJab; }
+	if (bTracked) { const int32 Step = WebStep(MenuIndex, Gesture.StepY, bChoose); bNext |= Step > 0; bBack |= Step < 0; }
 	if (bBack) { MenuIndex = (MenuIndex + Lines - 1) % Lines; Sfx(EKSSfx::Menu, 0.7f); }
 	if (bNext) { MenuIndex = (MenuIndex + 1) % Lines; Sfx(EKSSfx::Menu, 0.7f); }
 	bChoose |= Pressed(EKeys::Enter) || Pressed(EKeys::SpaceBar) || Pressed(EKeys::Gamepad_FaceButton_Bottom);
@@ -719,7 +766,13 @@ void AKSGameMode::TickSelect(float Dt)
 	int32 Move = 0; bool bChoose = false;
 	if (Pressed(EKeys::Right) || Pressed(EKeys::D) || Pressed(EKeys::Gamepad_DPad_Right)) Move = 1;
 	if (Pressed(EKeys::Left) || Pressed(EKeys::A) || Pressed(EKeys::Gamepad_DPad_Left)) Move = -1;
-	if (bTracked) { if (Gesture.StepX != 0) Move = Gesture.StepX; bChoose = bDoubleJab; }
+	if (bTracked)
+	{
+		const int32 Was = SelectIndex;
+		const int32 Step = WebStep(SelectIndex, Gesture.StepX, bChoose);
+		if (Step != 0) Move = Step;
+		if (SelectIndex != Was) ShowSelectFighter();      // the jabs had moved it: the fighter he was on comes back
+	}
 	bChoose |= Pressed(EKeys::Enter) || Pressed(EKeys::SpaceBar) || Pressed(EKeys::Gamepad_FaceButton_Bottom);
 	if (bSelectTour) Move = 0, bChoose = false;
 	if (Move != 0)
@@ -1011,8 +1064,9 @@ void AKSGameMode::StartCard(int32 Index)
 	const FLadderTier& Tier = LadderTiers[FMath::Min(FighterIndex, LadderLength - 1)];
 	CurrentDef.Health = Tier.Health; CurrentDef.WindupScale = Tier.WindupScale; CurrentDef.DamageScale = Tier.DamageScale;
 	CurrentDef.FeintChance = Tier.FeintChance; CurrentDef.IdleScale = Tier.IdleScale; CurrentDef.MaxHitsOpen = Tier.MaxHitsOpen;
+	OppSkill = Tier.Skill; OpenScale = Tier.OpenScale;
 	// Two players meet as equals: the same health as the player's own, and no ladder difficulty.
-	if (bOnline) { CurrentDef.Health = 100.f; CurrentDef.WindupScale = CurrentDef.DamageScale = CurrentDef.IdleScale = 1.f; CurrentDef.FeintChance = 0.f; }
+	if (bOnline) { CurrentDef.Health = 100.f; CurrentDef.WindupScale = CurrentDef.DamageScale = CurrentDef.IdleScale = 1.f; CurrentDef.FeintChance = 0.f; OppSkill = 0.f; OpenScale = 1.f; }
 	const FKSFighterDef& F = Fighter();
 	// A fresh actor for every bout. Putting a second fighter's mesh on the old actor left the drawn body frozen in
 	// one pose (the animation ran, the picture did not follow), so the opponent is spawned new, as in the first fight.
@@ -1041,6 +1095,9 @@ void AKSGameMode::StartCard(int32 Index)
 	Pending.Reset(); Popups.Reset();
 	OppState = EKSOppState::Idle; OppT = Clock; OppUntil = Clock + 1000.f;
 	OpenHits = BlockStreak = 0;
+	OppNext = ChainLeft = SameAttackRun = 0; LastAttackType = -1; bWary = false;
+	for (float& H : Habit) H = 0.f;
+	AiCombos = AiFeints = AiBaited = AiSnaps = AiReads = 0; FightStartClock = Clock;
 	OppGuardUntil = OppHurtUntil = PlayerHurtUntil = 0.f;
 	PunchStart[0] = PunchStart[1] = -10.f;
 	CueMain.Reset(); CueHint.Reset(); Announcement.Reset();
@@ -1080,6 +1137,7 @@ void AKSGameMode::StartFight()
 	Announce(TEXT("FIGHT!"), 0.8f);
 	Announcer(bOnline ? TEXT("round1") : FighterIndex + 1 >= NumFights() ? TEXT("round3") : FighterIndex == 0 ? TEXT("round1") : TEXT("round2"));
 	SetPhase(EKSPhase::Fight);
+	FightStartClock = Clock;
 	OppIdle(1.2f);
 }
 
@@ -2814,7 +2872,7 @@ void AKSGameMode::SpecialLand(const FVector& From, const FVector& To)
 	const EKSDefense D = Defense();
 	if (D == EKSDefense::Duck || D == EKSDefense::EvadeLeft || D == EKSDefense::EvadeRight)
 	{
-		Stats.Dodges++; PlayerMeter = FMath::Min(1.f, PlayerMeter + 0.25f);
+		Stats.Dodges++; PlayerMeter = FMath::Min(1.f, PlayerMeter + 0.25f * MeterPace);
 		Sfx(EKSSfx::Dodge); Popup(TEXT("DODGE!"), KSColors::Green, 0.38f, 0.45f, true);
 		CrowdReact(true, 0.8f);
 		OpenUp(1.6f + Rest);
@@ -2832,8 +2890,10 @@ void AKSGameMode::SpecialLand(const FVector& From, const FVector& To)
 
 void AKSGameMode::OppIdle(float Seconds)
 {
-	OppState = EKSOppState::Idle; OppT = Clock; OppUntil = Clock + Seconds; OppWaitUntil = Clock + Seconds + 1.5f;
-	Combo = 0; OppIdleCount++;
+	// How long he will wait for the player to come out of a held dodge before punching where it does not help: a
+	// better boxer loses less time over it (it was a flat second and a half).
+	OppState = EKSOppState::Idle; OppT = Clock; OppUntil = Clock + Seconds; OppWaitUntil = Clock + Seconds + 0.5f + 0.8f * (1.f - OppSkill);
+	Combo = 0; OppIdleCount++; OppNext = 0;
 	if (Phase == EKSPhase::Fight) { CueMain.Reset(); CueHint.Reset(); }
 }
 
@@ -2844,8 +2904,14 @@ void AKSGameMode::StartWindup(EKSPunch Type, float QuickSeconds, int32 Side)
 	Attack.Type = Type;
 	Attack.Side = Side >= 0 ? (EKSArm)Side : FMath::RandBool() ? EKSArm::Left : EKSArm::Right;   // online the other player chose the hand
 	Attack.Damage = AttackDamage[T] * F.DamageScale;
-	Attack.Duration = QuickSeconds > 0.f ? QuickSeconds : WindupSeconds[T] * F.WindupScale * (1.f - 0.2f * Rage());
-	Attack.bFeint = QuickSeconds <= 0.f && Rage() > 0.5f && FMath::FRand() < F.FeintChance;
+	// No two punches take quite the same time: a rhythm that never changes is one the player dodges with his eyes shut.
+	Attack.Duration = QuickSeconds > 0.f ? QuickSeconds : FMath::Max(MinWindup, WindupSeconds[T] * F.WindupScale * (1.f - 0.15f * Rage()) * FMath::FRandRange(0.88f, 1.14f));
+	// He fakes from the first bell (it was only once he was hurt), more when hurt, and most of all straight after being
+	// countered: the fake is there to draw that counter out again (PlayerPunch).
+	Attack.bFeint = QuickSeconds <= 0.f && !bOnline && FMath::FRand() < F.FeintChance * (0.6f + 0.8f * Rage()) + (bWary ? 0.35f : 0.f);
+	bWary = false;
+	if (Attack.bFeint) AiFeints++;
+	if (T == LastAttackType) SameAttackRun++; else { LastAttackType = T; SameAttackRun = 1; }
 	OppState = EKSOppState::Windup; OppT = Clock; OppUntil = Clock + Attack.Duration; bTellBeeped = false;
 	const bool bFromRight = Attack.Side == EKSArm::Left;
 	if (Type == EKSPunch::Straight) Cue(TEXT("JAB"), TEXT("block, duck or evade"));
@@ -2860,6 +2926,35 @@ void AKSGameMode::OpenUp(float Seconds)
 	else { CueMain.Reset(); CueHint.Reset(); }
 }
 
+// Which punch. A person does not draw lots: he looks at the stance in front of him, and he remembers how his last
+// punches were avoided, and throws the one that way out does not help against. How often he manages to is his Skill;
+// the rest of the time he guesses, as the old opponent always did.
+void AKSGameMode::OppAttack(bool bFollowUp)
+{
+	const FKSFighterDef& F = Fighter();
+	const bool bBlocking = Stance(EKSDefense::Block);
+	const float R = FMath::FRand(), Jab = bBlocking ? 0.15f : 0.45f, Hook = bBlocking ? 0.25f : 0.35f;
+	EKSPunch Type = R < Jab ? EKSPunch::Straight : R < Jab + Hook ? EKSPunch::Hook : EKSPunch::Uppercut;
+	int32 Side = -1;
+	EKSDefense Read = Defense();
+	if (Read == EKSDefense::None)
+	{
+		// Nothing held: the way out the player has taken most of late, if there is one he clearly favours.
+		int32 Best = 1; float Sum = 0.f;
+		for (int32 i = 1; i < UE_ARRAY_COUNT(Habit); i++) { Sum += Habit[i]; if (Habit[i] > Habit[Best]) Best = i; }
+		if (Habit[Best] >= 1.7f && Habit[Best] > 0.5f * Sum) Read = (EKSDefense)Best;
+	}
+	if (Read != EKSDefense::None && FMath::FRand() < OppSkill)
+	{
+		AiReads++;
+		if (Read == EKSDefense::Block) Type = FMath::FRand() < 0.7f ? EKSPunch::Uppercut : EKSPunch::Hook;   // through the guard, or half through it
+		else if (Read == EKSDefense::Duck) Type = EKSPunch::Uppercut;                                        // ducking walks into it
+		else { Type = EKSPunch::Hook; Side = (int32)(Read == EKSDefense::EvadeLeft ? EKSArm::Right : EKSArm::Left); }   // the hook he is leaning into
+	}
+	else if (SameAttackRun >= 2 && (int32)Type == LastAttackType) Type = (EKSPunch)((LastAttackType + FMath::RandRange(1, 2)) % 3);   // never the same punch three times running
+	StartWindup(Type, bFollowUp ? FMath::Max(MinWindup, WindupSeconds[(int32)Type] * F.WindupScale * 0.8f) : 0.f, Side);
+}
+
 void AKSGameMode::OppAI()
 {
 	const FKSFighterDef& F = Fighter();
@@ -2867,17 +2962,31 @@ void AKSGameMode::OppAI()
 	{
 		if (bOnline) return;   // another player decides when he punches (OnlineIncoming); the rest of his turn runs as below
 		const EKSDefense D = Defense();
-		// He waits for you to come out of a dodge, so holding one does not win the fight.
-		if ((D == EKSDefense::Duck || D == EKSDefense::EvadeLeft || D == EKSDefense::EvadeRight) && Clock < OppWaitUntil) { OppUntil = Clock + 0.15f; return; }
-		const bool bBlocking = Stance(EKSDefense::Block);
-		const float R = FMath::FRand(), Jab = bBlocking ? 0.15f : 0.45f, Hook = bBlocking ? 0.25f : 0.35f;
-		StartWindup(R < Jab ? EKSPunch::Straight : R < Jab + Hook ? EKSPunch::Hook : EKSPunch::Uppercut);
+		const int32 Next = OppNext;
+		// He waits a moment for you to come out of a dodge, so holding one does not win the fight; if you stay in it he
+		// throws the punch it does not help against (OppAttack).
+		if (Next == 0 && (D == EKSDefense::Duck || D == EKSDefense::EvadeLeft || D == EKSDefense::EvadeRight) && Clock < OppWaitUntil) { OppUntil = Clock + 0.15f; return; }
+		OppNext = 0;
+		// The answer to a punch on his guard, or into his fake: short and straight, or a short hook.
+		if (Next == 2) { AiSnaps++; StartWindup(FMath::FRand() < 0.65f ? EKSPunch::Straight : EKSPunch::Hook, FMath::Max(MinWindup, 0.40f * F.WindupScale)); return; }
+		// A fresh attack may be the first of two or three: the others follow only while they land (ResolveStrike).
+		if (Next == 0) { const float R = FMath::FRand(); ChainLeft = R < 0.25f * OppSkill ? 2 : R < 0.20f + 0.45f * OppSkill ? 1 : 0; }
+		OppAttack(Next == 1);
 	}
 	else if (OppState == EKSOppState::Windup)
 	{
 		const float U = (Clock - OppT) / Attack.Duration;
 		if (!bTellBeeped && U > 0.5f) { bTellBeeped = true; Sfx(EKSSfx::Tell); }
-		if (Attack.bFeint && U > 0.6f) { Popup(TEXT("FAKE!"), FLinearColor(1.f, 0.4f, 0.1f), 0.62f, 0.4f); OppIdle(FMath::FRandRange(0.5f, 0.9f)); return; }
+		if (Attack.bFeint && U > 0.6f)
+		{
+			Popup(TEXT("FAKE!"), FLinearColor(1.f, 0.4f, 0.1f), 0.62f, 0.4f);
+			// A fake is there to make the real punch land: more often than not that follows at once, and quickly.
+			const bool bReal = FMath::FRand() < 0.4f + 0.4f * OppSkill;
+			ChainLeft = 0;
+			OppIdle(bReal ? FMath::FRandRange(0.12f, 0.25f) : FMath::FRandRange(0.4f, 0.8f));
+			if (bReal) { OppNext = 1; OppGuardUntil = OppUntil; }
+			return;
+		}
 		if (U >= 1.f)
 		{
 			OppState = EKSOppState::Strike; OppT = Clock; OppUntil = Clock + Grace; Def0 = Defense();
@@ -2891,7 +3000,7 @@ void AKSGameMode::OppAI()
 	}
 	else if (OppState == EKSOppState::Open && (Clock >= OppUntil || OpenHits >= F.MaxHitsOpen))
 	{
-		OppIdle(FMath::FRandRange(0.7f, 1.3f) * (1.f - 0.3f * Rage()) * F.IdleScale);
+		OppIdle(FMath::FRandRange(0.45f, 1.0f) * (1.f - 0.3f * Rage()) * F.IdleScale);
 	}
 }
 
@@ -2901,12 +3010,17 @@ void AKSGameMode::ResolveStrike()
 	const EKSDefense D1 = Def0, D2 = Defense();
 	const EOutcome O = FMath::Max(Outcome(Attack.Type, Attack.Side, D1), Outcome(Attack.Type, Attack.Side, D2));
 	if (bOnline) { OnlineStruck((int32)O, D1 == EKSDefense::Block || D2 == EKSDefense::Block); return; }
-	if (O == EOutcome::Dodged) { Stats.Dodges++; PlayerMeter = FMath::Min(1.f, PlayerMeter + 0.12f); Sfx(EKSSfx::Dodge); Popup(TEXT("DODGE!"), KSColors::Green, 0.38f, 0.45f); OpenUp(1.2f); return; }
+	// He remembers how he was avoided, the latest times most: the way out the player keeps taking is the one he will
+	// punch into (OppAttack).
+	for (float& H : Habit) H *= 0.8f;
+	if (O == EOutcome::Dodged || O == EOutcome::Blocked || O == EOutcome::Half) Habit[(int32)(Outcome(Attack.Type, Attack.Side, D2) == O ? D2 : D1)] += 1.f;
+	if (O == EOutcome::Dodged) { ChainLeft = 0; Stats.Dodges++; PlayerMeter = FMath::Min(1.f, PlayerMeter + 0.12f * MeterPace); Sfx(EKSSfx::Dodge); Popup(TEXT("DODGE!"), KSColors::Green, 0.38f, 0.45f); OpenUp(1.2f * OpenScale); return; }
 	if (O == EOutcome::Blocked)
 	{
 		// A block does more than stop the punch: he is thrown back off the guard and reels, his attack is over and the
 		// player has the next word.
-		Stats.Blocks++; PlayerMeter = FMath::Min(1.f, PlayerMeter + 0.10f);
+		ChainLeft = 0;
+		Stats.Blocks++; PlayerMeter = FMath::Min(1.f, PlayerMeter + 0.10f * MeterPace);
 		Sfx(EKSSfx::Blocked); Popup(TEXT("BLOCKED"), KSColors::Lilac, 0.38f, 0.45f);
 		OppStaggerUntil = Clock + 0.8f;
 		if (OppDummy) { OppDummy->Knock(26.f); OppDummy->Flash(FLinearColor::White, 0.06f); }
@@ -2914,13 +3028,19 @@ void AKSGameMode::ResolveStrike()
 		GuardRing(PlayerDummy);
 		CamPunch(FVector(45.f, 0.f, 0.f), FMath::RandBool() ? 7.f : -7.f, -2.f);
 		Shake = FMath::Max(Shake, 3.f);
-		OpenUp(1.0f);
+		OpenUp(1.0f * OpenScale);
 		UE_LOG(LogTemp, Display, TEXT("KSTEST stagger clip=%d"), OppDummy && OppDummy->HasClip(TEXT("Stagger")) ? 1 : 0);
 		return;
 	}
 	if (Attack.Type == EKSPunch::Uppercut && (D1 == EKSDefense::Block || D2 == EKSDefense::Block)) Popup(TEXT("GUARD BREAK!"), KSColors::Red, 0.5f, 0.5f, true);
 	PlayerHurt(Attack.Damage * (O == EOutcome::Half ? 0.5f : O == EOutcome::HitPlus ? 1.25f : 1.f), O == EOutcome::Half);
-	if (PlayerHP > 0.f) OppIdle(FMath::FRandRange(0.8f, 1.2f));
+	if (PlayerHP > 0.f)
+	{
+		// A punch that lands is not left alone: the next of the combination is on its way before the guard is back.
+		// A punch that is blocked or dodged ends the combination (above), so defending still earns the opening.
+		if (ChainLeft > 0) { ChainLeft--; AiCombos++; OppIdle(FMath::FRandRange(0.10f, 0.22f)); OppNext = 1; OppGuardUntil = OppUntil; }
+		else OppIdle(FMath::FRandRange(0.5f, 1.0f) * Fighter().IdleScale);
+	}
 }
 
 void AKSGameMode::QueueHitShots(const TCHAR* Kind)
@@ -2937,7 +3057,7 @@ void AKSGameMode::PlayerHurt(float Damage, bool bLight)
 {
 	PlayerHP = FMath::Max(0.f, PlayerHP - Damage);
 	Stats.Taken++;
-	PlayerMeter = FMath::Min(1.f, PlayerMeter + 0.05f); OppMeter = FMath::Min(1.f, OppMeter + 0.22f);
+	PlayerMeter = FMath::Min(1.f, PlayerMeter + 0.05f * MeterPace); OppMeter = FMath::Min(1.f, OppMeter + 0.22f * MeterPace);
 	Shake = bLight ? 4.f : 10.f; RedFlash = bLight ? 0.4f : 1.f; Combo = 0;
 	PlayerHurtUntil = Clock + 0.3f;
 	// The camera takes the punch too: knocked back, tipped to one side.
@@ -2964,17 +3084,30 @@ void AKSGameMode::PlayerPunch(EKSArm Arm, EKSPunch Type)
 	if (Phase != EKSPhase::Fight) return;
 	if (bOnline) { OnlinePunch(Arm, Type); return; }
 	float Mult = 0.f;
-	bool bCounter = false;
+	bool bCounter = false, bBaited = false;
 	if (OppState == EKSOppState::Open && OpenHits < Fighter().MaxHitsOpen) { Mult = 1.f; OpenHits++; }
 	else if (OppState == EKSOppState::Windup && (Clock - OppT) / Attack.Duration >= 0.35f)
 	{
-		Mult = 2.5f; bCounter = true; Stats.Counters++; OpenUp(1.0f);
+		if (Attack.bFeint)
+		{
+			// The fake was thrown to draw exactly this punch: it meets his gloves, and his answer is already on its way.
+			// (It used to count as a counter like any other, so punching at every twitch of his won the bout.)
+			bBaited = true; AiBaited++; ChainLeft = 0;
+			Popup(TEXT("FAKE!"), FLinearColor(1.f, 0.4f, 0.1f), 0.62f, 0.4f);
+			OppIdle(FMath::FRandRange(0.14f, 0.24f)); OppNext = 2; OppGuardUntil = OppUntil;
+		}
+		else { Mult = CounterMult; bCounter = true; Stats.Counters++; bWary = true; ChainLeft = 0; OpenUp(1.0f * OpenScale); }
 	}
 	Pending.Add({ Clock + 0.09f, Arm, Type, Mult, bCounter });
-	if (Mult == 0.f && OppState == EKSOppState::Idle)
+	if (Mult == 0.f && !bBaited && OppState == EKSOppState::Idle && OppNext == 0)
 	{
-		// Punching into his guard three times makes him snap back with a quick jab.
-		if (++BlockStreak >= 3) { BlockStreak = 0; StartWindup(EKSPunch::Straight, 0.42f); }
+		// Punching into his guard gets an answer: always by the third punch, and from a better boxer often by the first,
+		// after the time a person needs to see the gap (it was always the third punch, and at once).
+		if (++BlockStreak >= 3 || FMath::FRand() < 0.12f + 0.38f * OppSkill)
+		{
+			BlockStreak = 0; ChainLeft = 0; OppNext = 2;
+			OppUntil = Clock + FMath::FRandRange(0.20f, 0.32f) + 0.15f * (1.f - OppSkill);
+		}
 	}
 }
 
@@ -3003,7 +3136,7 @@ void AKSGameMode::LandHit(const FPendingHit& Hit, float FixedDamage)
 		Sfx(Hit.bCounter ? EKSSfx::Score : EKSSfx::Pop, Hit.bCounter ? 0.5f : 0.45f);
 	}
 	Stats.Landed++; Combo++; Stats.BestCombo = FMath::Max(Stats.BestCombo, Combo);
-	PlayerMeter = FMath::Min(1.f, PlayerMeter + (Hit.bCounter ? 0.16f : 0.07f)); OppMeter = FMath::Min(1.f, OppMeter + 0.03f);
+	PlayerMeter = FMath::Min(1.f, PlayerMeter + (Hit.bCounter ? 0.16f : 0.07f) * MeterPace); OppMeter = FMath::Min(1.f, OppMeter + 0.03f * MeterPace);
 	OppHurtUntil = Clock + 0.24f;
 	// The camera drives in behind the punch, from the side of the hand that threw it, with a quick zoom.
 	CamPunch(FVector(Hit.bCounter ? 150.f : 85.f, Hit.Arm == EKSArm::Left ? 45.f : -45.f, 0.f), (Hit.Arm == EKSArm::Left ? -1.f : 1.f) * (Hit.bCounter ? 26.f : 10.f), Hit.bCounter ? -7.f : -3.5f);
@@ -3032,6 +3165,9 @@ void AKSGameMode::EndFight(bool bWin, bool bDecision)
 	UE_LOG(LogTemp, Display, TEXT("KSTEST bout=%d opponent=%s result=%s opp_hand_travel=%.0f player_hand_travel=%.0f landed=%d taken=%d spectators=%d"), FighterIndex, Fighter().Name,
 		bDecision ? TEXT("time") : bWin ? TEXT("win") : TEXT("loss"), TestOppHand.IsValid ? TestOppHand.GetSize().Size() : 0.0, TestPlayerHand.IsValid ? TestPlayerHand.GetSize().Size() : 0.0, Stats.Landed, Stats.Taken, Spectators.Num());
 	TestOppHand = FBox(ForceInit); TestPlayerHand = FBox(ForceInit);
+	// How long the bout was and what the opponent's head did in it: combinations thrown on, fakes, counters drawn by a
+	// fake, answers to a punch on his guard, punches chosen by reading the player.
+	UE_LOG(LogTemp, Display, TEXT("KSTEST ai bout=%d seconds=%d combos=%d fakes=%d baited=%d answers=%d reads=%d"), FighterIndex, FMath::RoundToInt(Clock - FightStartClock), AiCombos, AiFeints, AiBaited, AiSnaps, AiReads);
 	// Faces for tools/check.sh: a fighter who showed one face all bout, or never opened the mouth, is the bug.
 	int32 Faces = 0, Mouth = 0;
 	if (OppDummy) OppDummy->TakeFaceStats(Faces, Mouth);
@@ -3074,7 +3210,8 @@ void AKSGameMode::TickFight(float Dt)
 				AutoDefense = Attack.Type == EKSPunch::Straight ? EKSDefense::Block
 					: Attack.Type == EKSPunch::Hook ? (Attack.Side == EKSArm::Left ? EKSDefense::EvadeLeft : EKSDefense::EvadeRight) : EKSDefense::EvadeLeft;
 			}
-			if (OppState == EKSOppState::Open && Clock >= AutoNextPunch && !bGiveUp)
+			// -KSSpam: it punches all the time, into his guard and into his fakes, as a player in a hurry does.
+			if ((OppState == EKSOppState::Open || (bAutoSpam && !bOnline)) && Clock >= AutoNextPunch && !bGiveUp)
 			{
 				AutoNextPunch = Clock + 0.3f;
 				FramePunches.Add({ FMath::RandBool() ? EKSArm::Left : EKSArm::Right, (EKSPunch)FMath::RandRange(0, 2) });
@@ -3093,7 +3230,7 @@ void AKSGameMode::TickFight(float Dt)
 			for (const TPair<EKSArm, EKSPunch>& Punch : FramePunches) PlayerPunch(Punch.Key, Punch.Value);
 			if (Phase == EKSPhase::Fight) OppAI();
 			// The meters. The opponent's creeps up by itself too, so every bout sees his special at least once.
-			OppMeter = FMath::Min(1.f, OppMeter + Dt * 0.012f);
+			OppMeter = FMath::Min(1.f, OppMeter + Dt * 0.012f * MeterPace);
 			if (bTestSpecials)
 			{
 				// The player's special two seconds in, the opponent's three seconds after that is over, then out.

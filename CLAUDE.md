@@ -94,7 +94,9 @@ Test flags (all optional):
 | `-KSSelectTour` | With `-KSStart=select`: shows every fighter's dance and "picked" move in turn, logs whether he stayed in his part of the picture, and quits. |
 | `-KSPortraits` | Photograph every fighter's head to `unreal/Saved/Screenshots/avatar_<Folder>.png` and quit. |
 | `-KSGiveUp` | With `-KSAuto`: the bot neither defends, punches nor continues, so the count runs out. |
+| `-KSSpam` | With `-KSAuto`: the bot also punches when there is no opening, so the opponent's answers and fakes are run. |
 | `-KSEscAt=N` | As if Esc were pressed N seconds into the first bout. |
+| `-KSFakeJabSwipe` | On the menu: a fake left jab that is also read as a swipe down, then a right jab (the first line must be chosen). |
 | `-KSFakePunch` | During the film: fake webcam hooks and uppercuts for five seconds, then one jab. |
 | `-KSArena=N` `-KSArenaTour` | Fight every bout in arena N (0-10, `KSArenaData.h`) / build every arena once at the start. |
 | `-KSCalDemo` | Enter calibration without a camera and step through it automatically. |
@@ -102,6 +104,7 @@ Test flags (all optional):
 | `-KSVfxTour` | Plays 123 effects of the Fab packs between the fighters in turn, photographs each twice, and quits (`docs/VFX.md`). |
 | `-KSSpecials` | The player's special two seconds into the bout, the opponent's three seconds later, then quit. With `-KSHitShots`: five stills of each. |
 | `-KSNoRing` | The fighters stay on their two marks, as before they could move about the ring: tells a bug of the movement from any other. |
+| `-KSBadgesStay` | Damage badges stay where they were put, as before they slid off a fighter who moves under them (the check's comparison). |
 | `-KSMirrorArms` | Experimental: fighter's arms copy the webcam arms directly. Off by default, it looks bad. |
 | `-KSFakeArms` | Feed a fixed arm pose into the arm copying, to test it without a person. |
 | `-KSHost` `-KSPort=N` | Online: skip the menus and wait for another player (port 7777 unless given). |

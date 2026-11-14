@@ -32,7 +32,7 @@
 namespace
 {
 	const float Travel[] = { 0.45f, 0.58f, 0.70f };        // seconds a jab, hook and uppercut are in the air
-	const float OnlineDamage[] = { 6.f, 9.f, 12.f };       // out of 100 health
+	const float OnlineDamage[] = { 3.f, 4.5f, 6.f };       // out of 100 health. Half the first numbers (bouts were over too soon); a third made two bots take 72 s, up from 15
 	const float OnlineGrace = 0.14f;                       // the same grace as against the cabinet (Grace in KSGameMode.cpp)
 	const float Recovery = 0.20f;                          // after a punch has arrived, before the next can be thrown
 	const float GuardDown = 0.45f;                         // a punch drops the puncher's own guard for this long
@@ -99,7 +99,7 @@ void AKSGameMode::TickLobby(float Dt)
 		// The webcam as on the start menu: a hand swept down or up moves, a jab with one hand and then the other chooses
 		// (not "any punch": a player shifting his weight threw several a minute).
 		bool bUp = Pressed(EKeys::Up) || Pressed(EKeys::W) || Pressed(EKeys::Gamepad_DPad_Up);
-		if (bTracked) { bNext |= Gesture.StepY > 0; bUp |= Gesture.StepY < 0; bChoose = bDoubleJab; }
+		if (bTracked) { const int32 Step = WebStep(LobbyIndex, Gesture.StepY, bChoose); bNext |= Step > 0; bUp |= Step < 0; }
 		if (bUp) { LobbyIndex = (LobbyIndex + Lines - 1) % Lines; Sfx(EKSSfx::Menu, 0.7f); }
 		if (bNext) { LobbyIndex = (LobbyIndex + 1) % Lines; Sfx(EKSSfx::Menu, 0.7f); }
 		bChoose |= Pressed(EKeys::Enter) || Pressed(EKeys::SpaceBar) || Pressed(EKeys::Gamepad_FaceButton_Bottom);

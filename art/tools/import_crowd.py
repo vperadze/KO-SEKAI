@@ -8,7 +8,7 @@ Sounds:   art/audio/S_<Cheer|Roar|Gasp|Boo|Shout|Beast>_<n>.wav and art/audio/M_
 
 Anything whose source file is newer than its asset is brought in again.
 """
-import glob, os
+import glob, os, struct
 import unreal
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -41,7 +41,26 @@ for png in sorted(glob.glob(os.path.join(ROOT, 'art', 'arena', 'T_KS_Crowd_*.png
     EAL.save_loaded_asset(tex)
     pictures += 1
 
-names = [w for kind in ('Cheer', 'Roar', 'Gasp', 'Boo', 'Shout', 'Beast') for w in sorted(glob.glob(os.path.join(ROOT, 'art', 'audio', 'S_%s_*.wav' % kind)))]
+# Every sheet is cooked at half its drawn size (SHRINK): 179 sheets at full size were 255 MB of a package that has to
+# stay under 1 GB. The engine does the shrinking (max_texture_size), so the pictures in art/arena stay as drawn and
+# SHRINK = 1 gives the full size back. This runs over all the sheets, not only the ones just brought in.
+SHRINK = 2
+capped, sizes = 0, {}
+for png in sorted(glob.glob(os.path.join(ROOT, 'art', 'arena', 'T_KS_Crowd_*.png'))):
+    with open(png, 'rb') as f:
+        wide, high = struct.unpack('>II', f.read(24)[16:24])
+    limit = 0 if SHRINK == 1 else max(wide, high) // SHRINK
+    sizes[limit] = sizes.get(limit, 0) + 1
+    tex = EAL.load_asset('/Game/KS/Arena/' + os.path.splitext(os.path.basename(png))[0])
+    if not tex: unreal.log_error('KSIMPORT no asset for %s' % png); continue
+    if tex.get_editor_property('max_texture_size') == limit: continue
+    tex.set_editor_property('max_texture_size', limit)
+    EAL.save_loaded_asset(tex)
+    capped += 1
+with open(os.path.join(ROOT, 'unreal', 'Saved', 'import_crowd.txt'), 'w') as f:
+    f.write('pictures=%d changed=%d shrink=%d longest_side=%s\n' % (sum(sizes.values()), capped, SHRINK, sorted(sizes.items())))
+
+names =[w for kind in ('Cheer', 'Roar', 'Gasp', 'Boo', 'Shout', 'Beast') for w in sorted(glob.glob(os.path.join(ROOT, 'art', 'audio', 'S_%s_*.wav' % kind)))]
 for wav in names + glob.glob(os.path.join(ROOT, 'art', 'audio', 'M_Crowd.wav')):
     if not stale(wav, 'KS/Audio'): continue
     sound = bring(wav, '/Game/KS/Audio')

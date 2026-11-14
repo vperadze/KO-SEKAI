@@ -67,7 +67,7 @@ public:
 	float Clock = 0.f;            // game clock, stops while paused
 	bool bPaused = false;
 	int32 FighterIndex = 0;
-	float PlayerHP = 100.f, OppHP = 100.f, OppMaxHP = 100.f, TimeLeft = 120.f;
+	float PlayerHP = 100.f, OppHP = 100.f, OppMaxHP = 100.f, TimeLeft = 300.f;
 	float PlayerTrail = 100.f, OppTrail = 100.f;   // the slower bar behind each health bar
 	int32 Combo = 0;
 	FKSStats Stats;
@@ -159,6 +159,7 @@ private:
 	void OppIdle(float Seconds);
 	void StartWindup(EKSPunch Type, float QuickSeconds = 0.f, int32 Side = -1);
 	void OpenUp(float Seconds);
+	void OppAttack(bool bFollowUp);       // chooses his punch: by the player's stance and habits, or by guessing
 	void OppAI();
 	void ResolveStrike();
 	void PlayerHurt(float Damage, bool bLight);
@@ -306,6 +307,17 @@ private:
 	int32 DoubleJabs = 0;                     // for the log
 	bool bWebPunchClean[2] = { false, false };   // nothing else was thrown in the moment before that punch
 	double LastAnyWebPunch = -100.0;
+	/* A jab is also a hand travelling a shoulder's width through the picture, so the swipe rule sees one in it and the
+	   list moves between the two jabs (player, 2026-11-14: "sometimes goes down or up instead and picks another
+	   thing"). Every step a swipe makes is remembered for a moment; a left-right jab takes back those made during it. */
+	struct FKSSwipeStep { double At = 0.0; int32* Index = nullptr; int32 Before = 0; };
+	TArray<FKSSwipeStep> SwipeSteps;
+	double DoubleJabFrom = 0.0;               // when the first jab of this frame's pair was called
+	int32 SwipesTakenBack = 0;                // for the log
+	/** The webcam's part of a list screen. Returns the step to make (Swipe, or 0 on the frame of a left-right jab,
+	 *  which sets bChoose and puts Index back where it was before the jabs moved it). */
+	int32 WebStep(int32& Index, int32 Swipe, bool& bChoose);
+	bool bFakeJabSwipe = false;      // -KSFakeJabSwipe: on the menu, a left jab that is also read as a swipe down, then a right jab
 	void NoteWebPunch(EKSArm Arm);
 	bool bNoRing = false;                     // -KSNoRing: the fighters stay on their marks, as before TickRing (to tell its bugs from others)
 	float PunchSensitivity = 1.f, SensitivitySent = -1.f;   // the player's own (calibration), and what the tracker was last told
@@ -408,6 +420,17 @@ private:
 	EKSOppState OppState = EKSOppState::Idle;
 	float OppT = 0.f, OppUntil = 0.f, OppWaitUntil = 0.f, OppGuardUntil = 0.f, OppHurtUntil = 0.f, PlayerHurtUntil = 0.f;
 	int32 OpenHits = 0, BlockStreak = 0;
+	// The opponent's head (OppAI, OppAttack): how good he is, what he has learnt about the player this bout, and what
+	// he is in the middle of.
+	float OppSkill = 0.4f;                    // 0-1 from the ladder: how often he reads the player instead of guessing
+	float OpenScale = 1.f;                    // from the ladder: shortens the time he stands open
+	float Habit[5] = { 0.f, 0.f, 0.f, 0.f, 0.f };   // how the player got out of his last punches, by EKSDefense, fading
+	int32 OppNext = 0;                        // what the idle that is running ends in: 0 a fresh attack, 1 the next punch of a combination, 2 a quick answer
+	int32 ChainLeft = 0;                      // punches still to come in the combination he is throwing
+	bool bWary = false;                       // his last attack was countered: the next is likely a fake to draw the counter out
+	int32 LastAttackType = -1, SameAttackRun = 0;
+	float FightStartClock = 0.f;
+	int32 AiCombos = 0, AiFeints = 0, AiBaited = 0, AiSnaps = 0, AiReads = 0;   // counted for tools/check.sh (KSTEST ai)
 	bool bTellBeeped = false;
 	EKSDefense Def0 = EKSDefense::None;
 	FAttack Attack;
@@ -428,6 +451,7 @@ private:
 	bool bMirrorArms = false;    // -KSMirrorArms: the fighter's arms copy the webcam arms directly (experimental, off by default)
 	bool bFakeArms = false;      // -KSFakeArms: pretend the webcam sees a fixed arm pose, to check the arm copying
 	bool bAutoNoGuard = false;   // -KSNoGuard: the test bot never defends, so the opponent's punches land
+	bool bAutoSpam = false;      // -KSSpam: the test bot also punches when there is no opening, so the opponent's answers to that are run
 	bool bGiveUp = false;        // -KSGiveUp: the test bot neither defends nor punches nor continues, so the count runs out
 	float TestEscAt = 0.f;       // -KSEscAt=N: as if Esc were pressed N seconds into the first bout
 	bool bFakeFilmPunches = false;   // -KSFakePunch: during the film, webcam hooks and uppercuts for five seconds, then one jab

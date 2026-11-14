@@ -255,30 +255,53 @@ namespace
 
 void AKSHUD::BeginLayout(const AKSGameMode& G)
 {
-	Bodies.Reset(); Heads.Reset(); Taken.Reset();
+	Heads.Reset(); Taken.Reset();
 	// Below the health bars and above the bottom edge; on the VS card only the strip the fighters are seen through.
 	Region = G.Phase == EKSPhase::Card ? FBox2D(FVector2D(0.01f * SW, 0.16f * SH), FVector2D(0.99f * SW, 0.59f * SH))
 		: FBox2D(FVector2D(0.01f * SW, 0.185f * SH), FVector2D(0.99f * SW, 0.93f * SH));
+	Cell = FMath::Max(4.f, SH / 48.f);
+	GridW = FMath::CeilToInt(SW / Cell); GridH = FMath::CeilToInt(SH / Cell);
+	TArray<uint8> On;
+	On.SetNumZeroed(GridW * GridH);
+	TArray<FVector2D> Points;
 	const TPair<const TArray<FVector>*, FVector> Fighters[] = { { &G.OppBody, G.OppHead }, { &G.PlayerBody, G.PlayerHead } };
 	for (const TPair<const TArray<FVector>*, FVector>& F : Fighters)
 	{
-		FBox2D Body(ForceInit);
+		Points.Reset();
+		FBox2D Whole(ForceInit), Seen(ForceInit);
 		for (const FVector& Point : *F.Key)
 		{
 			const FVector S = Project(Point);
-			if (S.Z > 0.f) Body += FVector2D(FMath::Clamp(S.X, 0.f, SW), FMath::Clamp(S.Y, 0.f, SH));
+			if (S.Z <= 0.f) continue;
+			Points.Add(FVector2D(S.X, S.Y));
+			Whole += FVector2D(S.X, S.Y);
+			Seen += FVector2D(FMath::Clamp(S.X, 0.f, SW), FMath::Clamp(S.Y, 0.f, SH));
 		}
-		if (!Body.bIsValid || Body.GetArea() < 16.f) continue;
-		// The points are bones: flesh, hair and gloves reach a little further.
-		Bodies.Add(Body.ExpandBy(0.035f * Body.GetSize().Y));
+		if (!Seen.bIsValid || Seen.GetArea() < 16.f) continue;
+		// The points are bones: flesh, hair and gloves reach this much further, by the fighter's size in the picture.
+		const float Tall = FMath::Min(Whole.GetSize().Y, 1.5f * SH), Flesh = 0.075f * Tall;
+		// The head as one more point, a big one: hair, a horn or a television set reach well behind and above the face.
 		const FVector Head = Project(F.Value);
+		const int32 HeadAt = Head.Z > 0.f ? Points.Add(FVector2D(Head.X, Head.Y)) : INDEX_NONE;
+		for (int32 i = 0; i < Points.Num(); i++)
+		{
+			const FVector2D P = Points[i];
+			const float Round = i == HeadAt ? 0.13f * Tall : Flesh;
+			const int32 X0 = FMath::Max(0, FMath::FloorToInt((P.X - Round) / Cell)), X1 = FMath::Min(GridW - 1, FMath::FloorToInt((P.X + Round) / Cell));
+			const int32 Y0 = FMath::Max(0, FMath::FloorToInt((P.Y - Round) / Cell)), Y1 = FMath::Min(GridH - 1, FMath::FloorToInt((P.Y + Round) / Cell));
+			for (int32 Y = Y0; Y <= Y1; Y++) for (int32 X = X0; X <= X1; X++)
+				if (FVector2D::DistSquared(P, FVector2D((X + 0.5f) * Cell, (Y + 0.5f) * Cell)) <= Round * Round) On[Y * GridW + X] = 1;
+		}
 		if (Head.Z > 0.f)
 		{
-			const float R = FMath::Max(0.05f * SH, 0.12f * Body.GetSize().Y);
+			const float R = FMath::Max(0.05f * SH, 0.12f * Seen.GetSize().Y);
 			Heads.Add(BoxAt(FVector2D(Head.X, Head.Y), FVector2D(2.f * R, 2.4f * R)));
 		}
 	}
-	// A badge keeps the place it was given for as long as it is up; the ones that are gone free theirs.
+	BodySum.SetNumZeroed((GridW + 1) * (GridH + 1));
+	for (int32 Y = 0; Y < GridH; Y++) for (int32 X = 0; X < GridW; X++)
+		BodySum[(Y + 1) * (GridW + 1) + X + 1] = On[Y * GridW + X] + BodySum[Y * (GridW + 1) + X + 1] + BodySum[(Y + 1) * (GridW + 1) + X] - BodySum[Y * (GridW + 1) + X];
+	// A badge keeps its place for as long as it is up, unless a fighter moves under it (DrawPopup); the ones that are gone free theirs.
 	Placed.RemoveAll([&G](const FPlacedBadge& B) { return !G.Popups.ContainsByPredicate([&B](const FKSPopup& P) { return P.Start == B.Start && P.Text == B.Text; }); });
 
 	// A new line pops its bubble out afresh.
@@ -289,6 +312,16 @@ void AKSHUD::BeginLayout(const AKSGameMode& G)
 		KSAudio::Play(this, EKSSfx::Pop, 0.6f);
 		if (!bLoggedBubble) { bLoggedBubble = true; UE_LOG(LogTemp, Display, TEXT("KSTEST ui speech bubble shown picture=%d"), Tex(TEXT("bubble")) ? 1 : 0); }
 	}
+}
+
+float AKSHUD::BodyCover(const FBox2D& Box) const
+{
+	if (BodySum.Num() != (GridW + 1) * (GridH + 1)) return 0.f;
+	const int32 X0 = FMath::Clamp(FMath::FloorToInt(Box.Min.X / Cell), 0, GridW), X1 = FMath::Clamp(FMath::CeilToInt(Box.Max.X / Cell), 0, GridW);
+	const int32 Y0 = FMath::Clamp(FMath::FloorToInt(Box.Min.Y / Cell), 0, GridH), Y1 = FMath::Clamp(FMath::CeilToInt(Box.Max.Y / Cell), 0, GridH);
+	if (X1 <= X0 || Y1 <= Y0) return 0.f;
+	const int32 Row = GridW + 1;
+	return float(BodySum[Y1 * Row + X1] - BodySum[Y0 * Row + X1] - BodySum[Y1 * Row + X0] + BodySum[Y0 * Row + X0]) / float((X1 - X0) * (Y1 - Y0));
 }
 
 void AKSHUD::Reserve(float X, float Y, float W, float H)
@@ -303,7 +336,8 @@ float AKSHUD::SpotCost(const FBox2D& Box, int32 Self) const
 	for (const FBox2D& B : Heads) Cost += 20.f * Cover(Box, B);
 	for (const FBox2D& B : Taken) Cost += 10.f * Cover(Box, B);
 	for (int32 i = 0; i < Placed.Num(); i++) if (i != Self) Cost += 8.f * Cover(Box, BoxAt(Placed[i].At, Placed[i].Size));
-	for (const FBox2D& B : Bodies) Cost += 5.f * Cover(Box, B);
+	// A body, and a little room round it: a fighter who is hit falls back, and a badge right at his shoulder is under him at once.
+	Cost += 5.f * BodyCover(Box) + 2.f * BodyCover(Box.ExpandBy(0.4f * Box.GetSize().Y));
 	return Cost;
 }
 
@@ -493,7 +527,7 @@ void AKSHUD::DrawPopup(const AKSGameMode& G, const FKSPopup& P)
 	UTexture2D* Picture = Art ? Tex(Art) : nullptr;
 	const float Big = P.bBig ? 1.25f : 1.f, High = 0.15f, WordPx = P.bBig ? 60.f : 40.f;
 
-	// Where it goes is decided once, when it appears: as near to where it belongs as it can be without covering a fighter.
+	// Where it goes is decided when it appears: as near to where it belongs as it can be without covering a fighter.
 	int32 Slot = Placed.IndexOfByPredicate([&P](const FPlacedBadge& B) { return B.Start == P.Start && B.Text == P.Text; });
 	if (Slot == INDEX_NONE)
 	{
@@ -513,18 +547,37 @@ void AKSHUD::DrawPopup(const AKSGameMode& G, const FKSPopup& P)
 			if (Head.Z > 0.f) Want = FVector2D(Head.X + (Head.X < 0.5f * SW ? -0.13f : 0.13f) * SW, Head.Y + (P.Pos.Y - 0.63f) * SH);
 		}
 		const FVector2D At = FindSpot(Want, Size, INDEX_NONE);
-		Slot = Placed.Add({ P.Start, P.Text, At, Size });
+		Slot = Placed.Add({ P.Start, P.Text, At, Size, At });
 		// For tools/check.sh: how well the badges keep off the fighters.
 		const FBox2D Box = BoxAt(At, Size);
 		bool bOnHead = false;
 		for (const FBox2D& B : Heads) bOnHead |= Cover(Box, B) > 0.2f;
-		for (const FBox2D& B : Bodies) WorstCover = FMath::Max(WorstCover, Cover(Box, B));
+		const float OnBody = BodyCover(Box);
+		WorstCover = FMath::Max(WorstCover, OnBody);
+		// A badge that had to go over a body says where it wanted to be, so the reason can be read from the log.
+		if (OnBody > 0.35f) UE_LOG(LogTemp, Display, TEXT("KSTEST ui badge on body cover=%.2f kind=%d text=%s phase=%d want=%.0f,%.0f at=%.0f,%.0f size=%.0f,%.0f screen=%.0f,%.0f fixed=%d badges=%d"),
+			OnBody, P.Kind, *P.Text, (int32)G.Phase, Want.X, Want.Y, At.X, At.Y, Size.X, Size.Y, SW, SH, Taken.Num(), Placed.Num() - 1);
 		BadgesPlaced++; BadgesOnHeads += bOnHead ? 1 : 0;
-		if (BadgesPlaced == 10 && !bLoggedLayout)
+		// Every ten badges, the state so far: the check reads the last of these lines, so it covers the whole run.
+		// worst_body_cover is at the moment of placing; covered_frames is the share of the frames badges were fully
+		// shown in which a third or more of one lay on a fighter (he was hit and fell back into it, or stepped there).
+		if (BadgesPlaced % 10 == 0)
+			UE_LOG(LogTemp, Display, TEXT("KSTEST ui layout badges=%d on_heads=%d worst_body_cover=%.2f covered_frames=%.3f stay=%d"), BadgesPlaced, BadgesOnHeads, WorstCover,
+				BadgeFramesCovered / float(FMath::Max(1, BadgeFrames)), FParse::Param(FCommandLine::Get(), TEXT("KSBadgesStay")) ? 1 : 0);
+	}
+	{
+		// The fighters do not stand still: the one who is hit falls back, both step about the ring. A badge that a
+		// fighter has moved under slides to the nearest free place (-KSBadgesStay: it stays, as it used to).
+		static const bool bStay = FParse::Param(FCommandLine::Get(), TEXT("KSBadgesStay"));
+		FPlacedBadge& B = Placed[Slot];
+		const float Here = BodyCover(BoxAt(B.Goal, B.Size));
+		if (!bStay && Here > 0.08f)
 		{
-			bLoggedLayout = true;
-			UE_LOG(LogTemp, Display, TEXT("KSTEST ui layout badges=%d on_heads=%d worst_body_cover=%.2f"), BadgesPlaced, BadgesOnHeads, WorstCover);
+			const FVector2D Spot = FindSpot(B.Goal, B.Size, Slot);
+			if (BodyCover(BoxAt(Spot, B.Size)) + 0.1f < Here) B.Goal = Spot;
 		}
+		B.At = FMath::Vector2DInterpTo(B.At, B.Goal, GetWorld()->GetDeltaSeconds(), 16.f);
+		if (U < 0.7f) { BadgeFrames++; BadgeFramesCovered += BodyCover(BoxAt(B.At, B.Size)) >= 0.33f ? 1 : 0; }
 	}
 	const float X = Placed[Slot].At.X / SW, Y = Placed[Slot].At.Y / SH - 0.025f * U;
 	const float Tilt = (Hash(P.Start * 7.3f + P.Pos.X) - 0.5f) * 22.f;

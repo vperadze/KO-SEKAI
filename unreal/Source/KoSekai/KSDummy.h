@@ -105,7 +105,8 @@ public:
 	FVector GloveWorld(EKSArm Arm) const;
 	/** Front of the face in world space. bHome ignores the fighter's own dodge and duck, so a dodged punch really misses. */
 	FVector FaceWorld(bool bHome) const;
-	/** Points all over the body in world space (every bone of a real fighter), for the HUD to know where on screen the fighter is. */
+	/** Points all over the body in world space, for the HUD to know where on screen the fighter is: every bone of a
+	 *  real fighter and points along each bone, so that an outstretched arm is a line of points and not two far apart. */
 	void BodyPoints(TArray<FVector>& Out) const;
 	/** A box round everything that is DRAWN of the fighter, in world space: the bones, the flesh and gloves round them,
 	 *  and the hair, horn or television set above the face (HeadRoom). For cameras that must keep him in the picture. */
@@ -157,6 +158,7 @@ private:
 	UPROPERTY() TObjectPtr<UMaterialInstanceDynamic> GloveMID[2];
 
 	UPROPERTY() TObjectPtr<USkeletalMeshComponent> Skel;
+	void Joints(TArray<FVector>& Out) const;  // the joints alone, world space: what BodyMiddle and BodyBox are made from
 	UPROPERTY() TMap<FString, TObjectPtr<UAnimSequence>> Clips;
 	UPROPERTY() TMap<FString, TObjectPtr<UMaterialInterface>> Faces;
 	UPROPERTY() TObjectPtr<UMaterialInterface> NormalFace;

@@ -173,6 +173,20 @@ One entry per bug that cost time: what happened, the cause, the rule. Add to it 
   rim were. Rule: anything that pops up goes through the HUD's placer (`BeginLayout`, `Reserve`, `FindSpot`: it knows
   both fighters' screen boxes from their bones and keeps a badge where it was first put); anything written in a box
   passes a `MaxW` or goes through `Lines`, and a panel's contents stay inside its rim (`RimX`, `RimY`).
+- **"Badges cover the fighters" failed one check in seven, and the first explanation was a guess** (2026-11-14).
+  Two things were wrong, and neither was the placer. The measure: each fighter was a box round his bones, and a
+  fighter with an arm out is a box of mostly air; the two boxes together were nearly the whole picture, so a badge
+  in plain air counted as "on a body" (stills showed it beside him). And the check read only the first ten badges at
+  the moment each was placed, while the real fault came a moment later: the fighter who is hit falls back into the
+  badge put at his shoulder (a third of a badge lay on a fighter in 36 to 41% of the frames badges were shown).
+  Rule: the HUD knows the bodies as a grid of the screen filled from points along every bone (`BodyCover`), a badge
+  slides to the nearest free place when a fighter moves under it, and the check measures badges over their whole
+  life (`covered_frames`), not at birth. Before explaining a failed check line, read where its number is computed
+  and look at a still: "it comes and goes" was the sampling, not the game.
+- **"Half the crowd's resolution saves 190 MB" saved 22 MB** (2026-11-14). The 190 was the cooked files on disk
+  (`Saved/Cooked`), but the package holds them compressed in the `.ucas`, and pictures of people on a flat backdrop
+  compress well already. Rule: estimate a saving from the `.ucas`, not from the cooked folder: cook one variant and
+  compare, or compress a sample (`gzip -c file | wc -c`) before promising a number.
 - **Unreal's font importer crashes without a window** (`CurrentApplication.IsValid()` in a headless `pythonscript` run),
   and it took the rest of the import script down with it. Rule: fonts are plain `.ttf` files in
   `Content/KS/UI/Fonts`, read by `KSHUD` at run time and staged by `DefaultGame.ini`; never import them as assets.
@@ -319,6 +333,16 @@ One entry per bug that cost time: what happened, the cause, the rule. Add to it 
   "yes" is a jab with one hand and then the other. And measure it: phase changes are marked in the recordings now.
 - **A shift of the body is called as a left and a right at once.** Both wrists move with the trunk; the recordings show
   pairs 0 to 170 ms apart. The detector throws out the second of a pair within 120 ms; the menus ask for 200.
+- **A jab is a swipe too, and a swipe is a punch too** (player, 2026-11-14: the left-right jab "sometimes goes down or
+  up instead and picks another thing"). In the recordings of 2026-11-13 the swipe rule fires on the jabbing hand from
+  0.35 s before the detector calls the punch to 0.5 s after it, and nearly every deliberate swipe is also called an
+  uppercut or a hook, so neither can simply silence the other. Rule: the pair decides. A left-right jab takes back
+  every swipe step since 0.4 s before its first jab (`AKSGameMode::WebStep`); two readings of one movement are
+  settled when the movement is over, not by guessing at its start.
+- **A fake player timed by the phase clock can throw everything in one frame.** The menu's first frame after loading
+  is seconds long; the fake left and right jab of `-KSFakeJabSwipe`, 0.6 s apart on `PhaseTime`, both fell into it and
+  were refused as one body shift, so the new check failed on a guard that worked. Rule: a scripted input runs on its
+  own clock that no frame moves by more than 0.05 s.
 - **Tuning from recordings: change one thing, replay, count.** A higher bar, an automatic bar and a both-arms rule
   together halved the punches in the player's sessions, far more than was meant; each alone was modest. The replay
   (`-KSReplay`) needs the tracker: it does nothing with `-KSNoCamera`.
@@ -340,4 +364,12 @@ One entry per bug that cost time: what happened, the cause, the rule. Add to it 
 - **Assets that may not be in a public repository need a gate, not a paragraph.** The Fab packs are git-ignored, and
   a clone builds and runs without them with nothing failing. `tools/packs.sh` names the missing packs with links,
   `check.sh` and the packaging scripts run it first, and `CLAUDE.md` tells the assistant to say so before building.
-
+- **"I win easy, his punches are slow" was three rules, not one number** (player, 2026-11-14). A punch into any
+  wind-up counted as a counter at 2.5 times the damage, a fake included, so punching at every twitch won the bout; he
+  threw one punch and rested; and he drew his punch by lot whatever the player did. The self-playing bot never showed
+  it: it defends everything, so the opponent never lands and nothing he does after landing is ever run. Rule: when
+  the player says the opponent is easy, look for the move that always pays (here: counter everything) before making
+  him faster, and check the opponent against a bot that does NOT defend as well (`-KSGiveUp`: `KSTEST ai ... combos=`).
+- **A length asked for ("three times longer") is measured, not worked out.** Dividing the damage by three made
+  single-player bouts 2.9 times as long (59 and 67 s against 20 and 24) but online bouts 4.6 times (72 s against 15).
+  The game logs each bout's seconds (`KSTEST ai`) and the check fails a bout the bot wins in under 50 s.

@@ -137,9 +137,10 @@ else echo "  skipped"; fi
 
 echo "== self-playing ladder (two bouts, no camera)"
 LOG="$OUT/ladder.log"
-run_until 2 "KSTEST bout=" 240 "$LOG" -KSStart=fight -KSAuto -KSNoCamera -KSArenaTour
+# 480 s: a bout lasts about three times what it did (player request, 2026-11-14); two took under a minute before.
+run_until 2 "KSTEST bout=" 480 "$LOG" -KSStart=fight -KSAuto -KSNoCamera -KSArenaTour
 BOUTS=$(grep -c "KSTEST bout=" "$LOG" 2> /dev/null); BOUTS=${BOUTS:-0}
-[ "$BOUTS" -ge 2 ] && pass "two bouts were fought to the end" || fail "only $BOUTS bout(s) finished in 240 s"
+[ "$BOUTS" -ge 2 ] && pass "two bouts were fought to the end" || fail "only $BOUTS bout(s) finished in 480 s"
 field() { echo "$1" | tr -d "\r" | sed -n "s/.*$2=\([^ ]*\).*/\1/p"; }
 while read -r line; do
 	[ -z "$line" ] && continue
@@ -148,6 +149,15 @@ while read -r line; do
 	[ "$(field "$line" player_hand_travel)" -ge 20 ] && pass "bout $bout: the player's fighter moves" || fail "bout $bout: the player's fighter is frozen in one pose"
 	[ "$(field "$line" spectators)" -ge 150 ] && pass "bout $bout: $(field "$line" spectators) spectators at ringside" || fail "bout $bout: $(field "$line" spectators) spectators, expected 150 or more"
 done <<< "$(grep "KSTEST bout=" "$LOG" 2> /dev/null)"
+# How long a bout is. The player found bouts over too soon and asked for three times the length; the bot, which
+# defends everything and punches every opening, used to win in 20 to 24 s. The bug this guards: a damage number put
+# back up, or a new source of damage, making bouts short again.
+while read -r line; do
+	[ -z "$line" ] && continue
+	bout=$(field "$line" bout); secs=$(field "$line" seconds)
+	[ "${secs:-0}" -ge 50 ] && pass "bout $bout lasted $secs s against a bot that makes no mistake" || fail "bout $bout was over in ${secs:-?} s (50 or more expected; it was 20 to 24 before bouts were made longer)"
+done <<< "$(grep "KSTEST ai bout=" "$LOG" 2> /dev/null)"
+[ -n "$(grep "KSTEST ai bout=" "$LOG" 2> /dev/null)" ] || fail "no KSTEST ai line: the length of a bout was not measured"
 # The crowd. The bugs this guards: a sheet that did not import leaves a hole in the stands, and a crowd that only
 # ever shows one pose or one movement is the old stiff crowd again.
 line=$(grep "KSTEST crowd seated=" "$LOG" 2> /dev/null | head -1)
@@ -294,10 +304,17 @@ else fail "interface art incomplete (${line:-no KSTEST ui line}); run art/ui/cut
 grep -q "KSTEST ui speech bubble shown picture=1" "$LOG" 2> /dev/null && pass "a spoken line was shown in a speech bubble" || fail "no speech bubble was drawn"
 grep -q "KSTEST ui damage badge shown" "$LOG" 2> /dev/null && pass "a hit showed its damage badge" || fail "no damage badge was drawn"
 # Badges used to land on the fighters. The HUD now finds each one a place beside them and reports how the first ten did.
-line=$(grep "KSTEST ui layout badges=" "$LOG" 2> /dev/null | head -1)
-cover=$(field "$line" worst_body_cover)
-if [ "$(field "$line" on_heads)" = 0 ] && awk "BEGIN{exit !(${cover:-9} <= 0.35)}"; then pass "badges keep off the fighters (none on a face, at most ${cover} of one over a body)"
-else fail "badges cover the fighters (${line:-no KSTEST ui layout line})"; fi
+# The cover is the share of a badge that lies on a fighter's body (not on the box round him: with an arm out that box
+# is mostly air, and the two boxes together are the whole picture). The line is written every ten badges; the last one
+# covers the whole run. worst_body_cover is at the moment a badge is placed. covered_frames is the share of the frames
+# badges were fully shown in which a third of one lay on a fighter: he is hit and falls back into it. Badges that stay
+# where they were put (-KSBadgesStay, how it used to be) read 0.36 to 0.41 there; badges that slide away 0.03 to 0.08.
+line=$(grep "KSTEST ui layout badges=" "$LOG" 2> /dev/null | tail -1)
+cover=$(field "$line" worst_body_cover); frames=$(field "$line" covered_frames)
+if [ "$(field "$line" on_heads)" = 0 ] && awk "BEGIN{exit !(${cover:-9} <= 0.35)}"; then pass "badges are put beside the fighters ($(field "$line" badges) badges, none on a face, at most ${cover} of one on a body)"
+else fail "badges are put on the fighters (${line:-no KSTEST ui layout line})"; fi
+if awk "BEGIN{exit !(${frames:-9} <= 0.20)}"; then pass "badges keep off a fighter who moves (on one in ${frames} of the frames they were shown)"
+else fail "badges stay under a fighter who has moved into them (${line:-no KSTEST ui layout line})"; fi
 n=$(grep "KSTEST sound=Pop " "$LOG" 2> /dev/null | head -1 | tr -d "\r" | sed -n 's/.*recorded_variants=\([0-9]*\).*/\1/p')
 [ "${n:-0}" -ge 1 ] && pass "interface sounds loaded (Pop: $n takes)" || fail "interface sound Pop missing; run art/tools/prep_audio.py, then art/ui/import_ui.py"
 
@@ -357,6 +374,16 @@ secs=$(field "$line" seconds)
 if [ "$(field "$line" by_jab)" = 1 ] && awk "BEGIN{exit !(${secs:-0} >= 9.8)}"; then pass "one-armed punches, a lone jab and a both-at-once did not stop the film; left then right did (ended at ${secs} s)"
 else fail "the film ended on the wrong punch (${line:-it never ended})"; fi
 
+echo "== a left-right jab chooses the line the player was on (fake webcam: the first jab is also read as a swipe down)"
+# The bug this guards: a jab carries the hand a shoulder's width through the picture, so the swipe rule moved the
+# menu between the two jabs and the pair then chose the line below (player, 2026-11-14).
+LOG="$OUT/jabswipe.log"
+run_until 1 "KSTEST menu chosen=" 60 "$LOG" -KSStart=menu -KSFakeJabSwipe -KSNoCamera
+back=$(field "$(grep "KSTEST jab pair " "$LOG" 2> /dev/null | head -1)" taken_back)
+chosen=$(field "$(grep "KSTEST menu chosen=" "$LOG" 2> /dev/null | head -1)" chosen)
+if [ "$chosen" = 0 ] && [ "$back" = 1 ]; then pass "the swipe inside the jabs was taken back and the first line chosen"
+else fail "the jabs moved the menu before choosing (chosen=${chosen:-nothing}, taken back=${back:-none})"; fi
+
 echo "== Esc returns to the menu; a lost bout whose count runs out returns to the menu"
 LOG="$OUT/esc.log"
 run_until 1 "KSTEST to_menu" 120 "$LOG" -KSStart=fight -KSAuto -KSNoCamera -KSEscAt=2
@@ -365,6 +392,19 @@ grep -q "KSTEST to_menu from_phase=3" "$LOG" 2> /dev/null && pass "Esc in the mi
 LOG="$OUT/gameover.log"
 run_until 1 "KSTEST ui menu shown" 240 "$LOG" -KSStart=fight -KSAuto -KSGiveUp -KSNoCamera
 grep -q "KSTEST to_menu from_phase=6" "$LOG" 2> /dev/null && grep -q "KSTEST ui menu shown" "$LOG" 2> /dev/null && pass "game over (count run out) shows the start menu" || fail "game over did not reach the start menu ($(grep -c "KSTEST bout=" "$LOG" 2> /dev/null) bout(s) ended)"
+# The opponent against a player who does nothing (the same run). The player found him slow and easy; he now throws a
+# second and third punch when the first lands. The bug this guards: the combinations switched off without anyone
+# noticing, since the bot of the other runs defends everything and so never sees one.
+line=$(grep "KSTEST ai bout=" "$LOG" 2> /dev/null | head -1 | tr -d "\r")
+[ "$(field "$line" combos)" -ge 1 ] 2> /dev/null && pass "the opponent throws combinations when his punches land ($(field "$line" combos) follow-up punches, knockout after $(field "$line" seconds) s)" || fail "the opponent threw no combination at a player who did not defend (${line:-no KSTEST ai line})"
+# And against a player who punches all the time, opening or not (-KSSpam). He used to answer only the third punch on
+# his guard, and a punch into his fake counted as a counter, so punching without looking won the bout. The bug this
+# guards: those answers switched off; no other run punches at the wrong moment, so no other run would notice.
+LOG="$OUT/spam.log"
+run_until 1 "KSTEST ai bout=" 300 "$LOG" -KSStart=fight -KSAuto -KSSpam -KSNoCamera
+line=$(grep "KSTEST ai bout=" "$LOG" 2> /dev/null | head -1 | tr -d "\r")
+[ "$(field "$line" answers)" -ge 3 ] 2> /dev/null && pass "punching the opponent's guard gets answered ($(field "$line" answers) quick punches back in $(field "$line" seconds) s; $(field "$line" baited) punch(es) drawn by a fake)" || fail "the opponent did not answer a player who punches all the time (${line:-no KSTEST ai line})"
+grep -qE "Fatal error|Assertion failed|Ensure condition failed|Unhandled Exception" "$LOG" 2> /dev/null && fail "the engine reported a crash or failed check with -KSSpam"
 calls=$(grep -c "EnterStreet(" "$ROOT/unreal/Source/KoSekai/KSGameMode.cpp")
 [ "$calls" -le 2 ] && pass "nothing in the game leads back to the street (only -KSStart=street)" || fail "$((calls - 2)) place(s) in KSGameMode.cpp still send the player to the street: $(grep -n "EnterStreet(" "$ROOT/unreal/Source/KoSekai/KSGameMode.cpp" | cut -d: -f1 | tr "\n" " ")"
 
@@ -403,7 +443,7 @@ grep -q "KSTEST ui calibration text_outside_box=0" "$LOG" 2> /dev/null && pass "
 grep -q "KSTEST calibration done completed=1" "$LOG" 2> /dev/null && pass "all nine calibration steps run and hand over to the first bout" || fail "calibration did not reach its end"
 
 echo "== online match (two copies on this machine, one hosting and one joining)"
-run_pair 2 300 "$OUT/online_host.log" "$OUT/online_guest.log" "-KSHost -KSPort=17777" "-KSJoin=127.0.0.1:17777" "Hosting on port"
+run_pair 2 480 "$OUT/online_host.log" "$OUT/online_guest.log" "-KSHost -KSPort=17777" "-KSJoin=127.0.0.1:17777" "Hosting on port"
 check_pair "direct" "$OUT/online_host.log" "$OUT/online_guest.log"
 grep -q "KSTEST online match=2 " "$OUT/online_host.log" 2> /dev/null && grep -q "KSTEST online match=2 " "$OUT/online_guest.log" 2> /dev/null \
 	&& pass "direct: both asked for a rematch and it started" || fail "direct: the rematch did not start"
@@ -419,7 +459,7 @@ else
 	RELAY=$!
 	sleep 2
 	# Whoever reaches the relay first is made the host.
-	run_pair 1 240 "$OUT/relay_first.log" "$OUT/relay_second.log" "-KSJoin=127.0.0.1:17778#check" "-KSJoin=127.0.0.1:17778#check" "waiting to be given a role"
+	run_pair 1 300 "$OUT/relay_first.log" "$OUT/relay_second.log" "-KSJoin=127.0.0.1:17778#check" "-KSJoin=127.0.0.1:17778#check" "waiting to be given a role"
 	kill "$RELAY" 2> /dev/null; wait "$RELAY" 2> /dev/null
 	grep -q "meets" "$OUT/relay.log" 2> /dev/null && pass "relay: it put the two players in one room" || fail "relay: it never paired the two players (see $OUT/relay.log)"
 	check_pair "relay" "$OUT/relay_first.log" "$OUT/relay_second.log"

@@ -57,6 +57,8 @@ private:
 	void BeginLayout(const AKSGameMode& G);
 	/** Marks a part of the screen (fractions) as used by something fixed: a badge or bubble will not be put there. */
 	void Reserve(float X, float Y, float W, float H);
+	/** How much of Box lies on a fighter's body, 0 to 1. */
+	float BodyCover(const FBox2D& Box) const;
 	/** How bad it is to put something in Box: what it would cover of the heads, bodies, fixed pieces and other badges. */
 	float SpotCost(const FBox2D& Box, int32 Self) const;
 	/** The centre of the best place for something of Size, as near to Want as the fighters and everything else allow. */
@@ -86,15 +88,22 @@ private:
 	bool bLoggedIntro = false;
 	float HandsOutSince = -1.f;               // when the webcam last lost the player's hands; the STEP BACK plate waits a moment
 	UPROPERTY() TObjectPtr<UFont> ComicFont;
-	bool bArtLoaded = false, bLoggedBubble = false, bLoggedDamage = false, bLoggedMenu = false, bLoggedLayout = false, bLoggedCal = false, bLoggedSelect = false;
+	bool bArtLoaded = false, bLoggedBubble = false, bLoggedDamage = false, bLoggedMenu = false, bLoggedCal = false, bLoggedSelect = false;
 
-	struct FPlacedBadge { float Start; FString Text; FVector2D At, Size; };
-	TArray<FPlacedBadge> Placed;              // the badges on screen and where each was put when it appeared
-	TArray<FBox2D> Bodies, Heads, Taken;      // this frame: the fighters, their heads, the fixed pieces
+	struct FPlacedBadge { float Start; FString Text; FVector2D At, Size, Goal; };
+	TArray<FPlacedBadge> Placed;              // the badges on screen: where each is (At) and where it is going (Goal)
+	TArray<FBox2D> Heads, Taken;              // this frame: the fighters' heads, the fixed pieces
+	/* This frame: where the fighters' bodies are, as a coarse grid of the screen (cells of Cell pixels). Not a box
+	   round each fighter: a fighter with an arm out has a box that is mostly air, and two such boxes are the whole
+	   picture. BodySum[y * (GridW + 1) + x] counts the body cells above and left of the corner x, y. */
+	TArray<int32> BodySum;
+	int32 GridW = 0, GridH = 0;
+	float Cell = 15.f;
 	FBox2D Region;                            // where badges and bubbles may go at all
 	FVector2D BubbleAt = FVector2D::ZeroVector, BubbleGoal = FVector2D::ZeroVector, BubbleSize = FVector2D::ZeroVector, BubbleHead = FVector2D::ZeroVector;
 	bool bBubbleSet = false, bCalTextOutside = false;
 	int32 BadgesPlaced = 0, BadgesOnHeads = 0;
+	int32 BadgeFrames = 0, BadgeFramesCovered = 0;   // for the check: frames a badge was fully shown, and those in which a third of it lay on a fighter
 	float WorstCover = 0.f;
 
 	float SW = 1280.f, SH = 720.f, Unit = 1.f, Now = 0.f;

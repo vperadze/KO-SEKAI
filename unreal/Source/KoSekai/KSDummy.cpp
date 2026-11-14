@@ -640,7 +640,7 @@ FVector AKSDummy::GloveWorld(EKSArm Arm) const
 FVector AKSDummy::BodyMiddle() const
 {
 	TArray<FVector> Points;
-	BodyPoints(Points);
+	Joints(Points);
 	if (!Points.Num()) return GetActorLocation();
 	FVector Sum = FVector::ZeroVector;
 	for (const FVector& Point : Points) Sum += Point;
@@ -650,7 +650,7 @@ FVector AKSDummy::BodyMiddle() const
 FBox AKSDummy::BodyBox() const
 {
 	TArray<FVector> Points;
-	BodyPoints(Points);
+	Joints(Points);
 	FBox Box(ForceInit);
 	for (const FVector& Point : Points) Box += Point;
 	if (!Box.IsValid) return FBox(GetActorLocation() - FVector(40.f), GetActorLocation() + FVector(40.f, 40.f, 190.f));
@@ -664,7 +664,7 @@ FBox AKSDummy::BodyBox() const
 	return Box;
 }
 
-void AKSDummy::BodyPoints(TArray<FVector>& Out) const
+void AKSDummy::Joints(TArray<FVector>& Out) const
 {
 	Out.Reset();
 	if (!bCharacter || !Skel)
@@ -674,6 +674,23 @@ void AKSDummy::BodyPoints(TArray<FVector>& Out) const
 	}
 	const FTransform World = Skel->GetComponentTransform();
 	for (const FTransform& Bone : Skel->GetComponentSpaceTransforms()) Out.Add(World.TransformPosition(Bone.GetLocation()));
+}
+
+void AKSDummy::BodyPoints(TArray<FVector>& Out) const
+{
+	Joints(Out);
+	if (!bCharacter || !Skel || !Skel->GetSkeletalMeshAsset()) return;
+	// Along each bone as well: the joints of a straight arm are 30 cm apart, and what lies between them is arm too.
+	// BoneCount hung on the root are left out: the root is on the floor between the feet, and nothing is drawn from it to the hips.
+	const FReferenceSkeleton& Ref = Skel->GetSkeletalMeshAsset()->GetRefSkeleton();
+	const int32 BoneCount = FMath::Min(Out.Num(), Ref.GetNum());
+	for (int32 i = 1; i < BoneCount; i++)
+	{
+		const int32 Parent = Ref.GetParentIndex(i);
+		if (Parent <= 0 || Parent >= BoneCount) continue;
+		const FVector A = Out[Parent], B = Out[i];
+		for (int32 k = 1; k <= 3; k++) Out.Add(FMath::Lerp(A, B, k / 4.f));
+	}
 }
 
 FVector AKSDummy::FaceWorld(bool bHome) const

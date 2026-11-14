@@ -79,6 +79,12 @@ On the film, the menu and the select screen nothing a person does by accident is
 does not count, nor anything for 0.45 s after a swipe. `AKSGameMode::NoteWebPunch` pairs the jabs. Outside a bout the
 detector is also run at 0.7 of the player's sensitivity (a bar of 7 and more), so the jabs have to be meant.
 
+A jab is itself a hand travelling a shoulder's width, so the swipe rule fires on the jabbing hand (in the recordings
+of 2026-11-13 from 0.35 s before the punch is called to 0.5 s after) and the list moved between the two jabs. So every
+screen with a list asks `AKSGameMode::WebStep`: a left-right jab puts the list back where it was 0.4 s before its
+first jab, then chooses. What is left: a jab whose partner is never seen still moves the list by one, and the line
+is seen to move for a moment before the choice. `-KSFakeJabSwipe` plays the case on the menu for the self-check.
+
 Measured on the player's session of 22:17 (first 30 s, in front of the film and the menu): the old rule took 12 punches
 as button presses; the new one sees no left-right jab at all, and the swipe rule (tried in Python on the same
 recording) fires once. **Nobody has used them yet**: whether a deliberate swipe is always seen is untested.
