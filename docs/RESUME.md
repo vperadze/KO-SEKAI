@@ -438,6 +438,20 @@ Updated 2026-11-14. Deadline 2026-11-16 02:59 CET.
   online** (a special takes health off the other side locally, and online each game judges only its own health); the
   meters are not drawn there. A packaged Windows build was made on the Windows PC and two copies of it played an
   online bout on that one machine.
+- **Specials against another player** (2026-11-14 night; player: "online fight lacks special fights, the fight should
+  be the same in AI mode and online"). The special online is the cabinet's own (`StartSpecial`, `TickSpecial`,
+  `SpecialLand`), not a copy: the same meter filled by the same things (2.5 times faster, `OnlineMeterBoost`, an online
+  bout being much shorter), the same key, shout or hands, the same warning, move, effects and ways out. The thrower's
+  game sends `X`; the other shows it, settles it with its player's stance and answers `XR <H|B|D> <damage> <health>`;
+  each game sends its meter (`M`) and both are drawn. A special that lands does 11 (half blocked) and leaves the other
+  dizzy for 1.5 s after the move (no punches, no defence); a dodged one leaves the thrower open 1.6 s. Thrown at the
+  same moment, the host's happens and the guest keeps his meter. `tools/check.sh`: in each of the three online
+  matches a special must be thrown and the two logs must list the same endings and damage (seen: hits and dodges on
+  both sides, three specials a player in a bout). **Not verified**: seen by nobody (logs only, no stills of an online
+  special); a person throwing one by key, shout or hands; a blocked one (the bots duck or take it); two thrown at
+  once; over a real network with its delay. **To watch**: three specials each in a 50 s bout may be too many;
+  `OnlineMeterBoost` is the number to turn down. **Still different online**: punch damage (3, 4.5, 6) and the
+  cabinet's own tricks (feints, combinations, dizzy spell, adapting), which belong to the cabinet's brain.
 - **The match server is deployed** (2026-11-14 evening): an AWS EC2 `t3.micro` (Ubuntu 24.04, Stockholm, instance
   `ko-sekai-server`, free-plan account with 100 dollars of credit until 2027-05-14), `13.60.232.190:7777`, set as
   `[KoSekai] OnlineServer` in `DefaultGame.ini`. `ko_relay.py` is in `/opt/ko-sekai`, runs as the service `ko-sekai`

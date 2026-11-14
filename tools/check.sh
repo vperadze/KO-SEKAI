@@ -97,6 +97,9 @@ run_pair() {
 	kill "$pid_a" "$pid_b" 2> /dev/null; wait "$pid_a" "$pid_b" 2> /dev/null
 }
 
+# The specials one side of an online bout logged, as "H110 D0 ": how each ended and the damage. $1 is me or opponent.
+specials() { grep "KSTEST online special by=$1 " "$2" 2> /dev/null | tr -d "\r" | sed -n "s/.*outcome=\([A-Z]\) damage=\([0-9]*\).*/\1\2/p" | tr "\n" " "; }
+
 # What two logs of the same online bouts must agree on. $1 is a name for the messages, $2 the host's log, $3 the guest's.
 check_pair() {
 	local what="$1" host="$2" guest="$3" n a b ra rb i
@@ -124,6 +127,13 @@ check_pair() {
 			fail "$what bout $i: punches do not match (host landed $(field "$a" landed) took $(field "$a" taken); guest landed $(field "$b" landed) took $(field "$b" taken))"
 		fi
 	done
+	# Specials against another player: the thrower's game only knows how one ended from the other game's word, so the
+	# two logs must list the same endings (H hit, B blocked, D dodged) with the same damage, in the same order.
+	local sa sb sc sd
+	sa=$(specials me "$host"); sb=$(specials opponent "$guest"); sc=$(specials me "$guest"); sd=$(specials opponent "$host")
+	if [ -z "$sa$sc" ]; then fail "$what: no special was thrown by either player"
+	elif [ "$sa" = "$sb" ] && [ "$sc" = "$sd" ]; then pass "$what: specials were thrown and both games agree how each ended (host's: ${sa:-none}; guest's: ${sc:-none})"
+	else fail "$what: the games disagree about the specials (host threw '$sa', guest saw '$sb'; guest threw '$sc', host saw '$sd')"; fi
 	if grep -qE "Fatal error|Assertion failed|Ensure condition failed|Unhandled Exception" "$host" "$guest" 2> /dev/null; then fail "$what: a game crashed or failed an engine check"
 	else pass "$what: no crash in either game"; fi
 }

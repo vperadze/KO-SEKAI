@@ -1120,8 +1120,6 @@ void AKSHUD::DrawFight(const AKSGameMode& G)
 		HealthBar(0.57f, 0.405f, G.OppHP / G.OppMaxHP, G.OppTrail / G.OppMaxHP, Magenta, true, Jolt(OppJoltAt));
 		Text(FString::Printf(TEXT("YOU  -  %s"), G.PlayerFighter().Name), 0.07f, 0.150f, 19.f, Cyan, -1, EKSFont::Hud, 2.f, Edge, 0.36f);
 		Text(G.bOnline ? FString::Printf(TEXT("%s  -  %s"), F.Name, G.OppName.IsEmpty() ? TEXT("RIVAL") : *G.OppName) : FString(F.Name), 0.93f, 0.150f, 19.f, Magenta, 1, EKSFont::Hud, 2.f, Edge, 0.36f);
-		// Special abilities are not played online yet (each game judges only its own health), so no meters there.
-		if (!G.bOnline)
 		{
 			// The special meters: a thin bar under each name. A full one flashes, and the player is told what to shout.
 			auto Meter = [this](float X, float W, float V, const FLinearColor& Color, bool bFromRight)

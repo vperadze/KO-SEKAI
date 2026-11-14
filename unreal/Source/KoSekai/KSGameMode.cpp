@@ -57,6 +57,7 @@ namespace
 	const float PunchDamage[] = { 1.15f, 1.43f, 1.86f };      // straight, hook, uppercut
 	const float CounterMult = 2.f;        // a punch into his wind-up
 	const float MeterPace = 0.4f;         // on everything that fills a special meter
+	const float OnlineMeterBoost = 2.5f;  // against another player the meter fills this much faster (TickFight)
 
 	// How hard each fight on the ladder is, whoever the opponent turns out to be.
 	// Skill is how often he reads the player instead of guessing (OppAttack, and the answers in PlayerPunch); OpenScale
@@ -3057,6 +3058,8 @@ void AKSGameMode::SpecialLand(const FVector& From, const FVector& To)
 	if (bHitShots) QueueHitShots(TEXT("special"));
 	const float Rest = FMath::Max(0.f, SpecialEnd - Clock);
 
+	// Against another player his own game settles it; this one shows the result when it is told (OnlineSpecialApply).
+	if (bSpecialByPlayer && bOnline) { if (bSpecialReported) OnlineSpecialApply(); return; }
 	if (bSpecialByPlayer)
 	{
 		OppHP = FMath::Max(0.f, OppHP - SpecialDamage);
@@ -3082,13 +3085,49 @@ void AKSGameMode::SpecialLand(const FVector& From, const FVector& To)
 		Sfx(EKSSfx::Dodge); Popup(TEXT("DODGE!"), KSColors::Green, 0.38f, 0.45f, true);
 		CrowdReact(true, 0.8f);
 		OpenUp(1.6f + Rest);
+		if (bOnline) OnlineSpecialStruck(TEXT('D'), 0.f, Rest);
 		return;
 	}
 	Attack.Type = EKSPunch::Uppercut; Attack.Side = EKSArm::Right;
-	PlayerHurt(D == EKSDefense::Block ? OppSpecialDamage * 0.5f : OppSpecialDamage, D == EKSDefense::Block);
+	const float Taken = D == EKSDefense::Block ? OppSpecialDamage * 0.5f : OppSpecialDamage;
+	PlayerHurt(Taken, D == EKSDefense::Block);
 	RingPush(true, D == EKSDefense::Block ? 150.f : 320.f);
 	if (D != EKSDefense::Block) PlayerSpecialHitUntil = Clock + 1.2f;
 	if (PlayerHP > 0.f) OppIdle(1.0f + Rest);
+	if (bOnline) OnlineSpecialStruck(D == EKSDefense::Block ? TEXT('B') : TEXT('H'), Taken, Rest);
+}
+
+/** Against another player: what this game shows when his game has said how this player's special ended. It is the
+ *  ending the cabinet's fighter gets (SpecialLand), with his health as his own game counts it. */
+void AKSGameMode::OnlineSpecialApply()
+{
+	bSpecialReported = false;
+	const FSpecialDef& Def = Specials[SpecialIndex];
+	const float Rest = bSpecialOn ? FMath::Max(0.f, SpecialEnd - Clock) : 0.f;
+	UE_LOG(LogTemp, Display, TEXT("KSTEST online special by=me outcome=%c damage=%d opp_hp=%d"), SpecialOutcome, FMath::RoundToInt(SpecialDealt * 10.f), FMath::RoundToInt(SpecialHealthLeft * 10.f));   // for tools/check.sh
+	if (SpecialOutcome == TEXT('D'))
+	{
+		// He got out of the way: this player stands open, as the cabinet's fighter does when his special is dodged.
+		Combo = 0; Sfx(EKSSfx::Dodge);
+		OnlineSpecialMissed(1.6f + Rest);
+		return;
+	}
+	const bool bBlocked = SpecialOutcome == TEXT('B');
+	OppHP = FMath::Clamp(SpecialHealthLeft, 0.f, OppMaxHP);
+	Stats.Landed++; Combo++; Stats.BestCombo = FMath::Max(Stats.BestCombo, Combo);
+	Popups.Add({ FString::FromInt(FMath::RoundToInt(SpecialDealt * 10.f)), KSColors::Yellow, FVector2D(0.13f, -0.1f), Clock, 1.1f, true, 1 });
+	Popups.Add({ bBlocked ? TEXT("BLOCKED") : TEXT("KRAK!"), bBlocked ? KSColors::Lilac : KSColors::Yellow, FVector2D(-0.14f, 0.02f), Clock, 0.9f, false, 3 });
+	OppHurtUntil = Clock + 0.45f;
+	CamPunch(FVector(0.f, -50.f, 10.f), FMath::RandBool() ? 22.f : -22.f, -5.f);
+	if (OppDummy) { OppDummy->Flash(Def.Color, 0.16f); OppDummy->TakeHit(EKSPunch::Uppercut, EKSArm::Right, bBlocked ? 1.f : 2.2f); OppDummy->HitStop(0.16f); }
+	RingPush(false, bBlocked ? 150.f : 420.f);
+	if (!bBlocked) OppSpecialHitUntil = Clock + 1.2f;
+	if (PlayerDummy) PlayerDummy->HitStop(0.1f);
+	CrowdReact(true, 1.f);
+	if (Phase != EKSPhase::Fight) return;
+	if (OppHP <= 0.f) { EndFight(true, false); return; }
+	// He is left dizzy, as the cabinet's fighter is: his game holds him still and lets nothing be defended.
+	if (!bBlocked) OpenUp(1.5f + Rest);
 }
 
 /* ================= fight rules ================= */
@@ -3481,6 +3520,7 @@ void AKSGameMode::TickFight(float Dt)
 				AutoDefense = Attack.Type == EKSPunch::Straight ? EKSDefense::Block
 					: Attack.Type == EKSPunch::Hook ? (Attack.Side == EKSArm::Left ? EKSDefense::EvadeLeft : EKSDefense::EvadeRight) : EKSDefense::EvadeLeft;
 			}
+			if (bOnline && bSpecialOn && !bSpecialByPlayer && bOnlineBotGuard && !bAutoNoGuard) AutoDefense = EKSDefense::Duck;
 			// -KSSpam: it punches all the time, into his guard and into his fakes, as a player in a hurry does.
 			if ((OppState == EKSOppState::Open || (bAutoSpam && !bOnline)) && Clock >= AutoNextPunch && !bGiveUp)
 			{
@@ -3514,12 +3554,22 @@ void AKSGameMode::TickFight(float Dt)
 				else if (SpecialsStarted >= 2 && Clock > SpecialEnd + 3.f && PC) { bTestSpecials = false; PC->ConsoleCommand(TEXT("quit")); }
 				PlayerHP = 100.f; OppHP = OppMaxHP;
 			}
-			// No specials against another player yet: each game judges only its own health (KSGameModeOnline.cpp), and a
-			// special takes health off the other side here. The meters stay empty and the HUD does not draw them.
-			if (bOnline) PlayerMeter = OppMeter = 0.f;
+			if (bOnline)
+			{
+				// Against another player the same things fill the meter, faster: such a bout is a fifth as long as one
+				// against the cabinet, and each player should see his special in it. His meter is what his game says it is.
+				if (PlayerMeter > OnlineMeterSeen) PlayerMeter = FMath::Min(1.f, OnlineMeterSeen + (PlayerMeter - OnlineMeterSeen) * OnlineMeterBoost);
+				OnlineMeterSeen = PlayerMeter;
+				OppMeter = RemoteMeter;
+			}
 			if (PlayerMeter >= 1.f && !bMeterFullSaid) { bMeterFullSaid = true; Sfx(EKSSfx::Score, 0.7f); }
-			if (Phase == EKSPhase::Fight && PlayerMeter >= 1.f && (Pressed(KSKeys::Get(EKSKey::Special)) || bShoutNow || bHandsNow || bTestSpecials || (bAuto && !bGiveUp))) StartSpecial(true);
-			else if (Phase == EKSPhase::Fight && OppMeter >= 1.f && OppState == EKSOppState::Idle && PhaseTime > 4.f) StartSpecial(false);
+			if (Phase == EKSPhase::Fight && PlayerMeter >= 1.f && (!bOnline || OnlineCanPunch()) && (Pressed(KSKeys::Get(EKSKey::Special)) || bShoutNow || bHandsNow || bTestSpecials || (bAuto && !bGiveUp)))
+			{
+				StartSpecial(true);
+				// The other game shows it and judges it; its word comes back as "XR" (OnlineSpecialResult).
+				if (bOnline && Net) { bSpecialReported = false; OnlineMeterSeen = 0.f; Net->Send(TEXT("X")); }
+			}
+			else if (!bOnline && Phase == EKSPhase::Fight && OppMeter >= 1.f && OppState == EKSOppState::Idle && PhaseTime > 4.f) StartSpecial(false);
 		}
 		for (int32 i = Pending.Num() - 1; i >= 0 && Phase == EKSPhase::Fight; i--)
 		{

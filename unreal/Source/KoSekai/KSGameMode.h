@@ -236,6 +236,18 @@ private:
 	void OnlineIncoming(EKSPunch Type, EKSArm Arm, bool bCounter);
 	void OnlineStruck(int32 Outcome, bool bBlockHeld);   // the other player's punch arrives here: settle it and report back
 	void OnlineResult(int32 Outcome, float Damage, float HealthLeft, EKSPunch Type, EKSArm Arm, bool bCounter);
+	// A special against another player (the comment at the top of KSGameModeOnline.cpp): his game is told ("X"), shows
+	// it and settles it with his stance when it lands, and reports back ("XR"); only then does this game know the result.
+	void OnlineSpecialIncoming();
+	void OnlineSpecialStruck(TCHAR Outcome, float Damage, float Rest);
+	void OnlineSpecialResult(TCHAR Outcome, float Damage, float HealthLeft);
+	void OnlineSpecialApply();
+	void OnlineSpecialMissed(float Seconds);             // this player's special was dodged: he stands open
+	bool bSpecialReported = false;                       // his game's word on this player's special has arrived
+	TCHAR SpecialOutcome = TEXT('H');                    // H hit, B blocked (half), D dodged
+	float SpecialDealt = 0.f, SpecialHealthLeft = 0.f;
+	float RemoteMeter = 0.f, OnlineMeterSeen = 0.f;      // his meter as his game reports it ("M"); this player's, as last counted
+	int32 SentMeter = -1;
 	void OnlineTimeUp();
 	void OnlineAfterBout();
 	void OnlineBoutLog(bool bWin, bool bDecision);

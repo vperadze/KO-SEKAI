@@ -424,3 +424,7 @@ One entry per bug that cost time: what happened, the cause, the rule. Add to it 
   same frame, so "REFUSED: that name is taken" followed by a close would have shown as "The connection was closed".
   Rule: on a closed connection, hand over the lines already read first, then report the failure; and the game reads
   its lines before it looks at the link's state.
+- **A patch script passed through the shell lost its backslashes** (2026-11-14). A Python script written with a shell
+  heredoc put `\r` and `\1` into `tools/check.sh` as a real carriage return and a control character; `bash -n` still
+  said the file was fine. Rule: a script that writes backslashes is written to a file with the editor's own tool,
+  never through a heredoc, and the lines it wrote are read back (`cat -A`) before they are trusted.

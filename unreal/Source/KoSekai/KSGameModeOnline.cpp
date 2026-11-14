@@ -13,6 +13,12 @@
 //   - Dodging a punch leaves the puncher open: he cannot punch for a moment, and punches thrown at him meanwhile
 //     are counters (half as much damage again, and no defence against them).
 //   - Throwing a punch drops your own guard for a moment, so blocking and punching at once does not work.
+//   - The special is the one from the fights against the cabinet: the same meter, filled by the same things (faster,
+//     the bouts being shorter), the same key, shout or raised hands, the same warning and the same ways out (duck or
+//     lean away; a block halves it). The thrower's game sends "X"; the other shows it and settles it with its
+//     player's stance when it lands, and reports back ("XR"). A special that lands leaves the other player dizzy
+//     (no defence and no punches for a moment); one that is dodged leaves the thrower open. If both are thrown at
+//     once the host's is the one that happens and the guest keeps his meter.
 //   - Each player picks a fighter on the select screen before the lobby. The host settles the pairing and the
 //     arena, rings the bell and calls time for both.
 //
@@ -345,6 +351,8 @@ void AKSGameMode::TickOnline()
 	// The other side draws this player's fighter leaning, ducking and covering up.
 	const EKSDefense Stance = Phase == EKSPhase::Fight ? Defense() : EKSDefense::None;
 	if (Stance != SentDefense) { SentDefense = Stance; Link->Send(FString::Printf(TEXT("D %d"), (int32)Stance)); }
+	const int32 Meter = FMath::RoundToInt(PlayerMeter * 100.f);
+	if (Meter != SentMeter) { SentMeter = Meter; Link->Send(FString::Printf(TEXT("M %d"), Meter)); }
 	if (OnlineCueUntil > 0.f && Clock >= OnlineCueUntil)
 	{
 		OnlineCueUntil = 0.f;
@@ -369,8 +377,14 @@ void AKSGameMode::OnlineLine(const FString& Line)
 	else if (What == TEXT("GO")) { if (bOnline && Phase == EKSPhase::Card) StartFight(); }                       // the bell
 	else if (What == TEXT("P"))                                                                                  // P <punch> <arm> <counter>: a punch is on its way
 	{
-		if (bOnline && Phase == EKSPhase::Fight) OnlineIncoming((EKSPunch)FMath::Clamp(Num(1), 0, 2), (EKSArm)FMath::Clamp(Num(2), 0, 1), Num(3) != 0);
+		if (bOnline && Phase == EKSPhase::Fight && !bSpecialOn) OnlineIncoming((EKSPunch)FMath::Clamp(Num(1), 0, 2), (EKSArm)FMath::Clamp(Num(2), 0, 1), Num(3) != 0);
 	}
+	else if (What == TEXT("X")) { if (bOnline && Phase == EKSPhase::Fight) OnlineSpecialIncoming(); }           // X: his special has begun
+	else if (What == TEXT("XR"))                                                                                 // XR <H|B|D> <damage x10> <health left x10>: how this player's special ended
+	{
+		if (bOnline && Words.IsValidIndex(1) && Words[1].Len() == 1) OnlineSpecialResult(Words[1][0], Num(2) / 10.f, Num(3) / 10.f);
+	}
+	else if (What == TEXT("M")) RemoteMeter = FMath::Clamp(Num(1) / 100.f, 0.f, 1.f);                             // M <his special meter, 0-100>
 	else if (What == TEXT("D")) RemoteDefense = (EKSDefense)FMath::Clamp(Num(1), 0, 4);                           // D <stance>: what the other player is holding
 	else if (What == TEXT("R"))                                                                                  // R <outcome> <damage x10> <health left x10> <punch> <arm> <counter>
 	{
@@ -480,6 +494,7 @@ void AKSGameMode::OnlineBeginMatch(int32 Mine, int32 Theirs, int32 Where)
 	bRemoteCounter = false;
 	RemoteDefense = SentDefense = EKSDefense::None;
 	OnlineReadyAt = OnlineLockedUntil = OnlineGuardDownUntil = OnlineCueUntil = 0.f;
+	RemoteMeter = OnlineMeterSeen = 0.f; SentMeter = -1; bSpecialReported = false;
 	OnlineBout++;
 	bRated = false;
 	if (bLobbyLink && Net) Net->Send(FString::Printf(TEXT("S START %d"), OnlineBout));   // for the server, not the other game
@@ -528,6 +543,9 @@ void AKSGameMode::OnlineStruck(int32 Outcome, bool bBlockHeld)
 	const bool bDefenceless = bRemoteCounter || Clock < OnlineGuardDownUntil || Clock < OnlineLockedUntil;
 	if (bDefenceless && Outcome > Hit) Outcome = Hit;
 	const int32 Type = (int32)Attack.Type, Arm = (int32)Attack.Side, Counter = bRemoteCounter ? 1 : 0;
+	// Dodging and blocking fill the special meter as they do against the cabinet (ResolveStrike in KSGameMode.cpp).
+	if (Outcome == Dodged) PlayerMeter = FMath::Min(1.f, PlayerMeter + 0.12f * 0.4f);
+	else if (Outcome == Blocked) PlayerMeter = FMath::Min(1.f, PlayerMeter + 0.10f * 0.4f);
 	if (Outcome == Dodged)
 	{
 		Stats.Dodges++; Sfx(EKSSfx::Dodge); Popup(TEXT("DODGE!"), KSColors::Green, 0.38f, 0.45f);
@@ -557,6 +575,12 @@ void AKSGameMode::OnlineResult(int32 Outcome, float Damage, float HealthLeft, EK
 		if (Outcome <= Half) { OppHP = FMath::Clamp(HealthLeft, 0.f, OppMaxHP); OppTrail = FMath::Max(OppTrail, OppHP); }
 		return;
 	}
+	if (bSpecialOn)
+	{
+		// A punch that was settled over there just as a special began here: it counts, and is not acted out.
+		if (Outcome <= Half) { Stats.Landed++; OppHP = FMath::Clamp(HealthLeft, 0.f, OppMaxHP); if (OppHP <= 0.f) EndFight(true, false); }
+		return;
+	}
 	if (Outcome >= Dodged)
 	{
 		// Missed: this player stands open, and the other may punch at will for a moment.
@@ -572,6 +596,47 @@ void AKSGameMode::OnlineResult(int32 Outcome, float Damage, float HealthLeft, EK
 	OppHP = FMath::Clamp(HealthLeft + Damage, 0.f, OppMaxHP);
 	LandHit({ Clock, Arm, Type, 1.f, bCounter }, Damage);
 	if (Phase == EKSPhase::Fight) OppHP = FMath::Clamp(HealthLeft, 0.f, OppMaxHP);
+}
+
+void AKSGameMode::OnlineSpecialIncoming()
+{
+	if (bSpecialOn && !bSpecialByPlayer) return;
+	if (bSpecialOn)
+	{
+		// Both threw one at the same moment. The host's happens; the guest's is taken back and his meter stays full.
+		if (!Net || Net->IsHost()) return;
+		if (PlayerDummy) PlayerStand.At += PlayerDummy->CommitTravel();
+		StartSpecial(false);
+		PlayerMeter = OnlineMeterSeen = 1.f;
+	}
+	else StartSpecial(false);
+	if (bAuto) bOnlineBotGuard = FMath::FRand() < 0.5f;   // the test bot ducks under half of them
+}
+
+void AKSGameMode::OnlineSpecialStruck(TCHAR Outcome, float Damage, float Rest)
+{
+	// A special that lands leaves this player dizzy: no punches and no defence until it has passed, which is what the
+	// cabinet's fighter gets from the player's special.
+	if (Outcome == TEXT('H') && PlayerHP > 0.f) OnlineLockedUntil = Clock + 1.5f + Rest;
+	UE_LOG(LogTemp, Display, TEXT("KSTEST online special by=opponent outcome=%c damage=%d my_hp=%d"), Outcome, FMath::RoundToInt(Damage * 10.f), FMath::RoundToInt(PlayerHP * 10.f));   // for tools/check.sh
+	if (Net) Net->Send(FString::Printf(TEXT("XR %c %d %d"), Outcome, FMath::RoundToInt(Damage * 10.f), FMath::RoundToInt(PlayerHP * 10.f)));
+}
+
+void AKSGameMode::OnlineSpecialResult(TCHAR Outcome, float Damage, float HealthLeft)
+{
+	if (Outcome != TEXT('H') && Outcome != TEXT('B') && Outcome != TEXT('D')) return;
+	SpecialOutcome = Outcome; SpecialDealt = Damage; SpecialHealthLeft = HealthLeft;
+	bSpecialReported = true;
+	// Shown at once if the special has landed on this screen too; otherwise when it does (SpecialLand).
+	if (!bSpecialOn || !bSpecialByPlayer || bSpecialHit) OnlineSpecialApply();
+}
+
+void AKSGameMode::OnlineSpecialMissed(float Seconds)
+{
+	if (Phase != EKSPhase::Fight) return;
+	OnlineLockedUntil = Clock + Seconds;
+	OnlineCueUntil = Clock + Seconds;
+	Cue(MissedCue, TEXT("you are wide open"));
 }
 
 void AKSGameMode::OnlineTimeUp()
