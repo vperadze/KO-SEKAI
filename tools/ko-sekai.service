@@ -1,0 +1,18 @@
+[Unit]
+Description=KO-SEKAI match server (lobby, ratings, leaderboard)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=kosekai
+ExecStart=/usr/bin/python3 -u /opt/ko-sekai/ko_relay.py --port 7777 --data /var/lib/ko-sekai/ko_players.json
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/ko-sekai
+
+[Install]
+WantedBy=multi-user.target

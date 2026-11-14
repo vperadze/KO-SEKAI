@@ -19,8 +19,11 @@ if defined KS_MISSING if not defined KS_NO_PACKS (
   echo Add the packs above in the Unreal editor: Window, Fab, Add to Project. Then run this again.
   exit /b 1
 )
+rem The jam's limit is 1 GB. A Shipping program is about half the size of a Development one and writes no log;
+rem for a build that logs:  set KS_CONFIG=Development  before running (about 1.05 GB). -nodebuginfo leaves out the .pdb.
+if "%KS_CONFIG%"=="" set "KS_CONFIG=Shipping"
 call "%UE_ROOT%\Engine\Build\BatchFiles\RunUAT.bat" BuildCookRun ^
-  -project="%~dp0KoSekai.uproject" -platform=Win64 -clientconfig=Development ^
-  -build -cook -stage -pak -package -archive -archivedirectory="%~dp0Packaged" ^
+  -project="%~dp0KoSekai.uproject" -platform=Win64 -clientconfig=%KS_CONFIG% ^
+  -build -cook -stage -pak -nodebuginfo -package -archive -archivedirectory="%~dp0Packaged" ^
   -unattended -utf8output -nop4
 exit /b %ERRORLEVEL%

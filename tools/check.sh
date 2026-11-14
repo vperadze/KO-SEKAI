@@ -500,6 +500,30 @@ else
 	kill "$RELAY" 2> /dev/null; wait "$RELAY" 2> /dev/null
 	grep -q "meets" "$OUT/relay.log" 2> /dev/null && pass "relay: it put the two players in one room" || fail "relay: it never paired the two players (see $OUT/relay.log)"
 	check_pair "relay" "$OUT/relay_first.log" "$OUT/relay_second.log"
+
+	echo "== the match server by itself (tools/ko_relay_test.py: fake players, no game)"
+	SERVER_OUT=$("$PY" "$(native "$ROOT/tools/ko_relay_test.py")" 2>&1) \
+		&& pass "match server: lobby, challenges, ratings, leaderboard and the saved file ($(echo "$SERVER_OUT" | grep -c "^  ok") checks)" \
+		|| { fail "match server: its own test failed"; echo "$SERVER_OUT" | grep -v "^  ok" | sed 's/^/        /'; }
+
+	echo "== a rated match through the match server's lobby (two copies, each a named player)"
+	rm -f "$OUT/lobby_players.json"
+	"$PY" "$(native "$ROOT/tools/ko_relay.py")" --port 17779 --data "$(native "$OUT/lobby_players.json")" > "$OUT/lobby_server.log" 2>&1 &
+	RELAY=$!
+	sleep 2
+	run_pair 1 300 "$OUT/lobby_a.log" "$OUT/lobby_b.log" "-KSLobby=CHECKA -KSServer=127.0.0.1:17779" "-KSLobby=CHECKB -KSServer=127.0.0.1:17779" "KSTEST lobby you="
+	kill "$RELAY" 2> /dev/null; wait "$RELAY" 2> /dev/null
+	grep -q "KSTEST ui server lobby shown" "$OUT/lobby_a.log" 2> /dev/null && pass "lobby: the list of players and the leaderboard were drawn" || fail "lobby: the match server's lobby was never drawn"
+	grep -q "KSTEST lobby opponent=CHECKB" "$OUT/lobby_a.log" 2> /dev/null && grep -q "KSTEST lobby opponent=CHECKA" "$OUT/lobby_b.log" 2> /dev/null \
+		&& pass "lobby: a challenge put the two named players in one ring" || fail "lobby: the two players were never put together (see $OUT/lobby_server.log)"
+	# Whoever challenged is the host; the two bots both do, so either may be.
+	if grep -q "KSTEST online linked role=host" "$OUT/lobby_a.log" 2> /dev/null; then check_pair "lobby" "$OUT/lobby_a.log" "$OUT/lobby_b.log"; else check_pair "lobby" "$OUT/lobby_b.log" "$OUT/lobby_a.log"; fi
+	ca=$(field "$(grep "KSTEST online rated " "$OUT/lobby_a.log" 2> /dev/null | head -1)" change); cb=$(field "$(grep "KSTEST online rated " "$OUT/lobby_b.log" 2> /dev/null | head -1)" change)
+	case "$ca/$cb" in
+		16/-16|-16/16) pass "lobby: the bout was rated, and the winner gained what the loser lost ($ca and $cb)";;
+		0/0) pass "lobby: a double knockout moved neither rating";;
+		*) fail "lobby: the bout was not rated on both sides (changes '$ca' and '$cb'; see $OUT/lobby_server.log)";;
+	esac
 fi
 
 echo "== recorded moves (tests/tracking/*.csv with a .expect file)"

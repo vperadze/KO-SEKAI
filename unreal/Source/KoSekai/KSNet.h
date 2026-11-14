@@ -5,6 +5,8 @@
 //   - Join():  connect to a host's address.
 //   - Join():  connect to the relay server (tools/ko_relay.py), which pairs two players and passes their lines on.
 //              Nobody needs an open port for that except the relay.
+//   - Join() with a greeting of its own ("HELLO 2 ..."): the same server's lobby. Until an opponent is found the
+//              server's lines (who is here, the leaderboard, a challenge) are handed to the game like any others.
 // Whoever is told "ROLE host" runs the match (picks the fighters, rings the bell, calls time); the other is the guest.
 // A game that hosts gives itself the host role and tells the visitor "ROLE guest"; the relay hands the roles out.
 #pragma once
@@ -32,7 +34,7 @@ public:
 	~FKSNet();
 	bool Host(int32 Port);
 	/** Address is "name", "name:port" or either with "#room" on the end (the relay pairs players who give the same room). */
-	void Join(const FString& Address);
+	void Join(const FString& Address, const FString& LobbyHello = FString());
 	void Close();
 
 	/** Once a frame: lets a visitor in, finishes dialling, sends what is waiting and hands back the lines that arrived. */
@@ -55,7 +57,7 @@ private:
 
 	EState Now = EState::Off;
 	bool bHost = false;
-	FString Problem, Room;
+	FString Problem, Room, Hello;   // Hello: the greeting for the server's lobby; empty for a host or the plain relay
 	FSocket* Listener = nullptr;
 	FSocket* Socket = nullptr;
 	TFuture<FDialled> Dialling;

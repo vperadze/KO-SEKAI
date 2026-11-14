@@ -20,8 +20,11 @@ class UKSTrackingSubsystem;
 class FKSNet;
 
 enum class EKSPhase : uint8 { Street, PullIn, Card, Fight, FightEnd, Result, Continue, Ending, Calibrate, Menu, Intro, Select, Online, Controls };   // new ones go at the end: tools/check.sh reads the numbers
-/** The screens of the online lobby (EKSPhase::Online): the three choices, waiting as host, typing an address, dialling. */
-enum class EKSLobby : uint8 { Choose, Hosting, Typing, Joining };
+/** The screens of the online lobby (EKSPhase::Online): the four choices, waiting as host, typing an address, dialling,
+ *  typing a name for the match server, and the match server's own lobby (who is there, the leaderboard). */
+enum class EKSLobby : uint8 { Choose, Hosting, Typing, Joining, Naming, Server };
+/** A player as the match server describes one: in its lobby, or on its leaderboard. */
+struct FKSLobbyRow { FString Name; int32 Rating = 0, Wins = 0, Losses = 0; bool bBusy = false; };
 enum class EKSOppState : uint8 { Idle, Windup, Strike, Open, KO };
 
 struct FKSPopup
@@ -113,7 +116,16 @@ public:
 	float OnlinePingMs = -1.f;                // there and back, in milliseconds; below zero when not measured yet
 	bool bSelectForOnline = false;            // the select screen was opened by PLAY ONLINE: it leads to the lobby, not the ladder
 	EKSLobby Lobby = EKSLobby::Choose;
-	int32 LobbyIndex = 0, HostPort = 7777;    // the chosen line of the lobby: host, join, back
+	int32 LobbyIndex = 0, HostPort = 7777;    // the chosen line of the lobby: find a match, host, join, back
+	/* The match server (FIND A MATCH; tools/ko_relay.py): its lobby, the ratings and the leaderboard. */
+	bool bLobbyLink = false;                  // the link is to the match server, not to a host or the plain relay
+	TArray<FKSLobbyRow> LobbyPlayers, LobbyTop;   // everyone else in the lobby; the ten best
+	FString PlayerName, OppName, Challenger, Asked;   // this player; the opponent in the ring; who has challenged us; whom we have challenged
+	int32 MyRating = 0, MyPlace = 0, MyWins = 0, MyLosses = 0, OppRating = 0, ChallengerRating = 0;   // MyRating 0: the server has not said yet
+	int32 ServerIndex = 0;                    // the chosen line of the list of players
+	bool bRated = false; int32 RatedChange = 0;   // after a bout: the server has moved the rating, and by how much
+	/** What a rating is called. */
+	static const TCHAR* RankTitle(int32 Rating);
 	FString JoinAddress, LobbyNote, LobbyStatus;   // what is being typed, what went wrong last time, what is happening now
 	TArray<FString> HostAddresses;            // this machine's addresses, for the host to read out to a friend
 	bool bSpokenByOpp = false;                // who the speech bubble belongs to
@@ -207,6 +219,12 @@ private:
 	void TickLobby(float Dt);
 	void LobbyHost();
 	void LobbyJoin();
+	void LobbyFind();                                    // FIND A MATCH: asks for a name the first time, then dials the match server
+	void LobbyDial();
+	void TypeText(FString& Text, int32 Max, bool bName); // the keyboard into an address or a name
+	FString ServerAddress;                               // -KSServer=, or OnlineServer in DefaultGame.ini
+	bool bNameFromFlag = false;                          // -KSLobby=<name>: a test player, nothing of his is remembered
+	double LobbyKeepAt = 0.0, LobbyBotAt = 0.0;
 	void TickOnline();                                   // every frame while there is a link: reads what the other side sent
 	void OnlineLine(const FString& Line);
 	void OnlinePickMatch();                              // the host settles the two fighters and the arena and tells the guest

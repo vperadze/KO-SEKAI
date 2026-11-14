@@ -256,6 +256,8 @@ void AKSGameMode::BeginPlay()
 	FString JoinArg;
 	if (FParse::Param(Cmd, TEXT("KSHost"))) { EnterLobby(); LobbyHost(); }
 	else if (FParse::Value(Cmd, TEXT("KSJoin="), JoinArg)) { EnterLobby(); JoinAddress = JoinArg; LobbyJoin(); }
+	// -KSLobby=<name> -KSServer=<address>: into the match server's lobby under that name.
+	else if (FParse::Value(Cmd, TEXT("KSLobby="), JoinArg)) { EnterLobby(); PlayerName = JoinArg.ToUpper(); bNameFromFlag = true; LobbyFind(); }
 }
 
 /* ================= helpers ================= */
