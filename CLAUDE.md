@@ -55,8 +55,8 @@ fails, but the special abilities and the hit marks then have no effects at all. 
 | Path | What |
 |---|---|
 | `unreal/` | The game. C++ only, everything spawned from code, no level files. |
-| `unreal/Source/KoSekai/` | `KSGameMode` (rules, phases, crowd, special abilities, where the fighters stand), `KSVfx` (particle effects), `KSMic` (hears a shout), `KSDummy` (a fighter), `KSWorld` (street and arena), `KSHUD`, `KSAudio`, `KSTracking` + `KSCameraTracker` + `KSDetector` (webcam). |
-| `unreal/Content/KoSekai/Characters/` | Seven fighters, 17 shared clips each plus six of their own (`Fun_A`, `Fun_B`, `Picked`, `Special`, `Win`, `Stagger`), face materials. |
+| `unreal/Source/KoSekai/` | `KSGameMode` (rules, phases, crowd, special abilities, where the fighters stand), `KSKeys` (the keys of a bout, which the player can change), `KSVfx` (particle effects), `KSMic` (hears a shout), `KSDummy` (a fighter), `KSWorld` (street and arena), `KSHUD`, `KSAudio`, `KSTracking` + `KSCameraTracker` + `KSDetector` (webcam). |
+| `unreal/Content/KoSekai/Characters/` | Seven fighters, 17 shared clips each plus six of their own (`Fun_A`, `Fun_B`, `Picked`, `Special`, `Win`, `Stagger`) and three more shared (`Shocked`, `Blown`, `Dizzy`), face materials. |
 | `unreal/Content/KS/` | Materials, arena pictures and spectator pictures (`Arena/T_KS_Crowd_*`, eight poses each), sounds (`Audio/`), the pose model (`Tracker/`). |
 | `unreal/Content/KS/Props/` | The arena's Meshy models, `<Name>/SM_<Name>`: the kit every arena is built from and one landmark per arena. |
 | `unreal/Content/KS/UI/` | Interface pictures `T_UI_<name>` and the two fonts (`F_RussoOne`, `F_Bangers`); `KSHUD` falls back to plain boxes without them. |
@@ -85,7 +85,8 @@ Test flags (all optional):
 | `-KSAuto` | The game plays itself. `-KSNoGuard` makes the player take hits. |
 | `-KSFighter=N` `-KSPlayer=N` | Force the first opponent / the player's fighter (roster index 0–6). |
 | `-KSShots=N` `-KSHitShots` | Save screenshots to `unreal/Saved/Screenshots` (timed / bursts around each hit). |
-| `-KSNoCamera` | Do not open the webcam. |
+| `-KSNoCamera` | The webcam cannot be opened at all, not from the menu either. (It is shut at start anyway: the player switches it on with the menu's WEBCAM line.) |
+| `-KSCameraOn` | Open the webcam at start, as before it became the player's choice (the self-check's camera test; `-KSReplay` does it too). |
 | `-KSNoMic` | Do not open the microphone (it is also left shut with `-nosound`). |
 | `-KSMic` | Open the microphone even with `-nosound` (the self-check's recorder test). |
 | `-KSCamera=N` | Use camera index N. |
@@ -96,8 +97,11 @@ Test flags (all optional):
 | `-KSGiveUp` | With `-KSAuto`: the bot neither defends, punches nor continues, so the count runs out. |
 | `-KSSpam` | With `-KSAuto`: the bot also punches when there is no opening, so the opponent's answers and fakes are run. |
 | `-KSEscAt=N` | As if Esc were pressed N seconds into the first bout. |
+| `-KSEnterAt=N` | As if Enter were pressed N seconds into the film (the only thing that skips it). |
+| `-KSMenuPick=N` | On the start menu, line N (0 fight, 1 webcam, 2 calibration, 3 controls, 4 intro, 5 online, 6 quit) is chosen after two seconds. |
+| `-KSStart=controls` `-KSKeysTest` | Open on the controls screen / rebind two moves onto one key by itself, log it, and reset the keys. |
 | `-KSFakeJabSwipe` | On the menu: a fake left jab that is also read as a swipe down, then a right jab (the first line must be chosen). |
-| `-KSFakePunch` | During the film: fake webcam hooks and uppercuts for five seconds, then one jab. |
+| `-KSFakePunch` | During the film: fake webcam punches, a lone jab, a both-at-once and a left-right jab; none may end it. |
 | `-KSArena=N` `-KSArenaTour` | Fight every bout in arena N (0-10, `KSArenaData.h`) / build every arena once at the start. |
 | `-KSCalDemo` | Enter calibration without a camera and step through it automatically. |
 | `-KSCalJitter` | With `-KSCalDemo`: one framing reading flips every frame, to test that the text stays steady. |

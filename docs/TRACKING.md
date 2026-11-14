@@ -66,6 +66,11 @@ Every decision is logged, for example:
 
 ## Outside a fight: swipes and the left-right jab
 
+Since 2026-11-14 the webcam is shut when the game starts. The start menu's WEBCAM line switches it on and off
+(`UKSTrackingSubsystem::SetCamera`), CAMERA CALIBRATION switches it on if need be, and the film is skipped by Enter
+alone. Everything below applies once the player has switched it on. `-KSCameraOn` opens it at start for tests; a
+replay (`-KSReplay`) opens the tracker by itself.
+
 On the film, the menu and the select screen nothing a person does by accident is a button press (player,
 2026-11-13: "the slight movement of mine interrupts the cinematic, moves the menu or picks a character").
 

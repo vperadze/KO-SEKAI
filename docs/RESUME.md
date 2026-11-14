@@ -306,6 +306,66 @@ Updated 2026-11-14. Deadline 2026-11-16 02:59 CET.
   webcam's delay, whether stray webcam punches now get punished unfairly, whether a real bout is three times as long
   (a person is not the bot), whether the third opponent is beatable, and whether fakes and answers read on screen.
 
+- **Harder again, dizzy, optional webcam, key settings (player, 2026-11-14 afternoon, five messages).**
+  - **Opponent**: wind-ups 0.34 / 0.44 / 0.50 s (were 0.50 / 0.66 / 0.76), never under 0.24; damage 3.2 / 5.2 / 6.8
+    (were 2.4 / 4.0 / 5.2); health 130 / 155 / 180 (were 100 / 120 / 140); rests about half as long; combinations of
+    up to four. His punch is **drawn** differently: a short held tell, then the clip at about twice its speed
+    (`WindSnap`, `WindTell`); it used to creep out at half speed. His stance and recovery clips play faster too.
+  - **He defends**: he leans out of the way of punches (`Stand_Dodge` clips, "MISSED"), an opening is no longer three
+    free punches (after the first he may cover up or slip, and answer), and now and then he sees a counter coming.
+  - **He adapts** (`Heat`, 0 to 1): it rises with how fast the player punches and how many of his punches the player
+    gets out of; up to a fifth off his wind-ups, nearly half off his rests, and he reads the player more often
+    (`Wits`). Measured: 85-93% against the bots that avoid everything, 0% against a player who does nothing.
+  - **Dizzy**: a blocked punch, or a combination broken (a follow-up punch blocked, dodged or countered), leaves him
+    dizzy for **0.5 s** ("dizzy should break after 0.5 sec"): Meshy's "Head Hold in Pain" (3 credits, on all seven as
+    `Dizzy`), five stars circling his head, every punch lands and counts 1.25 times. A dodge of a lone punch leaves him
+    open for 0.56-0.72 s instead (it was 1.2 s), a block used to give a second.
+  - **Webcam optional**: shut when the game starts; the menu has seven lines now (FIGHT, WEBCAM: OFF/ON, CAMERA
+    CALIBRATION, CONTROLS, WATCH THE INTRO, PLAY ONLINE, QUIT). The film is skipped by Enter only.
+  - **Controls screen** (`KSKeys`, `EKSPhase::Controls`): the twelve moves of a bout, each with its key and how it is
+    done at the webcam; Enter on a line and the next key pressed is its key (two moves swap rather than share),
+    RESET ALL KEYS, saved in `GameUserSettings.ini` under `[KoSekai.Keys]`. The hints in the ring show the player's
+    keys. Menu keys (arrows, Enter, Esc) are fixed.
+  Measured by itself: the bot that makes no mistake wins in 67 and 77 s; a player who does nothing is knocked out in
+  21 s (was 35-38) after 8 follow-up punches; the bot that punches all the time wins in 69 s (27 dizzy spells, 36
+  answers, 18 slips, 7 counters seen coming).
+  **Not verified, and this is most of it**: nobody has played it. Whether punches this quick can be avoided at all
+  through the webcam's delay (0.38 s from the start of the quickest punch to the last moment a defence counts; the
+  third opponent, hot, is at that floor most of the time); whether half a second of dizzy is long enough to land
+  anything with a real arm; whether a person can still win a ladder; how the tell-then-snap punch, the dizzy clip at
+  1.5 speed, the stars and the leaning dodge look in motion (seen in stills only: the stars circle the head as five
+  glowing cubes, the DIZZY! and COMBO BROKEN! words show, a glove is at the head in some dizzy frames; the first
+  stars were inside Turbotron's helmet and the hurt clip hid the dizzy pose, both changed); the controls screen and
+  the seven-line menu were looked at in one still each and read well, but have not been used by hand; rebinding
+  by pressing a real key (the check rebinds through the same function, not through the keyboard); switching the
+  webcam on from the menu with a real camera, and off again; the menu's WEBCAM line when no camera is plugged in.
+  **The check**: 139 ok on the first full run; the second failed "a fighter was out of the picture" (0.8 and 1.1% of
+  the frames; fixed: the cameraman steps back when the two are too far apart for the lens, 0 lost frames in the four
+  bouts since); the third had 138 ok and one failure, "the player's fighter stood 46 cm from his mark" against a limit
+  of 45. That number follows how much the player punches (8 with no punches, 52 for the bot that punches all the
+  time; the bug it guards reads 130), so the limit is now 75. **The check has not been run in full since that last
+  edit of the limit.**
+  If it is now too hard, the knobs are `WindupSeconds`, `MinWindup`, `AttackDamage` and `LadderTiers` at the top of
+  `KSGameMode.cpp`, and the three Heat factors in `StartWindup`, `OppIdle` and `Wits`.
+  **Windows**: `KSKeys.cpp` is a new source file, and the `Dizzy` clip is new content: both go with the commit.
+
+- **Evening of 2026-11-14 (player, after playing: "the rest is fine")**:
+  - **Sound lost after alt+tab**: Unreal turns the sound to nothing while another window has the focus, and a looping
+    sound played at nothing is stopped for good. The game now keeps its sound on (`FApp::SetUnfocusedVolumeMultiplier`
+    in `BeginPlay`). The check sees the setting; **nobody has alt-tabbed since**, so that the music really comes
+    back is unconfirmed.
+  - **Bouts about 30% shorter**: the player's punches count 1.15 / 1.43 / 1.86 (were 0.8 / 1.0 / 1.3), his special
+    17 (was 12). The bot that makes no mistake wins in 42 and 49 s (was 64 to 73); the check wants 35 to 62.
+  - `tools/check.sh`: 138 ok, all passed, on this code.
+  - **Linux package** built on this code and run (15 effects, dizzy clip, webcam shut at start, no crash): folder
+    1594 MiB; without debug symbols (274), Vulkan debugging layers (263) and the `Saved` folder of test runs (58):
+    **1003 MiB = 1052 MB unpacked, 737 MB as a `.tar.gz`**. The same as before today (the dizzy clip is small).
+    Still just over 1 GB (decimal) unpacked, just under 1 GiB.
+  - **Windows package: not built.** It cannot be made on this machine: the Linux engine has no Windows target
+    (`Engine/Binaries` holds Linux and Android only) and cannot compile Direct3D shaders. On the Windows PC: pull,
+    add the four Fab packs, run `unreal\package_windows.bat`, and measure `Packaged\Windows` without `.pdb` files.
+    The content file will be about the Linux one (564 MiB); the rest is unmeasured.
+
 ## Built but not verified with a person
 
 - Early punch call (punch starts while the arm is still extending).
@@ -337,7 +397,7 @@ Updated 2026-11-14. Deadline 2026-11-16 02:59 CET.
 
 1. **Scripted recording from the player**, standing far enough back: 3 s still, 5 left jabs, 5 right jabs,
    3 hooks and 3 uppercuts each side, 3 blocks of 2 s. Turn it into `tests/tracking/` cases and tune from it.
-2. Commit and push (nothing since the `real-fighters` push at `ddc971e` is committed).
+2. The player tries the harder opponent, the dizzy, the WEBCAM line and the CONTROLS screen (see "Not verified" above).
 3. Windows package: build, size under 1 GB, test the webcam there (the OpenCV camera backend differs on Windows).
 4. The 30–60 s gameplay video.
 

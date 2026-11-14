@@ -464,8 +464,8 @@ void AKSHUD::DrawIntro(const AKSGameMode& G)
 	Text(Shot.Caption, 0.5f, 0.815f + 0.02f * (1.f - Rise), 40.f, FLinearColor(1.f, 0.9f, 0.3f, Rise), 0, EKSFont::Comic, 3.f, FLinearColor(0.04f, 0.f, 0.10f, 0.95f * Rise), 0.92f);
 	// Steady, and worded by whether a camera is plugged in, not by whether it sees a body this frame: the first version
 	// blinked on a timer and swapped its words whenever the tracker lost or found the player ("jab, enter, jab, enter").
-	const bool bJabSkips = G.Tracking() && G.Tracking()->IsConnected();
-	Label(bJabSkips ? TEXT("ENTER  or  JAB LEFT + RIGHT  skip") : TEXT("ENTER  skip"), 0.985f, 0.957f, 0.7f, Lilac, 1);
+	// Enter only since 2026-11-14: the webcam is shut until the player switches it on in the menu.
+	Label(TEXT("ENTER  skip"), 0.985f, 0.957f, 0.7f, Lilac, 1);
 	// The tape itself: scan lines and a band of noise that wanders up the picture.
 	for (float Y = 0.f; Y < SH; Y += 4.f * Unit) DrawRect(FLinearColor(0.f, 0.f, 0.f, 0.16f), 0.f, Y, SW, 1.5f * Unit);
 	Fill(0.f, 1.f - FMath::Frac(Now * 0.11f), 1.f, 0.014f, FLinearColor(1.f, 1.f, 1.f, 0.06f));
@@ -482,7 +482,9 @@ void AKSHUD::DrawTracker(const AKSGameMode& G, bool bWithSkeleton)
 	const UKSTrackingSubsystem* T = G.Tracking();
 	if (!T) return;
 	FString Status; FLinearColor Color = Muted;
-	if (!T->IsConnected()) Status = TEXT("WEBCAM OFF - KEYBOARD");
+	if (!T->IsCameraOn() && !T->IsConnected()) Status = G.Phase == EKSPhase::Menu ? TEXT("WEBCAM OFF - KEYBOARD") : TEXT("WEBCAM OFF - KEYBOARD (SWITCH IT ON IN THE MENU)");
+	// Switched on but no picture yet: say what the camera says (opening, not found), so "on" is not taken for "working".
+	else if (!T->IsConnected()) { Status = FString::Printf(TEXT("WEBCAM: %s"), *T->GetCameraStatus().ToUpper()); Color = Yellow; }
 	else if (!T->IsBodySeen()) { Status = TEXT("WEBCAM: STEP INTO VIEW"); Color = Yellow; }
 	else if (!T->IsTracking()) { Status = FString::Printf(TEXT("WEBCAM: HOLD STILL %d%%"), FMath::RoundToInt(FMath::Max(0.f, T->GetCalibrationProgress()) * 100.f)); Color = Yellow; }
 	else if (T->AreHandsOutOfView()) { Status = TEXT("WEBCAM: STEP BACK, HANDS OUT OF VIEW"); Color = Yellow; }
@@ -726,30 +728,33 @@ void AKSHUD::DrawMenu(const AKSGameMode& G)
 	Label(TEXT("T H E   G A M E   T H A T   W A S   N E V E R   R E L E A S E D"), 0.5f, 0.435f, 0.95f, Faded(Lilac, In), 0, 0.94f);
 
 	if (G.MenuIndex != SeenMenu) { SeenMenu = G.MenuIndex; MenuAt = Now; }
-	static const TCHAR* Items[] = { TEXT("FIGHT"), TEXT("CAMERA CALIBRATION"), TEXT("WATCH THE INTRO"), TEXT("PLAY ONLINE"), TEXT("QUIT") };
+	const UKSTrackingSubsystem* Tr = G.Tracking();
+	const bool bCameraOn = Tr && Tr->IsCameraOn();
+	const TCHAR* Items[AKSGameMode::MenuLines] = { TEXT("FIGHT"), bCameraOn ? TEXT("WEBCAM: ON") : TEXT("WEBCAM: OFF"), TEXT("CAMERA CALIBRATION"), TEXT("CONTROLS"), TEXT("WATCH THE INTRO"), TEXT("PLAY ONLINE"), TEXT("QUIT") };
 	for (int32 i = 0; i < UE_ARRAY_COUNT(Items); i++)
 	{
 		const bool bOn = i == G.MenuIndex;
 		// Each plate slides in from the side a moment after the one above it.
 		const float Slide = 1.f - FMath::Clamp((T - 0.45f - 0.09f * i) / 0.25f, 0.f, 1.f);
-		const float Y = 0.520f + 0.075f * i, X = 0.5f + Slide * Slide * (i % 2 ? 0.7f : -0.7f);   // five lines between the motto and the key help
+		const float Y = 0.505f + 0.054f * i, X = 0.5f + Slide * Slide * (i % 2 ? 0.7f : -0.7f);   // seven lines between the motto and the key help
 		const float Bump = bOn ? PopScale(Now - MenuAt) * (1.06f + 0.012f * FMath::Sin(Now * 6.f)) : 0.92f;
 		PushSpin(X, Y, Bump, 0.f);
-		Plate(X - 0.21f, Y - 0.033f, 0.42f, 0.066f, bOn ? 1.f : 0.8f, bOn ? FLinearColor::White : FLinearColor(0.42f, 0.36f, 0.6f));
-		Text(Items[i], X, Y - 0.002f, 26.f, bOn ? FLinearColor(1.f, 0.95f, 0.45f) : Lilac, 0, EKSFont::Hud, 2.2f, FLinearColor(0.04f, 0.f, 0.10f, 0.95f), 0.33f);
+		Plate(X - 0.19f, Y - 0.025f, 0.38f, 0.050f, bOn ? 1.f : 0.8f, bOn ? FLinearColor::White : FLinearColor(0.42f, 0.36f, 0.6f));
+		Text(Items[i], X, Y - 0.002f, 21.f, bOn ? FLinearColor(1.f, 0.95f, 0.45f) : Lilac, 0, EKSFont::Hud, 2.2f, FLinearColor(0.04f, 0.f, 0.10f, 0.95f), 0.33f);
 		if (bOn)
 		{
 			// The glove punches at the chosen line.
 			const float Jab = FMath::Abs(FMath::Sin(Now * 5.f)) * 0.012f;
-			if (!Pic(TEXT("glove"), X - 0.255f + Jab, Y, 0.085f)) Text(TEXT(">"), X - 0.24f + Jab, Y, 34.f, Yellow);
+			if (!Pic(TEXT("glove"), X - 0.232f + Jab, Y, 0.068f)) Text(TEXT(">"), X - 0.22f + Jab, Y, 30.f, Yellow);
 		}
 		PopSpin();
 	}
 
-	const UKSTrackingSubsystem* Tr = G.Tracking();
 	const bool bPunches = Tr && Tr->IsTracking();
+	// What the last choice did (the webcam switch says whether a camera was found), else how the menu is worked.
+	if (!G.MenuNote.IsEmpty()) Label(G.MenuNote, 0.5f, 0.882f, 0.8f, Faded(Yellow, In), 0, 0.94f);
 	Label(bPunches ? TEXT("UP / DOWN  or  SWEEP A HAND UP / DOWN  choose          ENTER  or  JAB LEFT + RIGHT  select")
-		: TEXT("UP / DOWN  choose          ENTER  select"), 0.5f, 0.905f, 0.8f, Faded(Lilac, In), 0, 0.94f);
+		: TEXT("UP / DOWN  choose          ENTER  select"), 0.5f, 0.912f, 0.8f, Faded(Lilac, In), 0, 0.94f);
 	if (FMath::Frac(Now * 0.8f) < 0.62f) Label(TEXT("INSERT YOURSELF"), 0.5f, 0.955f, 0.95f, Faded(Yellow, In));
 	Label(TEXT("(C) 1987   CANCELLED BEFORE LAUNCH"), 0.015f, 0.975f, 0.6f, Faded(Muted, In), -1);
 
@@ -757,6 +762,45 @@ void AKSHUD::DrawMenu(const AKSGameMode& G)
 	for (float Y = 0.f; Y < SH; Y += 4.f * Unit) DrawRect(FLinearColor(0.f, 0.f, 0.f, 0.13f), 0.f, Y, SW, 1.5f * Unit);
 	if (!bLoggedMenu) { bLoggedMenu = true; UE_LOG(LogTemp, Display, TEXT("KSTEST ui menu shown background=%d logo=%d"), Tex(TEXT("title_bg")) ? 1 : 0, Tex(TEXT("logo")) ? 1 : 0); }
 	DrawTracker(G, false);
+}
+
+void AKSHUD::DrawControls(const AKSGameMode& G)
+{
+	Backdrop();
+	Fill(0.f, 0.f, 1.f, 1.f, FLinearColor(0.02f, 0.f, 0.06f, 0.55f));
+	Text(TEXT("CONTROLS"), 0.5f, 0.075f, 54.f, Yellow, 0, EKSFont::Comic, 3.f, FLinearColor(0.04f, 0.f, 0.10f, 0.95f), 0.6f);
+	// Three columns: what it is, the key it is on, and the same move at the webcam.
+	const float XName = 0.10f, XKey = 0.345f, XCam = 0.56f, Top = 0.185f, Step = 0.0465f;
+	Label(TEXT("MOVE"), XName, 0.142f, 0.7f, Lilac, -1);
+	Label(TEXT("KEY"), XKey + 0.075f, 0.142f, 0.7f, Lilac, 0);
+	Label(TEXT("WITH THE WEBCAM"), XCam, 0.142f, 0.7f, Lilac, -1);
+	const int32 Rows = KSKeys::Num + 2;
+	for (int32 i = 0; i < Rows; i++)
+	{
+		const bool bOn = i == G.KeysIndex;
+		const float Y = Top + Step * i + (i >= KSKeys::Num ? 0.012f : 0.f);
+		if (bOn) Fill(0.07f, Y - 0.021f, 0.86f, 0.042f, FLinearColor(0.55f, 0.25f, 0.9f, 0.32f));
+		const FLinearColor Ink = bOn ? FLinearColor(1.f, 0.95f, 0.45f) : FLinearColor::White;
+		if (i >= KSKeys::Num)
+		{
+			Text(i == KSKeys::Num ? TEXT("RESET ALL KEYS") : TEXT("BACK TO THE MENU"), XName, Y, 19.f, Ink, -1, EKSFont::Hud, 1.5f, FLinearColor(0.04f, 0.f, 0.10f, 0.95f), 0.4f);
+			continue;
+		}
+		const EKSKey Action = (EKSKey)i;
+		Text(KSKeys::Name(Action), XName, Y, 19.f, Ink, -1, EKSFont::Hud, 1.5f, FLinearColor(0.04f, 0.f, 0.10f, 0.95f), 0.23f);
+		// The key on a key cap; while it is being changed the cap asks for the new one.
+		const bool bAsking = bOn && G.bKeysListening;
+		Fill(XKey, Y - 0.018f, 0.15f, 0.036f, bAsking ? FLinearColor(0.9f, 0.2f, 0.5f, 0.9f) : FLinearColor(0.02f, 0.f, 0.06f, 0.85f));
+		const FString Cap = bAsking ? (FMath::Frac(Now * 1.5f) < 0.6f ? FString(TEXT("PRESS A KEY")) : FString()) : KSKeys::Label(Action);
+		Text(Cap, XKey + 0.075f, Y, 18.f, bAsking ? FLinearColor::White : KSKeys::IsChanged(Action) ? Cyan : Yellow, 0, EKSFont::Hud, 1.5f, FLinearColor(0.04f, 0.f, 0.10f, 0.95f), 0.14f);
+		Label(KSKeys::WebcamMove(Action), XCam, Y, 0.72f, bOn ? FLinearColor::White : Lilac, -1, 0.37f);
+	}
+	Label(TEXT("The menus are always worked with UP / DOWN, ENTER and ESC; with the webcam on, by sweeping a hand and a left jab then a right jab."), 0.5f, 0.868f, 0.62f, Muted, 0, 0.92f);
+	if (!G.KeysNote.IsEmpty()) Label(G.KeysNote, 0.5f, 0.905f, 0.8f, Yellow, 0, 0.92f);
+	Label(G.bKeysListening ? TEXT("PRESS THE NEW KEY          ESC  keep the old one")
+		: TEXT("UP / DOWN  choose          ENTER  change the key          ESC  back"), 0.5f, 0.945f, 0.8f, Lilac, 0, 0.94f);
+	for (float Y = 0.f; Y < SH; Y += 4.f * Unit) DrawRect(FLinearColor(0.f, 0.f, 0.f, 0.13f), 0.f, Y, SW, 1.5f * Unit);
+	if (!bLoggedControls) { bLoggedControls = true; UE_LOG(LogTemp, Display, TEXT("KSTEST ui controls shown rows=%d"), Rows); }   // for tools/check.sh
 }
 
 void AKSHUD::DrawOnline(const AKSGameMode& G)
@@ -956,7 +1000,9 @@ void AKSHUD::DrawFight(const AKSGameMode& G)
 		Label(FString::Printf(TEXT("YOU FIGHT AS %s"), G.PlayerFighter().Name), 0.60f, 0.862f, 1.05f, Faded(Cyan, A), 0, 0.72f);
 		const bool bTracked = G.Tracking() && G.Tracking()->IsConnected();
 		Label(bTracked ? TEXT("PUNCH, BLOCK, LEAN AND DUCK FOR REAL - THE CABINET IS WATCHING")
-			: TEXT("A/Q/Z left straight/hook/uppercut   D/E/C right   SPACE block   ARROWS evade + duck   P pause   ESC menu"), 0.5f, 0.94f, 0.78f, Faded(Muted, A), 0, 0.80f);
+			: *FString::Printf(TEXT("%s/%s/%s left jab/hook/uppercut   %s/%s/%s right   %s block   %s/%s evade   %s duck   %s pause   ESC menu"),
+				*KSKeys::Label(EKSKey::JabLeft), *KSKeys::Label(EKSKey::HookLeft), *KSKeys::Label(EKSKey::UppercutLeft), *KSKeys::Label(EKSKey::JabRight), *KSKeys::Label(EKSKey::HookRight), *KSKeys::Label(EKSKey::UppercutRight),
+				*KSKeys::Label(EKSKey::Block), *KSKeys::Label(EKSKey::EvadeLeft), *KSKeys::Label(EKSKey::EvadeRight), *KSKeys::Label(EKSKey::Duck), *KSKeys::Label(EKSKey::Pause)), 0.5f, 0.94f, 0.78f, Faded(Muted, A), 0, 0.80f);
 		DrawTracker(G, true);
 		return;
 	}
@@ -998,7 +1044,7 @@ void AKSHUD::DrawFight(const AKSGameMode& G)
 				Reserve(0.05f, 0.19f, 0.42f, 0.085f);
 				const float Beat = 1.f + 0.05f * FMath::Abs(FMath::Sin(Now * 6.f));
 				PushSpin(0.07f, 0.225f, Beat, 0.f);
-				Text(FString::Printf(TEXT("%s  %s"), G.bMicOpen ? TEXT("SHOUT") : TEXT("PRESS S"), *G.PlayerCry()), 0.07f, 0.225f, 30.f, Yellow, -1, EKSFont::Comic, 2.5f, FLinearColor::Black, 0.40f);
+				Text(FString::Printf(TEXT("%s  %s"), G.bMicOpen ? TEXT("SHOUT") : *(FString(TEXT("PRESS ")) + KSKeys::Label(EKSKey::Special)), *G.PlayerCry()), 0.07f, 0.225f, 30.f, Yellow, -1, EKSFont::Comic, 2.5f, FLinearColor::Black, 0.40f);
 				PopSpin();
 				if (G.bMicOpen)
 				{
@@ -1006,7 +1052,7 @@ void AKSHUD::DrawFight(const AKSGameMode& G)
 					Label(TEXT("MIC"), 0.07f, 0.262f, 0.55f, Lilac, -1);
 					Fill(0.105f, 0.257f, 0.12f, 0.009f, FLinearColor(0.02f, 0.f, 0.06f, 0.85f));
 					Fill(0.105f, 0.257f, 0.12f * G.MicLevel, 0.009f, Green);
-					Label(TEXT("or press S"), 0.235f, 0.262f, 0.55f, Muted, -1);
+					Label(FString(TEXT("or press ")) + KSKeys::Label(EKSKey::Special), 0.235f, 0.262f, 0.55f, Muted, -1);
 				}
 			}
 			else Label(TEXT("SPECIAL"), 0.07f, 0.2f, 0.5f, Muted, -1);
@@ -1116,7 +1162,7 @@ void AKSHUD::DrawFight(const AKSGameMode& G)
 	{
 		Fill(0.f, 0.f, 1.f, 1.f, FLinearColor(0.02f, 0.f, 0.06f, 0.65f));
 		if (!Pic(TEXT("t_paused"), 0.5f, 0.44f + 0.006f * FMath::Sin(Now * 2.f), 0.26f)) Text(TEXT("PAUSED"), 0.5f, 0.45f, 80.f, Lilac, 0, EKSFont::Comic, 3.f);
-		Label(TEXT("Press P to carry on"), 0.5f, 0.62f, 1.0f, Lilac);
+		Label(FString::Printf(TEXT("Press %s to carry on"), *KSKeys::Label(EKSKey::Pause)), 0.5f, 0.62f, 1.0f, Lilac);
 	}
 	DrawTracker(G, true);
 }
@@ -1208,6 +1254,7 @@ void AKSHUD::DrawHUD()
 	switch (G->Phase)
 	{
 	case EKSPhase::Menu: DrawMenu(*G); break;
+	case EKSPhase::Controls: DrawControls(*G); break;
 	case EKSPhase::Intro: DrawIntro(*G); break;
 	case EKSPhase::Select: DrawSelect(*G); break;
 	case EKSPhase::Online: DrawOnline(*G); break;

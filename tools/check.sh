@@ -155,7 +155,9 @@ done <<< "$(grep "KSTEST bout=" "$LOG" 2> /dev/null)"
 while read -r line; do
 	[ -z "$line" ] && continue
 	bout=$(field "$line" bout); secs=$(field "$line" seconds)
-	[ "${secs:-0}" -ge 50 ] && pass "bout $bout lasted $secs s against a bot that makes no mistake" || fail "bout $bout was over in ${secs:-?} s (50 or more expected; it was 20 to 24 before bouts were made longer)"
+	# 35 since the evening of 2026-11-14 (it was 50): the player then found them too long and asked for about 30% less;
+	# the bot's bouts were 64 to 73 s before that and should be 45 to 51 now.
+	[ "${secs:-0}" -ge 35 ] && [ "${secs:-0}" -le 62 ] && pass "bout $bout lasted $secs s against a bot that makes no mistake" || fail "bout $bout took ${secs:-?} s (35 to 62 expected: about 30% less than the 64 to 73 the player found too long; it was 20 to 24 before bouts were made longer)"
 done <<< "$(grep "KSTEST ai bout=" "$LOG" 2> /dev/null)"
 [ -n "$(grep "KSTEST ai bout=" "$LOG" 2> /dev/null)" ] || fail "no KSTEST ai line: the length of a bout was not measured"
 # The crowd. The bugs this guards: a sheet that did not import leaves a hole in the stands, and a crowd that only
@@ -187,8 +189,11 @@ while read -r line; do
 	[ -n "$gone" ] && [ "${frames:-0}" -gt 0 ] && [ $((gone * 200 / frames)) -lt 1 ] && pass "bout $bout: both fighters were in the picture ($gone of $frames frames with one of them out; the camera was turned back $(field "$line" turned_back) times)" || fail "bout $bout: a fighter was out of the picture in ${gone:-?} of ${frames:-0} frames"
 	# The player's fighter stands at his own end of the ring. The bug this guards: the hold that keeps a winner's dance on
 	# the spot was not released, and he fought the next bout from where he had landed the knockout, inside his opponent.
+	# The limit was 45 until 2026-11-14. The number grows with how much the player punches (every punch lunges and follows
+	# in): 8 for a player who never punches, 35 to 46 for the patient bot now that it lands more punches a bout, 52 for the
+	# bot that punches all the time. The bug itself reads about 130.
 	px=$(field "$line" player_x)
-	[ -n "$px" ] && [ "$px" -ge -40 ] && [ "$px" -le 45 ] && pass "bout $bout: the player's fighter fought from his own mark (on average $px cm from it)" || fail "bout $bout: the player's fighter stood ${px:-?} cm from his mark on average (held where he celebrated the last bout?)"
+	[ -n "$px" ] && [ "$px" -ge -40 ] && [ "$px" -le 75 ] && pass "bout $bout: the player's fighter fought from his own mark (on average $px cm from it)" || fail "bout $bout: the player's fighter stood ${px:-?} cm from his mark on average (held where he celebrated the last bout?)"
 	# Seen in stills of the first version: he stood straight behind the player, whose back covered the opponent.
 	[ "${frames:-0}" -gt 0 ] && [ $((hidden * 100 / frames)) -le 6 ] && pass "bout $bout: the player's head was in front of the opponent's in $hidden of $frames frames" || fail "bout $bout: the player's own head hid the opponent in ${hidden:-?} of ${frames:-0} frames (cameraman straight behind his back)"
 done <<< "$(grep "KSTEST camera bout=" "$LOG" 2> /dev/null)"
@@ -245,7 +250,7 @@ while read -r line; do
 	[ "$(field "$line" faces)" -ge 4 ] && pass "$who: $(field "$line" faces) face expressions loaded" || fail "$who: only $(field "$line" faces) face expressions loaded"
 	[ "$(field "$line" voice_lines)" -ge 8 ] && pass "$who: $(field "$line" voice_lines) voice lines loaded" || fail "$who: only $(field "$line" voice_lines) voice lines loaded"
 	# The extra moves: without them the fighter stands in his stance on the select screen and pounds his chest for a special.
-	[ "$(field "$line" moves)" -ge 8 ] && pass "$who: all $(field "$line" moves) extra moves loaded (idles, picked, special, win, stagger, shocked, blown)" || fail "$who: only $(field "$line" moves) of 8 extra moves loaded; run art/tools/add_moves.py build, then art/tools/import_moves.py"
+	[ "$(field "$line" moves)" -ge 9 ] && pass "$who: all $(field "$line" moves) extra moves loaded (idles, picked, special, win, stagger, shocked, blown, dizzy)" || fail "$who: only $(field "$line" moves) of 9 extra moves loaded; run art/tools/add_moves.py build, then art/tools/import_moves.py"
 done <<< "$(grep "KSTEST fighter=" "$LOG" 2> /dev/null | sed 's/.*KSTEST/KSTEST/' | sort -u)"
 while read -r line; do
 	[ -z "$line" ] && continue
@@ -286,10 +291,17 @@ effects=$(field "$line" effects); missing=$(field "$line" missing)
 react=$(field "$line" reaction)
 [ "$react" = Shocked ] || [ "$react" = Blown ] && pass "the one hit by the special acted it out ($react)" || fail "no reaction clip for a special (${react:-none}); run art/tools/add_moves.py build, then art/tools/import_moves.py"
 # A blocked punch throws the attacker back and ends his attack.
-n=$(grep -c "KSTEST stagger" "$LOG" 2> /dev/null); n=${n:-0}; bad=$(grep "KSTEST stagger" "$LOG" 2> /dev/null | grep -c "clip=0")
-if [ "$n" = 0 ]; then echo "  --    block stagger: no punch was blocked in this run"
-elif [ "$bad" = 0 ]; then pass "a blocked punch made the attacker stagger ($n times, with the stagger move)"
-else fail "the attacker staggered $bad time(s) without his stagger move"; fi
+# A blocked punch, or a combination broken, leaves the opponent dizzy for half a second (player, 2026-11-14). The bugs
+# this guards: the dizzy clip missing from a fighter (he would reel with the old stagger), and a dizzy spell that lasts
+# as long as an ordinary opening instead of the half second asked for.
+n=$(grep -c "KSTEST dizzy clip=" "$LOG" 2> /dev/null); n=${n:-0}; bad=$(grep "KSTEST dizzy clip=" "$LOG" 2> /dev/null | grep -c "clip=0")
+broken=$(grep -c "KSTEST dizzy clip=.*combo_broken=1" "$LOG" 2> /dev/null); broken=${broken:-0}
+if [ "$n" = 0 ]; then fail "no blocked punch or broken combination made the opponent dizzy in two bouts"
+elif [ "$bad" = 0 ]; then pass "blocking and breaking combinations made the opponent dizzy ($n times, $broken of them a broken combination, with the dizzy move)"
+else fail "the opponent was dizzy $bad time(s) without his dizzy move; run art/tools/add_moves.py build, then art/tools/import_moves.py"; fi
+long=$(grep "KSTEST dizzy over" "$LOG" 2> /dev/null | tr -d "\r" | sed -n 's/.*after=\([0-9.]*\).*/\1/p' | awk '$1 > 0.62 { n++ } END { print n + 0 }')
+spells=$(grep -c "KSTEST dizzy over" "$LOG" 2> /dev/null); spells=${spells:-0}
+[ "$spells" -ge 1 ] && [ "$long" = 0 ] && pass "a dizzy spell is over after half a second ($spells spells timed)" || fail "$long of $spells dizzy spells lasted longer than 0.6 s (0.5 asked for)"
 n=$(grep -c "KSTEST voice .*line=intro sound=1" "$LOG" 2> /dev/null); n=${n:-0}
 [ "$n" -ge 2 ] && pass "each opponent introduced himself aloud" || fail "only $n spoken introduction(s) in two bouts"
 if grep -qE "Fatal error|Assertion failed|Ensure condition failed|Unhandled Exception" "$LOG" 2> /dev/null; then
@@ -318,6 +330,9 @@ else fail "badges stay under a fighter who has moved into them (${line:-no KSTES
 n=$(grep "KSTEST sound=Pop " "$LOG" 2> /dev/null | head -1 | tr -d "\r" | sed -n 's/.*recorded_variants=\([0-9]*\).*/\1/p')
 [ "${n:-0}" -ge 1 ] && pass "interface sounds loaded (Pop: $n takes)" || fail "interface sound Pop missing; run art/tools/prep_audio.py, then art/ui/import_ui.py"
 
+# The bug this guards: the game went silent for good after alt+tab (player, 2026-11-14). Unreal's own default turns the
+# sound to nothing when the window loses the focus, which stops the looping music and crowd.
+grep -q "KSTEST sound unfocused_volume=1.0" "$LOG" 2> /dev/null && pass "the sound stays on when the window is not in front (unfocused volume 1.0)" || fail "the game still turns its sound off when the window loses the focus"
 echo "== opening film, start menu, choosing a fighter (skips and chooses by itself, no camera)"
 LOG="$OUT/menu.log"
 run_until 1 "KSTEST announcer line=round" 150 "$LOG" -KSAuto -KSNoCamera
@@ -362,17 +377,27 @@ while read -r line; do
 	else pass "$who: $room cm of hair above the face, $table allowed for"; fi
 done <<< "$(grep "KSTEST shape " "$LOG" 2> /dev/null | tr -d "\r" | sort -u -t= -k2,2)"
 
-echo "== the film is skipped by a left jab and then a right jab only (fake webcam punches)"
-# The bug this guards: any punch the webcam called skipped the film, so it stopped whenever the player moved; and then
-# one jab did, which a player settling in front of the camera also sets off. The fake player punches with one arm
-# for five seconds, throws a lone jab at 5.5 s, a left and a right in the same instant at 7.5 s (the body shifting),
-# and a left then a right at 9.5 and 9.9 s: only the last may end it.
+echo "== the film is skipped by Enter only, and the webcam is shut until the player switches it on"
+# The bug this guards: any punch the webcam called skipped the film, so it stopped whenever the player moved; then one
+# jab did, then a left-right jab. Since 2026-11-14 only Enter does, and the camera is not even open at this point. The
+# fake player punches with one arm for five seconds, throws a lone jab at 5.5 s, a left and a right in the same instant
+# at 7.5 s and a left then a right at 9.5 and 9.9 s: none may end it. Enter is "pressed" at 12 s (-KSEnterAt).
+# This run has no -KSNoCamera on purpose: a game that opened the camera by itself would say on=1.
 LOG="$OUT/filmskip.log"
-run_until 1 "KSTEST intro ended" 90 "$LOG" -KSFakePunch -KSNoCamera
+run_until 1 "KSTEST intro ended" 90 "$LOG" -KSFakePunch -KSEnterAt=12
 line=$(grep "KSTEST intro ended" "$LOG" 2> /dev/null | head -1 | tr -d "\r")
 secs=$(field "$line" seconds)
-if [ "$(field "$line" by_jab)" = 1 ] && awk "BEGIN{exit !(${secs:-0} >= 9.8)}"; then pass "one-armed punches, a lone jab and a both-at-once did not stop the film; left then right did (ended at ${secs} s)"
-else fail "the film ended on the wrong punch (${line:-it never ended})"; fi
+if [ "$(field "$line" skipped)" = 1 ] && awk "BEGIN{exit !(${secs:-0} >= 11.9 && ${secs:-0} < 14)}"; then pass "no punch stopped the film, not even a left-right jab; Enter did (ended at ${secs} s)"
+else fail "the film ended on something other than Enter (${line:-it never ended})"; fi
+grep -q "KSTEST webcam at_start on=0" "$LOG" 2> /dev/null && ! grep -q "LogKSCamera: .* frames/s" "$LOG" 2> /dev/null && pass "the webcam is shut when the game starts" || fail "the game opened the webcam by itself at start-up"
+
+echo "== the controls screen: keys can be changed, two moves never share a key, and reset puts them back"
+# The settings file is saved and restored by run_until, so the player's own keys survive this.
+LOG="$OUT/keys.log"
+run_until 1 "KSTEST keys reset" 60 "$LOG" -KSStart=controls -KSKeysTest -KSNoCamera
+grep -q "KSTEST ui controls shown rows=14" "$LOG" 2> /dev/null && pass "the controls screen is drawn (12 moves, reset, back)" || fail "the controls screen was not drawn"
+grep -q "KSTEST keys rebound jab=Q hook=J" "$LOG" 2> /dev/null && pass "a move put on another move's key swaps the two (left jab took Q when the left hook took its J)" || fail "rebinding went wrong ($(grep -o "KSTEST keys rebound.*" "$LOG" 2> /dev/null | head -1 | tr -d "\r"))"
+grep -q "KSTEST keys reset jab=A hook=Q" "$LOG" 2> /dev/null && pass "reset puts the shipped keys back" || fail "reset did not restore the keys ($(grep -o "KSTEST keys reset.*" "$LOG" 2> /dev/null | head -1 | tr -d "\r"))"
 
 echo "== a left-right jab chooses the line the player was on (fake webcam: the first jab is also read as a swipe down)"
 # The bug this guards: a jab carries the hand a shoulder's width through the picture, so the swipe rule moved the
@@ -396,6 +421,11 @@ grep -q "KSTEST to_menu from_phase=6" "$LOG" 2> /dev/null && grep -q "KSTEST ui 
 # second and third punch when the first lands. The bug this guards: the combinations switched off without anyone
 # noticing, since the bot of the other runs defends everything and so never sees one.
 line=$(grep "KSTEST ai bout=" "$LOG" 2> /dev/null | head -1 | tr -d "\r")
+# He adapts (player, 2026-11-14: "when the player is fast the AI tries to be faster"): against the bot that gets out of
+# everything his "heat" rises and with it his speed; against a player who does nothing it stays cold. The bug this
+# guards: the adaptation switched off, or heating up whatever the player does.
+hot=$(field "$(grep "KSTEST ai bout=" "$OUT/ladder.log" 2> /dev/null | head -1 | tr -d "\r")" heat); cold=$(field "$line" heat)
+[ "${hot:-0}" -ge 35 ] 2> /dev/null && [ "${cold:-100}" -le 15 ] 2> /dev/null && pass "the opponent speeds up against a player who keeps up with him (heat $hot% against the bot, $cold% against a player who does nothing)" || fail "the opponent does not adapt to the player (heat ${hot:-?}% against the bot, ${cold:-?}% against a player who does nothing)"
 [ "$(field "$line" combos)" -ge 1 ] 2> /dev/null && pass "the opponent throws combinations when his punches land ($(field "$line" combos) follow-up punches, knockout after $(field "$line" seconds) s)" || fail "the opponent threw no combination at a player who did not defend (${line:-no KSTEST ai line})"
 # And against a player who punches all the time, opening or not (-KSSpam). He used to answer only the third punch on
 # his guard, and a punch into his fake counted as a counter, so punching without looking won the bout. The bug this
@@ -404,6 +434,9 @@ LOG="$OUT/spam.log"
 run_until 1 "KSTEST ai bout=" 300 "$LOG" -KSStart=fight -KSAuto -KSSpam -KSNoCamera
 line=$(grep "KSTEST ai bout=" "$LOG" 2> /dev/null | head -1 | tr -d "\r")
 [ "$(field "$line" answers)" -ge 3 ] 2> /dev/null && pass "punching the opponent's guard gets answered ($(field "$line" answers) quick punches back in $(field "$line" seconds) s; $(field "$line" baited) punch(es) drawn by a fake)" || fail "the opponent did not answer a player who punches all the time (${line:-no KSTEST ai line})"
+# He defends himself too (player, 2026-11-14: "much harder, so it hits faster, blocks, dodges"): he leans out of the
+# way of punches, and closes an opening himself after the first punch instead of standing there for three.
+[ "$(field "$line" slips)" -ge 1 ] 2> /dev/null && [ "$(field "$line" covers)" -ge 1 ] 2> /dev/null && pass "the opponent dodges and covers up ($(field "$line" slips) punches leant away from, $(field "$line" covers) openings closed, $(field "$line" seen) counters seen coming)" || fail "the opponent never dodged or closed an opening against a player who punches all the time (${line:-no KSTEST ai line})"
 grep -qE "Fatal error|Assertion failed|Ensure condition failed|Unhandled Exception" "$LOG" 2> /dev/null && fail "the engine reported a crash or failed check with -KSSpam"
 calls=$(grep -c "EnterStreet(" "$ROOT/unreal/Source/KoSekai/KSGameMode.cpp")
 [ "$calls" -le 2 ] && pass "nothing in the game leads back to the street (only -KSStart=street)" || fail "$((calls - 2)) place(s) in KSGameMode.cpp still send the player to the street: $(grep -n "EnterStreet(" "$ROOT/unreal/Source/KoSekai/KSGameMode.cpp" | cut -d: -f1 | tr "\n" " ")"
@@ -493,7 +526,7 @@ done
 if [ "$CAMERA" = 1 ]; then
 	echo "== webcam"
 	LOG="$OUT/camera.log"
-	run_until 3 "LogKSCamera: .* frames/s" 40 "$LOG" -KSStart=fight
+	run_until 3 "LogKSCamera: .* frames/s" 40 "$LOG" -KSStart=fight -KSCameraOn
 	if grep -q "camera .* open" "$LOG" 2> /dev/null; then
 		pass "the camera opens"
 		fps=$(grep "LogKSCamera: .* frames/s" "$LOG" | tail -1 | sed -n 's/.*LogKSCamera: \([0-9]*\) frames.*/\1/p')

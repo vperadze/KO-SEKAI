@@ -257,7 +257,9 @@ bool AKSDummy::UseCharacter(const FString& InFolder)
 		// ability, the win celebration, and the stagger of an attacker whose punch was blocked.
 		TEXT("Fun_A"), TEXT("Fun_B"), TEXT("Picked"), TEXT("Special"), TEXT("Win"), TEXT("Stagger"),
 		// Hit by a special ability: jolted rigid by electricity, or thrown back (AKSGameMode::SpecialHitClip).
-		TEXT("Shocked"), TEXT("Blown") };
+		TEXT("Shocked"), TEXT("Blown"),
+		// Dizzy for half a second after his punch is blocked or his combination broken (AKSGameMode::Daze).
+		TEXT("Dizzy") };
 	static const TCHAR* FaceNames[] = { TEXT("hurt"), TEXT("ko"), TEXT("dizzy"), TEXT("hit"), TEXT("smug"), TEXT("happy"), TEXT("love"), TEXT("neutral"),
 		TEXT("calm"), TEXT("talk"), TEXT("angry"), TEXT("blink") };
 
@@ -344,7 +346,7 @@ bool AKSDummy::UseCharacter(const FString& InFolder)
 		if (LoadObject<USoundBase>(nullptr, *FString::Printf(TEXT("/Game/KS/Voice/%s.%s"), *Asset, *Asset), nullptr, LOAD_NoWarn | LOAD_Quiet)) Sounds++;
 	}
 	int32 Moves = 0;
-	for (const TCHAR* Name : { TEXT("Fun_A"), TEXT("Fun_B"), TEXT("Picked"), TEXT("Special"), TEXT("Win"), TEXT("Stagger"), TEXT("Shocked"), TEXT("Blown") }) Moves += Clips.Contains(Name) ? 1 : 0;
+	for (const TCHAR* Name : { TEXT("Fun_A"), TEXT("Fun_B"), TEXT("Picked"), TEXT("Special"), TEXT("Win"), TEXT("Stagger"), TEXT("Shocked"), TEXT("Blown"), TEXT("Dizzy") }) Moves += Clips.Contains(Name) ? 1 : 0;
 	UE_LOG(LogTemp, Display, TEXT("KSTEST fighter=%s faces=%d voice_lines=%d moves=%d"), *Folder, Faces.Num(), Sounds, Moves);
 	ImpactGlove.Reset();
 	for (const FKSImpact& Row : KSImpacts) if (Folder == Row.Fighter) ImpactGlove.Add(Row.Clip, Row.Glove);
@@ -564,7 +566,7 @@ void AKSDummy::SolveLeg(bool bLeft, const FVector& FootAt, const FQuat& FootRota
 void AKSDummy::Footwork(float DeltaSeconds)
 {
 	// Not while falling or celebrating: those clips move the legs themselves.
-	static const TCHAR* OwnLegs[] = { TEXT("Knock_Down"), TEXT("victory"), TEXT("Chest_Pound_Taunt"), TEXT("Fun_A"), TEXT("Fun_B"), TEXT("Picked"), TEXT("Special"), TEXT("Win"), TEXT("Stagger"), TEXT("Shocked"), TEXT("Blown") };
+	static const TCHAR* OwnLegs[] = { TEXT("Knock_Down"), TEXT("victory"), TEXT("Chest_Pound_Taunt"), TEXT("Fun_A"), TEXT("Fun_B"), TEXT("Picked"), TEXT("Special"), TEXT("Win"), TEXT("Stagger"), TEXT("Shocked"), TEXT("Blown"), TEXT("Dizzy") };
 	bool bWanted = true;
 	for (const TCHAR* Name : OwnLegs) bWanted &= CurrentClip != Name;
 	LegWeight = FMath::FInterpTo(LegWeight, bWanted ? 1.f : 0.f, DeltaSeconds, 6.f);

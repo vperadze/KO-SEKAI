@@ -373,3 +373,24 @@ One entry per bug that cost time: what happened, the cause, the rule. Add to it 
 - **A length asked for ("three times longer") is measured, not worked out.** Dividing the damage by three made
   single-player bouts 2.9 times as long (59 and 67 s against 20 and 24) but online bouts 4.6 times (72 s against 15).
   The game logs each bout's seconds (`KSTEST ai`) and the check fails a bout the bot wins in under 50 s.
+- **"His movements are slow" was the drawing, not the rules** (player, 2026-11-14, watching the self-check play, after
+  the wind-ups had already been shortened twice). The opponent's punch clip was stretched evenly over the whole
+  wind-up, so the arm crept out at half the clip's speed, while the player's fighter starts his clip a tenth of a
+  second before impact and looks instant. Shorter timers changed the numbers and not what was seen. Rule: when the
+  player says something LOOKS slow, find the play rate of the clip before touching a timer; a telegraphed punch is a
+  short held tell and then the punch at full speed or more (`WindSnap`, `WindTell`), never a slow-motion punch.
+- **A scripted edit that stops half-way leaves half a change, and the build still passes.** One of several text
+  replacements failed its assert after the header had been written and before the source was; the build succeeded
+  and three test runs measured the old code. Rule: a multi-file scripted edit writes nothing until every replacement
+  has matched, and the run that follows must show the new log field before its numbers are believed.
+- **A webcam that opens by itself is a decision taken for the player** (player, 2026-11-14: "camera optional... when
+  the game starts the camera should not be on"). Three rounds of making the film and the menus safe against stray
+  punches were answered by taking the cause away: the camera is shut until the menu's WEBCAM line opens it, and only
+  Enter skips the film. Rule: a device that watches or listens is switched on by the person, in the game, and says
+  that it is on.
+- **Making the opponent harder broke the camera's promise** (2026-11-14: "a fighter was out of the picture" in 0.8 and
+  1.1% of the frames, 0.5% allowed, on the second run of the check after it had passed once). The log of the lost
+  frames (now written by the game: `KSTEST camera lost`) showed the cause at once: opponent open, cameraman dived in
+  to 110-150 cm, the two fighters over two metres apart because he is knocked back more often now, lens at its
+  widest. He now steps straight back until a 90 degree lens holds both. Rule: a rule change is checked against the
+  camera too, more than once (the first run passed by luck); and the lost frames are in the log before anyone guesses.

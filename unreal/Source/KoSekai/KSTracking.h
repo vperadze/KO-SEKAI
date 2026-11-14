@@ -64,6 +64,10 @@ public:
 	bool IsBuiltInCamera() const { return bBuiltInLive; }
 	/** A short description of the built-in tracker, for the HUD: camera found or not, frames per second. */
 	const FString& GetCameraStatus() const { return CameraStatus; }
+	/** The webcam is the player's choice (start menu): it is shut when the game starts, and nothing opens it but this
+	 *  (or -KSCameraOn, or a replay). Switching it off stops the camera thread and lets the camera go. */
+	void SetCamera(bool bOn);
+	bool IsCameraOn() const { return CameraTracker.IsValid(); }
 	/** Starts the calibration again (stand still in guard). Only affects the built-in tracker. */
 	void Recalibrate();
 

@@ -11,6 +11,7 @@
 #include "KSMic.h"
 #include "KSVfx.h"
 #include "KSGesture.h"
+#include "KSKeys.h"
 #include "KSGameMode.generated.h"
 
 class AKSDummy;
@@ -18,7 +19,7 @@ class AKSPawn;
 class UKSTrackingSubsystem;
 class FKSNet;
 
-enum class EKSPhase : uint8 { Street, PullIn, Card, Fight, FightEnd, Result, Continue, Ending, Calibrate, Menu, Intro, Select, Online };
+enum class EKSPhase : uint8 { Street, PullIn, Card, Fight, FightEnd, Result, Continue, Ending, Calibrate, Menu, Intro, Select, Online, Controls };   // new ones go at the end: tools/check.sh reads the numbers
 /** The screens of the online lobby (EKSPhase::Online): the three choices, waiting as host, typing an address, dialling. */
 enum class EKSLobby : uint8 { Choose, Hosting, Typing, Joining };
 enum class EKSOppState : uint8 { Idle, Windup, Strike, Open, KO };
@@ -97,7 +98,15 @@ public:
 	void LogSelectFrame();                    // one line per fighter shown, for tools/check.sh
 	int32 CelebFrames = 0, CelebOut = 0;      // after the bell: frames, and frames with part of the winner outside the picture
 	bool bPortraits = false;                  // -KSPortraits: photographs every fighter's head for the portraits and quits
-	int32 MenuIndex = 0;                      // the chosen line of the start menu: fight, camera calibration, watch the intro, play online, quit
+	// The start menu: fight, webcam on/off, camera calibration, controls, watch the intro, play online, quit.
+	static constexpr int32 MenuLines = 7;
+	int32 MenuIndex = 0;
+	FString MenuNote;                         // a word under the menu about what the last choice did (the webcam switch)
+	// The controls screen (EKSPhase::Controls): every action of a bout, its key, and how it is done at the webcam.
+	// Rows: the actions (KSKeys), then RESET, then BACK.
+	int32 KeysIndex = 0;
+	bool bKeysListening = false;              // waiting for the key the chosen action is to go on
+	FString KeysNote;
 	/* Online play (KSGameModeOnline.cpp): a bout against another player over the network. */
 	bool bOnline = false;                     // the opponent in the ring is another player
 	bool bOnlineReady = false, bOnlineOppReady = false;   // after a bout: who has asked for another
@@ -132,6 +141,7 @@ private:
 	void EnterSelect();
 	void ShowSelectFighter();                 // a fresh actor for the fighter being looked at
 	void TickSelect(float Dt);
+	void TickControls(float Dt);              // the keys of a bout: look them up, change them
 	void TickIntro(float Dt);                 // the opening film (KSCineData.h); a confirm key or a jab at the webcam skips it to the menu
 	void TickStreet(float Dt);
 	void TickPullIn(float Dt);
@@ -155,10 +165,13 @@ private:
 
 	/* ---- fight rules (see fight.html) ---- */
 	struct FAttack { EKSPunch Type = EKSPunch::Straight; EKSArm Side = EKSArm::Left; float Damage = 0.f, Duration = 0.f; bool bFeint = false; };
-	struct FPendingHit { float At; EKSArm Arm; EKSPunch Type; float Mult; bool bCounter; };
+	struct FPendingHit { float At; EKSArm Arm; EKSPunch Type; float Mult; bool bCounter; bool bSlipped = false; };   // bSlipped: he leant out of its way
 	void OppIdle(float Seconds);
 	void StartWindup(EKSPunch Type, float QuickSeconds = 0.f, int32 Side = -1);
 	void OpenUp(float Seconds);
+	/** He is dizzy for half a second: guard down, stars round the head, every punch lands and counts for more. A
+	 *  blocked punch does it, and so does breaking his combination (blocking, dodging or countering a follow-up). */
+	void Daze(bool bComboBroken);
 	void OppAttack(bool bFollowUp);       // chooses his punch: by the player's stance and habits, or by guessing
 	void OppAI();
 	void ResolveStrike();
@@ -225,7 +238,9 @@ private:
 	void SpecialLand(const FVector& From, const FVector& To);       // what happens where it lands, and the damage
 	bool bSpecialLaunched = false, bSpecialHit = false, bShoutNow = false, bMeterFullSaid = false;
 	int32 SpecialIndex = 0;                   // roster index of whoever is doing it
-	float OppStaggerUntil = 0.f;              // the opponent reels after a blocked punch
+	float OppDizzyUntil = 0.f;                // the opponent is dizzy until then (Daze)
+	float OppDodgeUntil = 0.f, OppDodgeSide = 0.f;   // he is leaning out of the way of the player's punch
+	TArray<TWeakObjectPtr<AActor>> DizzyStars;       // what circles his head meanwhile
 	TUniquePtr<FKSMic> Mic;
 	// A piece of an effect: an engine shape that flies, grows or shrinks, and is gone after Life seconds.
 	struct FFx { TWeakObjectPtr<AActor> Actor; FVector Pos = FVector::ZeroVector, Vel = FVector::ZeroVector, Size0 = FVector::OneVector, Size1 = FVector::OneVector; FRotator Rot = FRotator::ZeroRotator, Spin = FRotator::ZeroRotator; float Age = 0.f, Life = 1.f, Gravity = 0.f, Delay = 0.f; };
@@ -397,7 +412,7 @@ private:
 	float OpCelebFov = 0.f;                   // after the bell: how wide the lens must be to hold the whole winner
 	bool bOpAimSet = false, bOpWasBout = false;
 	EKSOppState OpSeenState = EKSOppState::Idle;
-	int32 OpShots = 0, OpFrames = 0, OpLost = 0, OpHidden = 0, OpEitherLost = 0, OpSaved = 0; double OpPlayerX = 0.0;                  // for the self-check
+	int32 OpShots = 0, OpFrames = 0, OpLost = 0, OpHidden = 0, OpEitherLost = 0, OpSaved = 0, OpSteppedBack = 0; double OpPlayerX = 0.0;                  // for the self-check
 	float OpTravel = 0.f, OpMinAngle = 1000.f, OpMaxAngle = -1000.f;
 	TArray<FSpectator> Spectators;
 	bool bCalFromMenu = false;                // calibration was chosen in the menu: go back there when it is done
@@ -427,9 +442,18 @@ private:
 	float Habit[5] = { 0.f, 0.f, 0.f, 0.f, 0.f };   // how the player got out of his last punches, by EKSDefense, fading
 	int32 OppNext = 0;                        // what the idle that is running ends in: 0 a fresh attack, 1 the next punch of a combination, 2 a quick answer
 	int32 ChainLeft = 0;                      // punches still to come in the combination he is throwing
+	// He adapts to the player in front of him (player, 2026-11-14: "when the player is fast the AI tries to be faster
+	// and adapts to his movements"). Heat, 0 to 1, rises with how fast the player punches and how many of his punches
+	// the player gets out of; it shortens his wind-ups and rests and sharpens his reading (Wits).
+	float PlayerTempo = 0.f;                  // the player's punches a second, lately
+	float Avoided = 0.f;                      // the share of his last punches that were blocked, dodged or countered
+	float Heat = 0.f, HeatSum = 0.f, HeatTime = 0.f, HeatMax = 0.f;
+	float Wits() const { return FMath::Min(1.f, OppSkill + 0.25f * Heat); }
+	bool bChainPunch = false;                 // the punch he is throwing is a follow-up of a combination
 	bool bWary = false;                       // his last attack was countered: the next is likely a fake to draw the counter out
 	int32 LastAttackType = -1, SameAttackRun = 0;
 	float FightStartClock = 0.f;
+	int32 AiDizzy = 0, AiCovers = 0, AiSlips = 0, AiSeen = 0;   // dizzy spells; openings he closed himself; punches he leant away from; counters he saw coming
 	int32 AiCombos = 0, AiFeints = 0, AiBaited = 0, AiSnaps = 0, AiReads = 0;   // counted for tools/check.sh (KSTEST ai)
 	bool bTellBeeped = false;
 	EKSDefense Def0 = EKSDefense::None;
@@ -454,6 +478,12 @@ private:
 	bool bAutoSpam = false;      // -KSSpam: the test bot also punches when there is no opening, so the opponent's answers to that are run
 	bool bGiveUp = false;        // -KSGiveUp: the test bot neither defends nor punches nor continues, so the count runs out
 	float TestEscAt = 0.f;       // -KSEscAt=N: as if Esc were pressed N seconds into the first bout
+	float TestEnterAt = 0.f;     // -KSEnterAt=N: as if Enter were pressed N seconds into the film
+	int32 TestMenuPick = -1;     // -KSMenuPick=N: on the start menu, line N is chosen after two seconds (once)
+	bool bKeysTest = false;      // -KSKeysTest: the controls screen rebinds two actions onto one key by itself, logs, and resets
+	float KeysListenFrom = 0.f, KeysTestClock = 0.f;
+	int32 KeysTestStep = 0;
+	void BindChosen(const FKey& Key);
 	bool bFakeFilmPunches = false;   // -KSFakePunch: during the film, webcam hooks and uppercuts for five seconds, then one jab
 	float ShotEvery = 0.f, NextShot = 0.f, AutoNextPunch = 0.f, PortraitT = 0.f;
 	int32 ShotIndex = 0;

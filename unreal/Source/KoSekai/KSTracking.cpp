@@ -20,7 +20,11 @@ DEFINE_LOG_CATEGORY_STATIC(LogKSTracking, Log, All);
 void UKSTrackingSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
-	StartBuiltInTracker();
+	// The camera stays shut until the player switches it on in the start menu (player, 2026-11-14). The self-check's
+	// camera test asks for it with -KSCameraOn, and a replay of a recording needs the tracker to run the detector.
+	CameraStatus = TEXT("webcam off");
+	FString Replay;
+	if (FParse::Param(FCommandLine::Get(), TEXT("KSCameraOn")) || FParse::Value(FCommandLine::Get(), TEXT("KSReplay="), Replay)) StartBuiltInTracker();
 	FHttpServerModule& Http = FHttpServerModule::Get();
 	Router = Http.GetHttpRouter(Port);
 	if (!Router.IsValid())
@@ -74,6 +78,20 @@ void UKSTrackingSubsystem::StartBuiltInTracker()
 	CameraTracker = MakeUnique<FKSCameraTracker>(Instance, CameraIndex);
 	TickHandle = FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateUObject(this, &UKSTrackingSubsystem::PullBuiltInTracker));
 	UE_LOG(LogKSTracking, Log, TEXT("Built-in webcam tracker started."));
+}
+
+void UKSTrackingSubsystem::SetCamera(bool bOn)
+{
+	if (bOn == CameraTracker.IsValid()) return;
+	if (bOn) { StartBuiltInTracker(); UE_LOG(LogKSTracking, Display, TEXT("KSTEST webcam on=%d status=%s"), CameraTracker.IsValid() ? 1 : 0, *CameraStatus); return; }
+	if (TickHandle.IsValid()) { FTSTicker::GetCoreTicker().RemoveTicker(TickHandle); TickHandle.Reset(); }
+	CameraTracker.Reset();   // stops the camera thread and releases the camera
+	PoseModel.Reset();
+	bBuiltInLive = false; LastPacketTime = -1000.0; bSeen = bCalibrated = bHandsOutOfView = false; CalProgress = -1.f;
+	for (bool& H : Held) H = false;
+	Pending.Reset(); World.Reset(); Image.Reset(); StrokePeaks.Reset();
+	CameraStatus = TEXT("webcam off");
+	UE_LOG(LogKSTracking, Display, TEXT("KSTEST webcam on=0 status=%s"), *CameraStatus);
 }
 
 /** Runs on the game thread every frame: copies what the camera thread has worked out. */
