@@ -11,7 +11,11 @@ unreal/Intermediate/
 unreal/Saved/
 unreal/DerivedDataCache/
 unreal/Packaged/
-unreal/Build/
+# Unreal writes this folder itself, except the program icon (art/ui/make_icon.py), which is ours.
+unreal/Build/*
+!unreal/Build/Windows/
+unreal/Build/Windows/*
+!unreal/Build/Windows/Application.ico
 unreal/.vscode/
 *.code-workspace
 

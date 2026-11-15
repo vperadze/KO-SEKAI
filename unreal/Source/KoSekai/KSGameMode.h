@@ -177,7 +177,7 @@ private:
 
 	/* ---- fight rules (see fight.html) ---- */
 	struct FAttack { EKSPunch Type = EKSPunch::Straight; EKSArm Side = EKSArm::Left; float Damage = 0.f, Duration = 0.f; bool bFeint = false; };
-	struct FPendingHit { float At; EKSArm Arm; EKSPunch Type; float Mult; bool bCounter; bool bSlipped = false; };   // bSlipped: he leant out of its way
+	struct FPendingHit { float At; EKSArm Arm; EKSPunch Type; float Mult; bool bCounter; bool bSlipped = false; float Fixed = -1.f; };   // bSlipped: he leant out of its way
 	void OppIdle(float Seconds);
 	void StartWindup(EKSPunch Type, float QuickSeconds = 0.f, int32 Side = -1);
 	void OpenUp(float Seconds);
@@ -190,6 +190,7 @@ private:
 	void PlayerHurt(float Damage, bool bLight);
 	void PlayerPunch(EKSArm Arm, EKSPunch Type);
 	void LandHit(const FPendingHit& Hit, float FixedDamage = -1.f);
+	int32 OutcomeOf(EKSPunch Type, EKSArm Side, EKSDefense Def) const;   // Outcome() of KSGameMode.cpp, for the online file
 	void EndFight(bool bWin, bool bDecision);
 	float Rage() const { return 1.f - OppHP / OppMaxHP; }
 	EKSDefense Defense() const;
@@ -232,9 +233,9 @@ private:
 	void OnlineHangUp();                                 // drops the link and forgets the match; changes no screen
 	void OnlineLeave(const FString& Note);               // hangs up and shows the lobby with a word about why
 	bool OnlineCanPunch() const;
-	void OnlinePunch(EKSArm Arm, EKSPunch Type);         // this player throws: the other side decides what it did
-	void OnlineIncoming(EKSPunch Type, EKSArm Arm, bool bCounter);
-	void OnlineStruck(int32 Outcome, bool bBlockHeld);   // the other player's punch arrives here: settle it and report back
+	void OnlinePunch(EKSArm Arm, EKSPunch Type);         // this player throws: settled here at once, the other game is told
+	void OnlineIncoming(EKSPunch Type, EKSArm Arm, bool bCounter, int32 Outcome, float Damage);
+	void OnlineStruck(int32 Outcome, bool bBlockHeld);   // the other player's punch lands here as his game settled it: act it out and report the health left
 	void OnlineResult(int32 Outcome, float Damage, float HealthLeft, EKSPunch Type, EKSArm Arm, bool bCounter);
 	// A special against another player (the comment at the top of KSGameModeOnline.cpp): his game is told ("X"), shows
 	// it and settles it with his stance when it lands, and reports back ("XR"); only then does this game know the result.
@@ -251,8 +252,9 @@ private:
 	void OnlineTimeUp();
 	void OnlineAfterBout();
 	void OnlineBoutLog(bool bWin, bool bDecision);
-	/** Online, a punch takes this long to arrive (0 offline): the other player has to be able to see it coming. */
-	float OnlinePunchLead(int32 Arm) const;
+	int32 RemoteOutcome = 1, OnlineOutstanding = 0;      // how his punch on its way here was settled; this player's hits not yet answered
+	float RemoteDamage = 0.f, RemoteGuardDownUntil = 0.f;   // what it does; his guard is down until then (he has just punched)
+	EKSDefense AutoStance = EKSDefense::None; float AutoStanceUntil = 0.f;   // the test bot online: the stance it holds, and until when
 	TSharedPtr<FKSNet> Net;
 	bool bLinked = false, bRemoteCounter = false, bOnlineBotGuard = true;
 	int32 OnlineMine = 0, OnlineTheirs = 1, OnlineArena = 0, OnlineBout = 0;
@@ -493,8 +495,6 @@ private:
 	FAttack Attack;
 	TArray<FPendingHit> Pending;
 	float PunchStart[2] = { -10.f, -10.f };
-	float PunchLead[2] = { 0.f, 0.f };              // online: how long that punch is in the air on this screen (OnlinePunch)
-	int32 PlayerPunchStage = 0;                     // online: 0 the tell, 1 the fist snapping out, 2 out and coming back
 	EKSPunch PunchType[2] = { EKSPunch::Straight, EKSPunch::Straight };
 	float Shake = 0.f;
 	bool bFightStarted = false;

@@ -4,15 +4,19 @@
 // opponent, exactly as in a fight against the cabinet, and the same rules decide what beats what (Outcome() in
 // KSGameMode.cpp). The difference is who throws the opponent's punches: the other player.
 //
-//   - A punch is sent the moment it is thrown ("P"). On the other side it appears as the opponent winding up, with
-//     the usual cue, and arrives OnlineWindup() seconds later. That time in the air is what lets a person answer a
-//     person, and it hides the network's delay.
-//   - The game of the player being punched settles it with that player's own stance at that moment, takes the
-//     damage off its own health and reports back ("R"). Each side is the only judge of its own health, so the two
-//     screens cannot disagree about a hit.
-//   - Dodging a punch leaves the puncher open: he cannot punch for a moment, and punches thrown at him meanwhile
+//   - A punch is settled the moment it is thrown, by the game of the player who throws it, with the stance the other
+//     player last reported ("D"): it lands, is blocked or misses on that screen as soon as a punch at the cabinet's
+//     fighter does. The other game is told what happened ("P", a few bytes), plays the punch at once, takes the damage
+//     off its own health and answers with the health left ("R"). (Until 2026-11-15 the other game settled it, after
+//     the punch had been in the air long enough to be seen and answered: fair, but half a second passed before a
+//     punch was seen to land; player: "it lacks satisfaction, and is weird to play".)
+//   - So a punch cannot be answered once it is thrown: a defence has to be held already. A block stops jabs and
+//     hooks, a duck or a lean makes the right punch miss, and no stance stops everything (Outcome()).
+//   - A punch that misses leaves the puncher open: he cannot punch for a moment, and punches thrown at him meanwhile
 //     are counters (half as much damage again, and no defence against them).
 //   - Throwing a punch drops your own guard for a moment, so blocking and punching at once does not work.
+//   - Each game is still the only one to call its own player knocked out, so two punches that cross make a double
+//     knockout and never two winners.
 //   - The special is the one from the fights against the cabinet: the same meter, filled by the same things (faster,
 //     the bouts being shorter), the same key, shout or raised hands, the same warning and the same ways out (duck or
 //     lean away; a block halves it). The thrower's game sends "X"; the other shows it and settles it with its
@@ -43,13 +47,9 @@
 
 namespace
 {
-	// Seconds a jab, hook and uppercut are in the air: the wind-ups of the cabinet's fighters (WindupSeconds in
-	// KSGameMode.cpp; keep the two alike). They were 0.45, 0.58, 0.70, left behind when the cabinet's were made quicker.
-	const float Travel[] = { 0.34f, 0.44f, 0.50f };
-	const float MaxPingLead = 0.25f;                       // the most of the link's delay the punch's drawing waits for
+	const float Recover[] = { 0.34f, 0.42f, 0.50f };       // seconds after a jab, hook and uppercut before the next punch
+	const float StrikeShow = 0.12f;                        // his punch is on the screen this long before it lands: the clip starts that far from its impact
 	const float OnlineDamage[] = { 3.f, 4.5f, 6.f };       // out of 100 health. Half the first numbers (bouts were over too soon); a third made two bots take 72 s, up from 15
-	const float OnlineGrace = 0.14f;                       // the same grace as against the cabinet (Grace in KSGameMode.cpp)
-	const float Recovery = 0.20f;                          // after a punch has arrived, before the next can be thrown
 	const float GuardDown = 0.45f;                         // a punch drops the puncher's own guard for this long
 	const float OpenSeconds = 1.1f;                        // how long a dodged puncher stands open
 	const float CounterBonus = 1.5f;
@@ -378,9 +378,9 @@ void AKSGameMode::OnlineLine(const FString& Line)
 	}
 	else if (What == TEXT("MATCH")) { if (Net && !Net->IsHost()) OnlineBeginMatch(Num(2), Num(1), Num(3)); }     // MATCH <host's fighter> <guest's fighter> <arena>
 	else if (What == TEXT("GO")) { if (bOnline && Phase == EKSPhase::Card) StartFight(); }                       // the bell
-	else if (What == TEXT("P"))                                                                                  // P <punch> <arm> <counter>: a punch is on its way
+	else if (What == TEXT("P"))                                                                                  // P <punch> <arm> <counter> <outcome> <damage x10>: his punch, as his game settled it
 	{
-		if (bOnline && Phase == EKSPhase::Fight && !bSpecialOn) OnlineIncoming((EKSPunch)FMath::Clamp(Num(1), 0, 2), (EKSArm)FMath::Clamp(Num(2), 0, 1), Num(3) != 0);
+		if (bOnline && Phase == EKSPhase::Fight) OnlineIncoming((EKSPunch)FMath::Clamp(Num(1), 0, 2), (EKSArm)FMath::Clamp(Num(2), 0, 1), Num(3) != 0, FMath::Clamp(Num(4), 0, 4), Num(5) / 10.f);
 	}
 	else if (What == TEXT("X")) { if (bOnline && Phase == EKSPhase::Fight) OnlineSpecialIncoming(); }           // X: his special has begun
 	else if (What == TEXT("XR"))                                                                                 // XR <H|B|D> <damage x10> <health left x10>: how this player's special ended
@@ -496,7 +496,8 @@ void AKSGameMode::OnlineBeginMatch(int32 Mine, int32 Theirs, int32 Where)
 	bOnlineReady = bOnlineOppReady = false;
 	bRemoteCounter = false;
 	RemoteDefense = SentDefense = EKSDefense::None;
-	OnlineReadyAt = OnlineLockedUntil = OnlineGuardDownUntil = OnlineCueUntil = 0.f;
+	OnlineReadyAt = OnlineLockedUntil = OnlineGuardDownUntil = OnlineCueUntil = RemoteGuardDownUntil = 0.f;
+	OnlineOutstanding = 0; AutoStanceUntil = 0.f;
 	RemoteMeter = OnlineMeterSeen = 0.f; SentMeter = -1; bSpecialReported = false;
 	OnlineBout++;
 	bRated = false;
@@ -507,11 +508,6 @@ void AKSGameMode::OnlineBeginMatch(int32 Mine, int32 Theirs, int32 Where)
 	StartCard(0);
 }
 
-float AKSGameMode::OnlinePunchLead(int32 Arm) const
-{
-	return bOnline && Phase == EKSPhase::Fight ? PunchLead[Arm] : 0.f;
-}
-
 bool AKSGameMode::OnlineCanPunch() const
 {
 	return Clock >= OnlineReadyAt && Clock >= OnlineLockedUntil;
@@ -519,89 +515,107 @@ bool AKSGameMode::OnlineCanPunch() const
 
 void AKSGameMode::OnlinePunch(EKSArm Arm, EKSPunch Type)
 {
-	// A punch thrown at a player who has just missed is a counter: his game will not let him defend it.
+	// Settled here and now, as a punch at the cabinet's fighter is: by the stance the other player last reported. A
+	// player who has just missed, or whose guard is still down from a punch of his own, has no defence.
+	const int32 T = (int32)Type;
 	const bool bCounter = OppState == EKSOppState::Open;
-	OnlineReadyAt = Clock + Travel[(int32)Type] + OnlineGrace + Recovery;
-	// On this screen the fist is out when the other game's word on the punch is due: its time in the air there, and the
-	// way there and back.
-	PunchLead[(int32)Arm] = Travel[(int32)Type] + OnlineGrace + FMath::Clamp(OnlinePingMs / 1000.f, 0.f, MaxPingLead);
-	OnlineGuardDownUntil = Clock + GuardDown;
-	if (bCounter) Stats.Counters++;
-	if (Net) Net->Send(FString::Printf(TEXT("P %d %d %d"), (int32)Type, (int32)Arm, bCounter ? 1 : 0));
+	int32 Result = OutcomeOf(Type, Arm, RemoteDefense);
+	if ((bCounter || Clock < RemoteGuardDownUntil) && Result > Hit) Result = Hit;
+	// In tenths, as it travels: both games take exactly the same off.
+	const float Damage = Result > Half ? 0.f
+		: FMath::RoundToInt(OnlineDamage[T] * (Result == Half ? 0.5f : Result == HitPlus ? 1.25f : 1.f) * (bCounter ? CounterBonus : 1.f) * 10.f) / 10.f;
+	OnlineReadyAt = Clock + Recover[T];
+	if (Net) Net->Send(FString::Printf(TEXT("P %d %d %d %d %d"), T, (int32)Arm, bCounter ? 1 : 0, Result, FMath::RoundToInt(Damage * 10.f)));
 	Sfx(EKSSfx::Whoosh, 0.5f);
-}
-
-void AKSGameMode::OnlineIncoming(EKSPunch Type, EKSArm Arm, bool bCounter)
-{
-	// One punch at a time: if his last one is still in the air it lands first.
-	if (OppState == EKSOppState::Windup || OppState == EKSOppState::Strike) ResolveStrike();
-	if (Phase != EKSPhase::Fight) return;
-	bRemoteCounter = bCounter;
-	StartWindup(Type, Travel[(int32)Type], (int32)Arm);
-	Attack.Damage = OnlineDamage[(int32)Type];
-	// The test bot gets some punches right and walks into others, so a bout between two bots ends.
-	if (bAuto) bOnlineBotGuard = FMath::FRand() < 0.55f;
-}
-
-void AKSGameMode::OnlineStruck(int32 Outcome, bool bBlockHeld)
-{
-	// No defence against a counter, nor with the guard still down from a punch of one's own.
-	const bool bDefenceless = bRemoteCounter || Clock < OnlineGuardDownUntil || Clock < OnlineLockedUntil;
-	if (bDefenceless && Outcome > Hit) Outcome = Hit;
-	const int32 Type = (int32)Attack.Type, Arm = (int32)Attack.Side, Counter = bRemoteCounter ? 1 : 0;
-	// Dodging and blocking fill the special meter as they do against the cabinet (ResolveStrike in KSGameMode.cpp).
-	if (Outcome == Dodged) PlayerMeter = FMath::Min(1.f, PlayerMeter + 0.12f * 0.4f);
-	else if (Outcome == Blocked) PlayerMeter = FMath::Min(1.f, PlayerMeter + 0.10f * 0.4f);
-	if (Outcome == Dodged)
+	// Shown a moment later, when the fist is out, exactly as against the cabinet (PlayerPunch).
+	if (Result >= Dodged)
 	{
-		Stats.Dodges++; Sfx(EKSSfx::Dodge); Popup(TEXT("DODGE!"), KSColors::Green, 0.38f, 0.45f);
-		OpenUp(OpenSeconds);   // he stands open on this screen, and his own game holds him still (OnlineResult over there)
+		// Missed: this player stands open, and the other may punch at will for a moment.
+		Pending.Add({ Clock + 0.09f, Arm, Type, 0.f, false, true });
+		OnlineLockedUntil = Clock + OpenSeconds;
+		OnlineCueUntil = Clock + OpenSeconds;
+		Combo = 0;
+		Cue(MissedCue, TEXT("you are wide open"));
+	}
+	else if (Result == Blocked) Pending.Add({ Clock + 0.09f, Arm, Type, 0.f, false });
+	else
+	{
+		if (bCounter) Stats.Counters++;
+		OnlineOutstanding++;
+		Pending.Add({ Clock + 0.09f, Arm, Type, 1.f, bCounter, false, Damage });
+	}
+}
+
+void AKSGameMode::OnlineIncoming(EKSPunch Type, EKSArm Arm, bool bCounter, int32 Outcome, float Damage)
+{
+	// One punch at a time: if his last one is still on its way it lands first.
+	if (OppState == EKSOppState::Strike) ResolveStrike();
+	if (Phase != EKSPhase::Fight) return;
+	RemoteGuardDownUntil = Clock + GuardDown;
+	bRemoteCounter = bCounter; RemoteOutcome = Outcome; RemoteDamage = Damage;
+	Attack.Type = Type; Attack.Side = Arm; Attack.Damage = Damage; Attack.bFeint = false; Attack.Duration = StrikeShow;
+	if (bSpecialOn)
+	{
+		// It was thrown just as a special began: it counts, and is not acted out.
+		OnlineStruck(Outcome, false);
+		return;
+	}
+	// His fighter throws it at once (the "strike" clip starts just before its impact); it lands when the fist is out.
+	OppState = EKSOppState::Strike; OppT = Clock; OppUntil = Clock + StrikeShow; Def0 = Defense();
+	Sfx(EKSSfx::Whoosh);
+	CueMain.Reset(); CueHint.Reset();
+}
+
+void AKSGameMode::OnlineStruck(int32, bool bBlockHeld)
+{
+	// What it did was settled by the game of the player who threw it (OnlinePunch over there); this game acts it out.
+	const int32 Outcome = RemoteOutcome;
+	const float Damage = Outcome <= Half ? RemoteDamage : 0.f;
+	const int32 Type = (int32)Attack.Type, Arm = (int32)Attack.Side, Counter = bRemoteCounter ? 1 : 0;
+	const bool bQuiet = bSpecialOn;
+	// Dodging and blocking fill the special meter as they do against the cabinet (ResolveStrike in KSGameMode.cpp).
+	if (Outcome == Dodged) { Stats.Dodges++; PlayerMeter = FMath::Min(1.f, PlayerMeter + 0.12f * 0.4f); }
+	else if (Outcome == Blocked) { Stats.Blocks++; PlayerMeter = FMath::Min(1.f, PlayerMeter + 0.10f * 0.4f); }
+	if (bQuiet)
+	{
+		if (Outcome <= Half) { PlayerHP = FMath::Max(0.f, PlayerHP - Damage); Stats.Taken++; }
+	}
+	else if (Outcome == Dodged)
+	{
+		Sfx(EKSSfx::Dodge); Popup(TEXT("DODGE!"), KSColors::Green, 0.38f, 0.45f);
+		OpenUp(OpenSeconds);   // he stands open on this screen, and his own game holds him still (OnlinePunch over there)
 	}
 	else if (Outcome == Blocked)
 	{
-		Stats.Blocks++; Sfx(EKSSfx::Blocked); Popup(TEXT("BLOCKED"), KSColors::Lilac, 0.38f, 0.45f);
+		Sfx(EKSSfx::Blocked); Popup(TEXT("BLOCKED"), KSColors::Lilac, 0.38f, 0.45f);
 		OppIdle(0.2f);
 	}
-	float Damage = 0.f;
-	if (Outcome <= Half)
+	else
 	{
-		if (Attack.Type == EKSPunch::Uppercut && bBlockHeld && !bDefenceless) Popup(TEXT("GUARD BREAK!"), KSColors::Red, 0.5f, 0.5f, true);
-		Damage = OnlineDamage[Type] * (Outcome == Half ? 0.5f : Outcome == HitPlus ? 1.25f : 1.f) * (bRemoteCounter ? CounterBonus : 1.f);
+		if (Attack.Type == EKSPunch::Uppercut && bBlockHeld) Popup(TEXT("GUARD BREAK!"), KSColors::Red, 0.5f, 0.5f, true);
 		PlayerHurt(Damage, Outcome == Half);   // ends the bout if that was the last of the health
 		if (PlayerHP > 0.f) OppIdle(0.2f);
 	}
 	if (Net) Net->Send(FString::Printf(TEXT("R %d %d %d %d %d %d"), Outcome, FMath::RoundToInt(Damage * 10.f), FMath::RoundToInt(PlayerHP * 10.f), Type, Arm, Counter));
+	if (bQuiet && PlayerHP <= 0.f) EndFight(false, false);
 }
 
-void AKSGameMode::OnlineResult(int32 Outcome, float Damage, float HealthLeft, EKSPunch Type, EKSArm Arm, bool bCounter)
+void AKSGameMode::OnlineResult(int32 Outcome, float, float HealthLeft, EKSPunch, EKSArm, bool)
 {
+	// The punch was shown when it was thrown (OnlinePunch). This is his game's word on the health he has left, and on
+	// whether he is still standing: that is his game's to say.
+	if (Outcome > Half) return;
+	OnlineOutstanding = FMath::Max(0, OnlineOutstanding - 1);
+	HealthLeft = FMath::Clamp(HealthLeft, 0.f, OppMaxHP);
 	if (Phase != EKSPhase::Fight)
 	{
-		// The bout ended while this punch was in the air; the number is still the truth about his health.
-		if (Outcome <= Half) { OppHP = FMath::Clamp(HealthLeft, 0.f, OppMaxHP); OppTrail = FMath::Max(OppTrail, OppHP); }
+		// The bout ended while this was on its way; the number is still the truth about his health.
+		OppHP = HealthLeft; OppTrail = FMath::Max(OppTrail, OppHP);
 		return;
 	}
-	if (bSpecialOn)
-	{
-		// A punch that was settled over there just as a special began here: it counts, and is not acted out.
-		if (Outcome <= Half) { Stats.Landed++; OppHP = FMath::Clamp(HealthLeft, 0.f, OppMaxHP); if (OppHP <= 0.f) EndFight(true, false); }
-		return;
-	}
-	if (Outcome >= Dodged)
-	{
-		// Missed: this player stands open, and the other may punch at will for a moment.
-		OnlineLockedUntil = Clock + OpenSeconds;
-		OnlineCueUntil = Clock + OpenSeconds;
-		Combo = 0;
-		Sfx(EKSSfx::Dodge);
-		Cue(MissedCue, TEXT("you are wide open"));
-		return;
-	}
-	if (Outcome == Blocked) { LandHit({ Clock, Arm, Type, 0.f, false }); return; }
-	// His health is whatever his own game says it is; the punch is shown with the damage it did there.
-	OppHP = FMath::Clamp(HealthLeft + Damage, 0.f, OppMaxHP);
-	LandHit({ Clock, Arm, Type, 1.f, bCounter }, Damage);
-	if (Phase == EKSPhase::Fight) OppHP = FMath::Clamp(HealthLeft, 0.f, OppMaxHP);
+	// With another hit of this player's still unanswered the number is already out of date: only ever downwards then.
+	if (OnlineOutstanding == 0 || HealthLeft < OppHP) OppHP = HealthLeft;
+	if (HealthLeft <= 0.f) EndFight(true, false);
 }
 
 void AKSGameMode::OnlineSpecialIncoming()

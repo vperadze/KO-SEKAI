@@ -2538,7 +2538,7 @@ void AKSGameMode::DriveCharacters()
 		int32 PunchArm = -1;
 		for (int32 i = 0; i < 2; i++)
 		{
-			if (Clock - PunchStart[i] < PlayerPunchSeconds + OnlinePunchLead(i) && (PunchArm < 0 || PunchStart[i] > PunchStart[PunchArm])) PunchArm = i;
+			if (Clock - PunchStart[i] < PlayerPunchSeconds && (PunchArm < 0 || PunchStart[i] > PunchStart[PunchArm])) PunchArm = i;
 		}
 		// With the webcam, the fighter's arms copy the player's own arms, so punch and block clips are not needed:
 		// the body keeps its stance and the arms do whatever the player does, as it happens.
@@ -2581,14 +2581,7 @@ void AKSGameMode::DriveCharacters()
 			{
 				// The hit lands 0.09 s after the input, so the clip starts just before its impact frame.
 				const FPunchClip& Punch = PunchClips[(int32)PunchType[PunchArm]][PunchArm];
-				// Online the punch is in the air for a while (the other player must be able to answer it). It is drawn as
-				// the cabinet's fighter draws his (WindSnap): the tell at once, then the fist fired out fast, there when the
-				// other game's word on it arrives. (The clip was stretched evenly over the whole time, at 0.4 to 0.8 of its
-				// speed; player, 2026-11-15: "the punching motions look different and slow".)
-				const float Lead = OnlinePunchLead(PunchArm);
-				if (Lead > 0.f) PlayerDummy->PlayClip(Punch.Name, false, WindTell * Punch.Impact / FMath::Max(0.05f, WindSnap * Lead));
-				else PlayerDummy->PlayClip(Punch.Name, false, 1.25f, FMath::Max(0.f, Punch.Impact - 0.11f));
-				PlayerPunchStage = 0;
+				PlayerDummy->PlayClip(Punch.Name, false, 1.25f, FMath::Max(0.f, Punch.Impact - 0.11f));
 			}
 			else if (Key == TEXT("block")) PlayerDummy->PlayClip(TEXT("Block1"), true, 1.f, 0.6f);
 			else if (Key.StartsWith(TEXT("idle own")))
@@ -2598,23 +2591,8 @@ void AKSGameMode::DriveCharacters()
 			}
 			else PlayerDummy->PlayClip(TEXT("Combat_Stance"), true);
 		}
-		// Online: the tell is over, the fist goes; and once it is out the arm comes back at the speed it does offline.
-		if (PunchArm >= 0 && PlayerClipKey.StartsWith(TEXT("punch")) && OnlinePunchLead(PunchArm) > 0.f)
-		{
-			const FPunchClip& Punch = PunchClips[(int32)PunchType[PunchArm]][PunchArm];
-			const float Lead = OnlinePunchLead(PunchArm), U = (Clock - PunchStart[PunchArm]) / Lead;
-			const int32 Stage = U >= 1.f ? 2 : U >= WindSnap ? 1 : 0;
-			if (Stage > PlayerPunchStage)
-			{
-				const float Snap = (1.f - WindTell) * Punch.Impact / FMath::Max(0.05f, (1.f - WindSnap) * Lead);
-				PlayerDummy->SetClipRate(Stage == 1 ? Snap : 1.25f);
-				// For tools/check.sh: the fist must fly at least as fast as the clip was made, never in slow motion.
-				if (PlayerPunchStage == 0) UE_LOG(LogTemp, Display, TEXT("KSTEST online punch type=%d arm=%d lead=%.2f snap_rate=%.2f"), (int32)PunchType[PunchArm], PunchArm, Lead, Snap);
-				PlayerPunchStage = Stage;
-			}
-		}
 		// Aim the punch at the opponent's face when he is open, or at his guard when he is not.
-		if (PunchArm >= 0 && Clock - PunchStart[PunchArm] < 0.24f + OnlinePunchLead(PunchArm) && !bLost && OppState != EKSOppState::KO)
+		if (PunchArm >= 0 && Clock - PunchStart[PunchArm] < 0.24f && !bLost && OppState != EKSOppState::KO)
 		{
 			const FVector Away = (PlayerDummy->GetActorLocation() - OppDummy->GetActorLocation()).GetSafeNormal2D();
 			const bool bOpen = OppState == EKSOppState::Open || OppState == EKSOppState::KO || Clock < OppHurtUntil || (bOnline && RemoteDefense != EKSDefense::Block);
@@ -3295,6 +3273,11 @@ void AKSGameMode::OppAI()
 	}
 }
 
+int32 AKSGameMode::OutcomeOf(EKSPunch Type, EKSArm Side, EKSDefense Def) const
+{
+	return (int32)Outcome(Type, Side, Def);
+}
+
 void AKSGameMode::ResolveStrike()
 {
 	// Take the better of the defence held when the punch arrived and the one held now (camera delay).
@@ -3442,6 +3425,8 @@ void AKSGameMode::PlayerPunch(EKSArm Arm, EKSPunch Type)
 void AKSGameMode::LandHit(const FPendingHit& Hit, float FixedDamage)
 {
 	if (Phase != EKSPhase::Fight) return;
+	// For tools/check.sh: against another player the punch is settled on this screen, as soon as against the cabinet.
+	if (bOnline) UE_LOG(LogTemp, Display, TEXT("KSTEST online punch outcome=%s after=%.2f"), Hit.Mult > 0.f ? TEXT("H") : Hit.bSlipped ? TEXT("D") : TEXT("B"), Clock - PunchStart[(int32)Hit.Arm]);
 	if (Hit.Mult == 0.f && Hit.bSlipped)
 	{
 		// He leant out of its way: nothing is hit.
@@ -3485,7 +3470,8 @@ void AKSGameMode::LandHit(const FPendingHit& Hit, float FixedDamage)
 	if (Hit.bCounter) { Sfx(EKSSfx::Counter); Popup(TEXT("COUNTER!"), KSColors::Yellow, 0.56f, 0.3f, true); }
 	else Sfx(EKSSfx::Hit);   // the running combo is on the HUD's combo badge
 	if (OppHP > 0.f) { if (FMath::FRand() < (Hit.bCounter ? 0.7f : 0.4f)) Speak(OppDummy, TEXT("hurt")); else if (FMath::FRand() < 0.4f) Speak(PlayerDummy, TEXT("hit")); }
-	if (OppHP <= 0.f) EndFight(true, false);
+	// Against another player the knockout is his game's to call (OnlineResult): two punches that cross must not make two winners.
+	if (OppHP <= 0.f && !bOnline) EndFight(true, false);
 }
 
 void AKSGameMode::EndFight(bool bWin, bool bDecision)
@@ -3541,7 +3527,18 @@ void AKSGameMode::TickFight(float Dt)
 		{
 			// Test bot: defends correctly and punches every opening.
 			AutoDefense = EKSDefense::None;
-			if (!bAutoNoGuard && (!bOnline || bOnlineBotGuard) && (OppState == EKSOppState::Windup || OppState == EKSOppState::Strike))
+			if (bOnline)
+			{
+				// Against another player a punch is not seen coming: the bot holds a stance for a while, or none.
+				if (Clock >= AutoStanceUntil)
+				{
+					AutoStanceUntil = Clock + FMath::FRandRange(0.5f, 1.2f);
+					const float R = FMath::FRand();
+					AutoStance = bAutoNoGuard || R < 0.45f ? EKSDefense::None : R < 0.70f ? EKSDefense::Block : R < 0.82f ? EKSDefense::Duck : R < 0.91f ? EKSDefense::EvadeLeft : EKSDefense::EvadeRight;
+				}
+				AutoDefense = AutoStance;
+			}
+			else if (!bAutoNoGuard && (OppState == EKSOppState::Windup || OppState == EKSOppState::Strike))
 			{
 				AutoDefense = Attack.Type == EKSPunch::Straight ? EKSDefense::Block
 					: Attack.Type == EKSPunch::Hook ? (Attack.Side == EKSArm::Left ? EKSDefense::EvadeLeft : EKSDefense::EvadeRight) : EKSDefense::EvadeLeft;
@@ -3599,7 +3596,7 @@ void AKSGameMode::TickFight(float Dt)
 		}
 		for (int32 i = Pending.Num() - 1; i >= 0 && Phase == EKSPhase::Fight; i--)
 		{
-			if (Clock >= Pending[i].At) { const FPendingHit Hit = Pending[i]; Pending.RemoveAt(i); LandHit(Hit); }
+			if (Clock >= Pending[i].At) { const FPendingHit Hit = Pending[i]; Pending.RemoveAt(i); LandHit(Hit, Hit.Fixed); }
 		}
 		if (Phase == EKSPhase::Fight)
 		{

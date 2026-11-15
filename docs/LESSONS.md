@@ -434,6 +434,11 @@ One entry per bug that cost time: what happened, the cause, the rule. Add to it 
   saw fast punches against the cabinet and slow motion against a person. Rule: when a number or a way of drawing in
   the cabinet's fight changes, look for its twin in `KSGameModeOnline.cpp` in the same change; and a clip is never
   stretched evenly over a wait, it holds its tell and then goes at full speed.
+- **The player blamed the data for a delay that was a rule** (2026-11-15). Online punches were settled by the game of
+  the player being hit, after the punch had been "in the air" long enough to be answered: 0.5 to 0.8 s before the
+  thrower saw it land, of which the network was 0.17. The lines were already a few bytes. Rule: when a player says
+  "delay", add up where the time goes before touching the network, and say which part is a rule; a hit that is not
+  shown within a tenth of a second of the punch does not feel like a hit, whatever is fair to the other side.
 - **The film's words lay across a fighter's face** (player report, 2026-11-15). The caption was drawn on the picture,
   at 0.815 of the height, and in the shot of the seven walking at the camera the grandmother, the shortest of them,
   has her face exactly there. Rule: words over a picture nobody composed for them go in the bar, not on the picture;

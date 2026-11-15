@@ -447,7 +447,25 @@ Updated 2026-11-15. Deadline 2026-11-16 02:59 CET.
   online** (a special takes health off the other side locally, and online each game judges only its own health); the
   meters are not drawn there. A packaged Windows build was made on the Windows PC and two copies of it played an
   online bout on that one machine.
-- **Punches online no longer in slow motion** (2026-11-15; player: "the punching motions look different and slow", not
+- **The program has an icon** (2026-11-15 evening). `python art/ui/make_icon.py` (Pillow; no credits) draws "KO" in the
+  logo's manner with the bolt behind and writes `unreal/Build/Windows/Application.ico`, which Unreal puts into the
+  .exe when it packages (the one file of `unreal/Build` that is tracked), and `art/ui/out/icon.png` (1024) for the jam
+  page. Read back out of both packaged .exe files: it is in them. After changing the icon, delete
+  `unreal/Intermediate/Build/Win64/x64/KoSekai/Shipping/*.rc2.res` before packaging, to be sure it is compiled in again.
+- **A punch at another player lands at once** (2026-11-15 evening; player: "online has about 0.5 delay, it lacks
+  satisfaction and is weird to play ... on the other side just play this punch"). This replaces the entry below: the
+  punch is no longer in the air. The game of the player who throws it settles it at that moment, with the stance the
+  other player last reported, and shows it 0.09 s later exactly as against the cabinet (same clip, same speed). The
+  other game is told (`P <punch> <arm> <counter> <outcome> <damage>`), plays the punch at once (0.12 s), takes the
+  damage and answers with the health left (`R`). Each game still calls its own knockout, so punches that cross make a
+  double knockout, not two winners. The next punch can be thrown after 0.34, 0.42, 0.50 s (`Recover`).
+  **What it costs**: a punch cannot be answered once it is thrown; a defence has to be held already (block, duck,
+  lean), and the stance the thrower's game judges by is up to the link's delay old. `tools/check.sh`: every punch in
+  the three online matches logs how long after the throw it was shown, none may be over 0.25 s. The test bot online
+  now holds a stance for a while, or none. **Not verified**: how it plays between two people (bots only): whether
+  holding stances is a game, whether punching fast simply wins, the damage (3, 4.5, 6) and `Recover` are guesses for
+  this rule. Both players need a package with this change: the old and the new do not understand each other's `P`.
+- **Punches online no longer in slow motion** (superseded the same day by the entry above) (2026-11-15; player: "the punching motions look different and slow", not
   the network's delay). Two causes. The player's own punch clip was stretched evenly over the punch's whole time in the
   air (0.4 to 0.8 of its speed); it is now drawn as the cabinet's fighter draws his (`WindSnap`, `WindTell`): the tell at
   once, then the fist fired out at 1.5 to 2.8 times the clip's speed, out when the other game's answer is due (time in
