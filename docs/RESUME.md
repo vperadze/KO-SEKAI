@@ -438,6 +438,18 @@ Updated 2026-11-14. Deadline 2026-11-16 02:59 CET.
   online** (a special takes health off the other side locally, and online each game judges only its own health); the
   meters are not drawn there. A packaged Windows build was made on the Windows PC and two copies of it played an
   online bout on that one machine.
+- **Punches online no longer in slow motion** (2026-11-15; player: "the punching motions look different and slow", not
+  the network's delay). Two causes. The player's own punch clip was stretched evenly over the punch's whole time in the
+  air (0.4 to 0.8 of its speed); it is now drawn as the cabinet's fighter draws his (`WindSnap`, `WindTell`): the tell at
+  once, then the fist fired out at 1.5 to 2.8 times the clip's speed, out when the other game's answer is due (time in
+  the air plus the link's delay, `PunchLead`). And the times in the air (`Travel` in `KSGameModeOnline.cpp`) were still
+  0.45, 0.58, 0.70 from before the cabinet's wind-ups were made quicker; they are now the cabinet's 0.34, 0.44, 0.50,
+  so the other player's punches come as fast as the cabinet's and a punch can be thrown again sooner.
+  `tools/check.sh`: every punch of a player's own in the three online matches logs its speed and none may be under the
+  clip's own. **Not verified**: how it looks and feels to a person (logs and bot bouts only); whether 0.34 s plus the
+  grace is enough for a person to answer a jab over a real link. **Still different, and cannot be the same**: against
+  the cabinet a punch lands 0.09 s after it is thrown; against a person it has to be in the air long enough for him to
+  see it, so the fist starts with a tell instead of leaving at once.
 - **Specials against another player** (2026-11-14 night; player: "online fight lacks special fights, the fight should
   be the same in AI mode and online"). The special online is the cabinet's own (`StartSpecial`, `TickSpecial`,
   `SpecialLand`), not a copy: the same meter filled by the same things (2.5 times faster, `OnlineMeterBoost`, an online

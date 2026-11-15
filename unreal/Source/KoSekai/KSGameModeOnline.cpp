@@ -43,7 +43,10 @@
 
 namespace
 {
-	const float Travel[] = { 0.45f, 0.58f, 0.70f };        // seconds a jab, hook and uppercut are in the air
+	// Seconds a jab, hook and uppercut are in the air: the wind-ups of the cabinet's fighters (WindupSeconds in
+	// KSGameMode.cpp; keep the two alike). They were 0.45, 0.58, 0.70, left behind when the cabinet's were made quicker.
+	const float Travel[] = { 0.34f, 0.44f, 0.50f };
+	const float MaxPingLead = 0.25f;                       // the most of the link's delay the punch's drawing waits for
 	const float OnlineDamage[] = { 3.f, 4.5f, 6.f };       // out of 100 health. Half the first numbers (bouts were over too soon); a third made two bots take 72 s, up from 15
 	const float OnlineGrace = 0.14f;                       // the same grace as against the cabinet (Grace in KSGameMode.cpp)
 	const float Recovery = 0.20f;                          // after a punch has arrived, before the next can be thrown
@@ -506,7 +509,7 @@ void AKSGameMode::OnlineBeginMatch(int32 Mine, int32 Theirs, int32 Where)
 
 float AKSGameMode::OnlinePunchLead(int32 Arm) const
 {
-	return bOnline && Phase == EKSPhase::Fight ? Travel[(int32)PunchType[Arm]] + OnlineGrace : 0.f;
+	return bOnline && Phase == EKSPhase::Fight ? PunchLead[Arm] : 0.f;
 }
 
 bool AKSGameMode::OnlineCanPunch() const
@@ -519,6 +522,9 @@ void AKSGameMode::OnlinePunch(EKSArm Arm, EKSPunch Type)
 	// A punch thrown at a player who has just missed is a counter: his game will not let him defend it.
 	const bool bCounter = OppState == EKSOppState::Open;
 	OnlineReadyAt = Clock + Travel[(int32)Type] + OnlineGrace + Recovery;
+	// On this screen the fist is out when the other game's word on the punch is due: its time in the air there, and the
+	// way there and back.
+	PunchLead[(int32)Arm] = Travel[(int32)Type] + OnlineGrace + FMath::Clamp(OnlinePingMs / 1000.f, 0.f, MaxPingLead);
 	OnlineGuardDownUntil = Clock + GuardDown;
 	if (bCounter) Stats.Counters++;
 	if (Net) Net->Send(FString::Printf(TEXT("P %d %d %d"), (int32)Type, (int32)Arm, bCounter ? 1 : 0));

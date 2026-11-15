@@ -428,3 +428,9 @@ One entry per bug that cost time: what happened, the cause, the rule. Add to it 
   heredoc put `\r` and `\1` into `tools/check.sh` as a real carriage return and a control character; `bash -n` still
   said the file was fine. Rule: a script that writes backslashes is written to a file with the editor's own tool,
   never through a heredoc, and the lines it wrote are read back (`cat -A`) before they are trusted.
+- **The online fight kept its own copy of the cabinet's numbers and drawing, and fell behind** (2026-11-15). The
+  cabinet's wind-ups were made quicker three times and its punch drawn "tell, then snap"; the online bout had its own
+  times in the air (`Travel`) and its own way of drawing the player's punch (the clip stretched evenly), so the player
+  saw fast punches against the cabinet and slow motion against a person. Rule: when a number or a way of drawing in
+  the cabinet's fight changes, look for its twin in `KSGameModeOnline.cpp` in the same change; and a clip is never
+  stretched evenly over a wait, it holds its tell and then goes at full speed.

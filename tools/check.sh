@@ -134,6 +134,14 @@ check_pair() {
 	if [ -z "$sa$sc" ]; then fail "$what: no special was thrown by either player"
 	elif [ "$sa" = "$sb" ] && [ "$sc" = "$sd" ]; then pass "$what: specials were thrown and both games agree how each ended (host's: ${sa:-none}; guest's: ${sc:-none})"
 	else fail "$what: the games disagree about the specials (host threw '$sa', guest saw '$sb'; guest threw '$sc', host saw '$sd')"; fi
+	# The player's own punch online was drawn in slow motion (the clip stretched over the punch's whole time in the air).
+	# Each punch logs how fast its fist goes out: never slower than the clip was made, and out within a second.
+	local slow
+	n=$(cat "$host" "$guest" 2> /dev/null | grep -c "KSTEST online punch ")
+	slow=$(cat "$host" "$guest" 2> /dev/null | grep "KSTEST online punch " | tr -d "\r" | sed -n "s/.*lead=\([0-9.]*\) snap_rate=\([0-9.]*\).*/\1 \2/p" | awk '$2 < 1.0 || $1 > 1.0' | wc -l)
+	if [ "${n:-0}" -lt 1 ]; then fail "$what: no punch of a player's own was drawn"
+	elif [ "$slow" -eq 0 ]; then pass "$what: the players' own punches snap out at full speed ($n punches, none in slow motion)"
+	else fail "$what: $slow of $n punches were drawn in slow motion or took over a second"; fi
 	if grep -qE "Fatal error|Assertion failed|Ensure condition failed|Unhandled Exception" "$host" "$guest" 2> /dev/null; then fail "$what: a game crashed or failed an engine check"
 	else pass "$what: no crash in either game"; fi
 }

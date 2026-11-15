@@ -2573,11 +2573,14 @@ void AKSGameMode::DriveCharacters()
 			{
 				// The hit lands 0.09 s after the input, so the clip starts just before its impact frame.
 				const FPunchClip& Punch = PunchClips[(int32)PunchType[PunchArm]][PunchArm];
-				// Online the punch is in the air for a while (the other player must be able to answer it), so the clip is
-				// played from its start and stretched to have the fist out when the punch arrives over there.
+				// Online the punch is in the air for a while (the other player must be able to answer it). It is drawn as
+				// the cabinet's fighter draws his (WindSnap): the tell at once, then the fist fired out fast, there when the
+				// other game's word on it arrives. (The clip was stretched evenly over the whole time, at 0.4 to 0.8 of its
+				// speed; player, 2026-11-15: "the punching motions look different and slow".)
 				const float Lead = OnlinePunchLead(PunchArm);
-				if (Lead > 0.f) PlayerDummy->PlayClip(Punch.Name, false, Punch.Impact / (Lead + 0.05f));
+				if (Lead > 0.f) PlayerDummy->PlayClip(Punch.Name, false, WindTell * Punch.Impact / FMath::Max(0.05f, WindSnap * Lead));
 				else PlayerDummy->PlayClip(Punch.Name, false, 1.25f, FMath::Max(0.f, Punch.Impact - 0.11f));
+				PlayerPunchStage = 0;
 			}
 			else if (Key == TEXT("block")) PlayerDummy->PlayClip(TEXT("Block1"), true, 1.f, 0.6f);
 			else if (Key.StartsWith(TEXT("idle own")))
@@ -2586,6 +2589,21 @@ void AKSGameMode::DriveCharacters()
 				if (PlayerDummy->HasClip(Own)) PlayerDummy->PlayClip(Own, true, 1.f, FMath::FRandRange(0.f, FMath::Max(0.f, PlayerDummy->ClipSeconds(Own) - 1.5f)));
 			}
 			else PlayerDummy->PlayClip(TEXT("Combat_Stance"), true);
+		}
+		// Online: the tell is over, the fist goes; and once it is out the arm comes back at the speed it does offline.
+		if (PunchArm >= 0 && PlayerClipKey.StartsWith(TEXT("punch")) && OnlinePunchLead(PunchArm) > 0.f)
+		{
+			const FPunchClip& Punch = PunchClips[(int32)PunchType[PunchArm]][PunchArm];
+			const float Lead = OnlinePunchLead(PunchArm), U = (Clock - PunchStart[PunchArm]) / Lead;
+			const int32 Stage = U >= 1.f ? 2 : U >= WindSnap ? 1 : 0;
+			if (Stage > PlayerPunchStage)
+			{
+				const float Snap = (1.f - WindTell) * Punch.Impact / FMath::Max(0.05f, (1.f - WindSnap) * Lead);
+				PlayerDummy->SetClipRate(Stage == 1 ? Snap : 1.25f);
+				// For tools/check.sh: the fist must fly at least as fast as the clip was made, never in slow motion.
+				if (PlayerPunchStage == 0) UE_LOG(LogTemp, Display, TEXT("KSTEST online punch type=%d arm=%d lead=%.2f snap_rate=%.2f"), (int32)PunchType[PunchArm], PunchArm, Lead, Snap);
+				PlayerPunchStage = Stage;
+			}
 		}
 		// Aim the punch at the opponent's face when he is open, or at his guard when he is not.
 		if (PunchArm >= 0 && Clock - PunchStart[PunchArm] < 0.24f + OnlinePunchLead(PunchArm) && !bLost && OppState != EKSOppState::KO)

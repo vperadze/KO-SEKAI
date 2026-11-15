@@ -492,6 +492,8 @@ private:
 	FAttack Attack;
 	TArray<FPendingHit> Pending;
 	float PunchStart[2] = { -10.f, -10.f };
+	float PunchLead[2] = { 0.f, 0.f };              // online: how long that punch is in the air on this screen (OnlinePunch)
+	int32 PlayerPunchStage = 0;                     // online: 0 the tell, 1 the fist snapping out, 2 out and coming back
 	EKSPunch PunchType[2] = { EKSPunch::Straight, EKSPunch::Straight };
 	float Shake = 0.f;
 	bool bFightStarted = false;
