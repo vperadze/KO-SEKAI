@@ -434,3 +434,12 @@ One entry per bug that cost time: what happened, the cause, the rule. Add to it 
   saw fast punches against the cabinet and slow motion against a person. Rule: when a number or a way of drawing in
   the cabinet's fight changes, look for its twin in `KSGameModeOnline.cpp` in the same change; and a clip is never
   stretched evenly over a wait, it holds its tell and then goes at full speed.
+- **The film's words lay across a fighter's face** (player report, 2026-11-15). The caption was drawn on the picture,
+  at 0.815 of the height, and in the shot of the seven walking at the camera the grandmother, the shortest of them,
+  has her face exactly there. Rule: words over a picture nobody composed for them go in the bar, not on the picture;
+  the check now compares the caption's top with where the picture ends.
+- **The engine wrote "Preparing textures (N)" in the top left corner of the select screen** (player report,
+  2026-11-15). Run from the editor's program, the engine draws its own notices (assets still being prepared, shader
+  counts, streaming warnings) over the game whenever it has work, which is when a fighter is first shown. Rule: a
+  game somebody plays switches the engine's screen messages off at the start (`GAreScreenMessagesEnabled`); our own
+  messages go to the log or the HUD.

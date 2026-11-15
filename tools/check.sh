@@ -357,6 +357,10 @@ run_until 1 "KSTEST announcer line=round" 150 "$LOG" -KSAuto -KSNoCamera
 grep -q "KSTEST ui menu shown background=1 logo=1" "$LOG" 2> /dev/null && pass "the start menu is drawn with its background and logo" || fail "the start menu was not drawn, or its pictures are missing"
 line=$(grep "KSTEST intro shown " "$LOG" 2> /dev/null | head -1 | tr -d "\r")
 [ -n "$line" ] && [ "$(field "$line" shots)" -ge 1 ] && [ "$(field "$line" shots)" = "$(field "$line" loaded)" ] && pass "the opening film plays: $(field "$line" shots) shots, every sheet loaded" || fail "the opening film is missing pictures (${line:-it was never shown})"
+# The bug this guards: the caption lay across the grandmother's face in the shot of the seven walking at the camera.
+awk "BEGIN{exit !(\"$(field "$line" caption_top)\" != \"\" && $(field "$line" caption_top)+0 >= $(field "$line" picture_bottom)+0)}" && pass "the film's words stand in the lower bar, off the picture (top at $(field "$line" caption_top), picture ends at $(field "$line" picture_bottom))" || fail "the film's words stand on the picture (${line:-it was never shown})"
+# The bug this guards: the engine wrote "Preparing textures" in the top left corner of the select screen.
+grep -q "KSTEST engine_notices on=0" "$LOG" 2> /dev/null && pass "the engine's own notices are not drawn over the game" || fail "the engine's notices (\"Preparing textures\") can be drawn over the game"
 grep -q "KSTEST intro ended" "$LOG" 2> /dev/null && pass "the opening film hands over to the start menu" || fail "the opening film never ended"
 grep -q "KSTEST menu chosen=0" "$LOG" 2> /dev/null && pass "the start menu's first line starts the fights" || fail "the start menu did not start the game"
 

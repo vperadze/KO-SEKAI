@@ -185,6 +185,11 @@ AKSGameMode::AKSGameMode()
 void AKSGameMode::BeginPlay()
 {
 	Super::BeginPlay();
+	// The engine's own notices ("Preparing textures (12)", shader counts, streaming warnings) are written in the top left
+	// corner over the game; the player saw them on the select screen (2026-11-15). Nothing of ours is drawn that way.
+	GAreScreenMessagesEnabled = false;
+	if (GEngine) GEngine->bEnableOnScreenDebugMessages = false;
+	UE_LOG(LogTemp, Display, TEXT("KSTEST engine_notices on=%d"), GAreScreenMessagesEnabled ? 1 : 0);   // for tools/check.sh
 	TrackingSubsystem = GetGameInstance()->GetSubsystem<UKSTrackingSubsystem>();
 
 	const TCHAR* Cmd = FCommandLine::Get();
@@ -977,7 +982,7 @@ void AKSGameMode::TickStreet(float Dt)
 	if (Street.ScreenText) Street.ScreenText->GetTextRender()->SetText(FText::FromString(Near > 0.45f ? TEXT("I SEE\nYOU") : TEXT("INSERT\nYOURSELF")));
 
 	const float X = WalkPos.X;
-	Subtitle = X < 500 ? TEXT("1987. The fighting game KO-SEKAI is cancelled three weeks before launch.")
+	Subtitle = X < 500 ? TEXT("1985. The fighting game KO-SEKAI is cancelled three weeks before launch.")
 		: X < 1250 ? TEXT("Its whole roster is cut. Nobody ever gets to play them.")
 		: X < 2000 ? TEXT("Every cabinet is recalled and scrapped.")
 		: X < 2700 ? TEXT("Every cabinet but one.")
@@ -3656,7 +3661,7 @@ void AKSGameMode::TickEnding(float Dt)
 	Pawn->SetView(Pos, (FVector(FKSStreet::CabinetX, 0, 120.f) - Pos).Rotation(), 75.f);
 	Subtitle = PhaseTime < 4.f ? TEXT("You are back on the street. The screen is dark.")
 		: PhaseTime < 8.f ? TEXT("The fighters nobody was meant to see finally got their match.")
-		: PhaseTime < 12.f ? TEXT("The cabinet has what it waited thirty-nine years for: a player.")
+		: PhaseTime < 12.f ? TEXT("The cabinet has what it waited forty-one years for: a player.")
 		: TEXT("KO-SEKAI   -   thank you for playing");
 	Prompt = PhaseTime > 6.f ? TEXT("Press ENTER for the menu") : TEXT("");
 	if ((PhaseTime > 6.f && ConfirmPressed()) || (bAuto && PhaseTime > 16.f)) ToMenu();

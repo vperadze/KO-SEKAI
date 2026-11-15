@@ -20,11 +20,11 @@ FPS, W, H, SHEET = 12, 640, 360, 4096
 COLS, ROWS = SHEET // W, SHEET // H            # 6 x 11 = 66 frames, five and a half seconds
 # The film in order: clip name and the words shown under it.
 FILM = [
-    ('city',      "1987."),
+    ('city',      "1985."),
     ('fighters',  "KO-SEKAI. SEVEN FIGHTERS. THE GREATEST GAME NEVER RELEASED."),
     ('cancelled', "CANCELLED. THREE WEEKS BEFORE LAUNCH."),
     ('alley',     "ONE CABINET SURVIVED."),
-    ('fists',     "IT HAS WAITED 39 YEARS FOR A CHALLENGER."),
+    ('fists',     "IT HAS WAITED 41 YEARS FOR A CHALLENGER."),
     ('pull',      "INSERT YOURSELF."),
 ]
 

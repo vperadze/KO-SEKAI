@@ -1,9 +1,15 @@
 # Where things stand
 
-Updated 2026-11-14. Deadline 2026-11-16 02:59 CET.
+Updated 2026-11-15. Deadline 2026-11-16 02:59 CET.
 
 ## Works (checked by `tools/check.sh` or seen in a self-playing fight)
 
+- 2026-11-15: the opening film's words stand in the lower black bar (they covered the grandmother's face in the
+  walking shot), and the engine's corner notices ("Preparing textures") are switched off. Both checked by log line;
+  **not seen by the player yet**, and the notice only ever appeared while textures were being prepared, so its
+  absence was not watched happening.
+  The story's year is 1985 now (film, menu line, ending; "41 years"), at the player's request. The jam trailer in
+  `art/trailer` still says 1987, in its caption and in the spoken line.
 - Seven fighters, random player fighter, ladder of three random opponents.
 - Punches connect: aimed clips, recoil, hit-stop, flash, sound, camera shake.
 - Smooth transitions between clips, with momentum carried over.

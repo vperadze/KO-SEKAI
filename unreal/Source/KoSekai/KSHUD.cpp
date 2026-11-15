@@ -461,7 +461,10 @@ void AKSHUD::DrawIntro(const AKSGameMode& G)
 	Fill(0.f, 0.f, 1.f, 0.085f, FLinearColor::Black);
 	Fill(0.f, 0.915f, 1.f, 0.085f, FLinearColor::Black);
 	const float Rise = FMath::Clamp((T - 0.25f) / 0.2f, 0.f, 1.f);
-	Text(Shot.Caption, 0.5f, 0.815f + 0.02f * (1.f - Rise), 40.f, FLinearColor(1.f, 0.9f, 0.3f, Rise), 0, EKSFont::Comic, 3.f, FLinearColor(0.04f, 0.f, 0.10f, 0.95f * Rise), 0.92f);
+	// The words stand in the lower bar, not on the picture: at 0.815 of the height they lay across the grandmother's
+	// face while the seven walk at the camera (player report, 2026-11-15). Narrow enough to leave the skip hint alone.
+	const float CapY = 0.9575f, CapPx = 32.f, CapW = 0.74f, BarTop = 0.915f;
+	Text(Shot.Caption, 0.5f, CapY + 0.008f * (1.f - Rise), CapPx, FLinearColor(1.f, 0.9f, 0.3f, Rise), 0, EKSFont::Comic, 3.f, FLinearColor(0.04f, 0.f, 0.10f, 0.95f * Rise), CapW);
 	// Steady, and worded by whether a camera is plugged in, not by whether it sees a body this frame: the first version
 	// blinked on a timer and swapped its words whenever the tracker lost or found the player ("jab, enter, jab, enter").
 	// Enter only since 2026-11-14: the webcam is shut until the player switches it on in the menu.
@@ -473,7 +476,10 @@ void AKSHUD::DrawIntro(const AKSGameMode& G)
 	{
 		bLoggedIntro = true; int32 Loaded = 0;
 		for (UTexture2D* Sheet : CineSheets) Loaded += Sheet ? 1 : 0;
-		UE_LOG(LogTemp, Display, TEXT("KSTEST intro shown shots=%d loaded=%d"), Count, Loaded);   // for tools/check.sh
+		// How high the tallest caption reaches, against where the picture ends: it must not stand on the picture.
+		float CapTop = 1.f;
+		for (const FKSCineShot& Each : KSCineShots) CapTop = FMath::Min(CapTop, CapY - TextSize(Each.Caption, Fit(Each.Caption, CapPx, EKSFont::Comic, CapW), EKSFont::Comic).Y * 0.5f / SH);
+		UE_LOG(LogTemp, Display, TEXT("KSTEST intro shown shots=%d loaded=%d caption_top=%.3f picture_bottom=%.3f"), Count, Loaded, CapTop, BarTop);   // for tools/check.sh
 	}
 }
 
@@ -758,7 +764,7 @@ void AKSHUD::DrawMenu(const AKSGameMode& G)
 	Label(bPunches ? TEXT("UP / DOWN  or  SWEEP A HAND UP / DOWN  choose          ENTER  or  JAB LEFT + RIGHT  select")
 		: TEXT("UP / DOWN  choose          ENTER  select"), 0.5f, 0.912f, 0.8f, Faded(Lilac, In), 0, 0.94f);
 	if (FMath::Frac(Now * 0.8f) < 0.62f) Label(TEXT("INSERT YOURSELF"), 0.5f, 0.955f, 0.95f, Faded(Yellow, In));
-	Label(TEXT("(C) 1987   CANCELLED BEFORE LAUNCH"), 0.015f, 0.975f, 0.6f, Faded(Muted, In), -1);
+	Label(TEXT("(C) 1985   CANCELLED BEFORE LAUNCH"), 0.015f, 0.975f, 0.6f, Faded(Muted, In), -1);
 
 	// Scan lines, as on the tube of an old cabinet.
 	for (float Y = 0.f; Y < SH; Y += 4.f * Unit) DrawRect(FLinearColor(0.f, 0.f, 0.f, 0.13f), 0.f, Y, SW, 1.5f * Unit);
