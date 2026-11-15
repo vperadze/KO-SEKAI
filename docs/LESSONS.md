@@ -443,3 +443,8 @@ One entry per bug that cost time: what happened, the cause, the rule. Add to it 
   counts, streaming warnings) over the game whenever it has work, which is when a fighter is first shown. Rule: a
   game somebody plays switches the engine's screen messages off at the start (`GAreScreenMessagesEnabled`); our own
   messages go to the log or the HUD.
+- **The film was silent apart from the music, though every shot came with a sound of its own** (player, 2026-11-15).
+  `prep_cinematic.py` took only the pictures of Dreamina's clips. Rule: when a bought clip is cut up for the game,
+  look at what else is in the file before it is put away. The sounds are joined by `art/cinematic/prep_cine_sound.py`;
+  two of them carry a low pulse like a beat, which is cut away there so that it does not fight the music, and the
+  shot of the seven walking came with music of its own (the player heard it; the figures did not show it) and is silent.

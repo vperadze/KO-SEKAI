@@ -361,6 +361,8 @@ line=$(grep "KSTEST intro shown " "$LOG" 2> /dev/null | head -1 | tr -d "\r")
 awk "BEGIN{exit !(\"$(field "$line" caption_top)\" != \"\" && $(field "$line" caption_top)+0 >= $(field "$line" picture_bottom)+0)}" && pass "the film's words stand in the lower bar, off the picture (top at $(field "$line" caption_top), picture ends at $(field "$line" picture_bottom))" || fail "the film's words stand on the picture (${line:-it was never shown})"
 # The bug this guards: the engine wrote "Preparing textures" in the top left corner of the select screen.
 grep -q "KSTEST engine_notices on=0" "$LOG" 2> /dev/null && pass "the engine's own notices are not drawn over the game" || fail "the engine's notices (\"Preparing textures\") can be drawn over the game"
+line=$(grep "KSTEST music track=Cine " "$LOG" 2> /dev/null | head -1 | tr -d "\r")
+[ "$(field "$line" loaded)" = 1 ] && [ "$(field "$line" seconds)" -ge 27 ] && [ "$(field "$line" seconds)" -le 30 ] && pass "the opening film has its own sound, as long as the film ($(field "$line" seconds) s)" || fail "the opening film's sound is missing or not the film's length (${line:-never asked for}); run art/cinematic/prep_cine_sound.py and art/tools/import_voice_faces.py"
 grep -q "KSTEST intro ended" "$LOG" 2> /dev/null && pass "the opening film hands over to the start menu" || fail "the opening film never ended"
 grep -q "KSTEST menu chosen=0" "$LOG" 2> /dev/null && pass "the start menu's first line starts the fights" || fail "the start menu did not start the game"
 

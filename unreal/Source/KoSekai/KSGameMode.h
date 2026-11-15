@@ -417,6 +417,7 @@ private:
 	float NextCrowdVoiceAt = 0.f, NextShoutAt = 0.f, NextBeastAt = 0.f, NextWaveAt = 0.f;
 	int32 CrowdTwice = 0;                                         // spectators dealt a second time (must stay 0), for the self-check
 	int32 CrowdMovesSeen = 0, CrowdPosesSeen = 0;                 // bit sets, for the self-check
+	UPROPERTY() TObjectPtr<class UAudioComponent> FilmPlayer;     // the opening film's own sound (M_Cine)
 	UPROPERTY() TObjectPtr<class UAudioComponent> CrowdPlayer;    // the murmur under everything
 	// Arena effects (lamps and lasers live in FKSArena; see TickArenaFx).
 	struct FConfetti { TWeakObjectPtr<AActor> Actor; FVector Pos = FVector::ZeroVector, Vel = FVector::ZeroVector; FRotator Spin = FRotator::ZeroRotator; float Phase = 0.f; bool bLive = false; };

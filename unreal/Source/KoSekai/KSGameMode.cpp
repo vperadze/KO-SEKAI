@@ -313,6 +313,9 @@ void AKSGameMode::SetPhase(EKSPhase NewPhase)
 	KSAudio::Crowd(this, CrowdPlayer, Phase == EKSPhase::Fight ? 0.2f : Level > 0.f ? 0.14f : 0.f);
 	// The start menu plays the fight music too, without the crowd.
 	if (Phase == EKSPhase::Menu || Phase == EKSPhase::Intro || Phase == EKSPhase::Select || Phase == EKSPhase::Online || Phase == EKSPhase::Controls) { MusicLevel = Phase == EKSPhase::Intro ? 0.34f : 0.26f; PlayMusic(); }
+	// The film has a sound of its own beside the music: what was under each shot when it was made (M_Cine, from
+	// art/cinematic/prep_cine_sound.py), from the top each time the film starts and faded away when it is left.
+	KSAudio::Music(this, FilmPlayer, Phase == EKSPhase::Intro ? 0.5f : 0.f, 0.3f, TEXT("Cine"));
 	// Choosing a fighter happens in the hall, so the hall is heard.
 	if (Phase == EKSPhase::Select) KSAudio::Crowd(this, CrowdPlayer, 0.12f);
 }

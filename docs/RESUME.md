@@ -10,6 +10,9 @@ Updated 2026-11-15. Deadline 2026-11-16 02:59 CET.
   absence was not watched happening.
   The story's year is 1985 now (film, menu line, ending; "41 years"), at the player's request. The jam trailer in
   `art/trailer` still says 1987, in its caption and in the spoken line.
+- 2026-11-15: the opening film has its own sound beside the music (`M_Cine`, the six shots' own soundtracks levelled
+  and joined by `art/cinematic/prep_cine_sound.py`). Loading and length are checked. The player listened to it:
+  good, except the shot of the seven walking, whose take had music in it; that shot is silent now (**not heard again since**).
 - Seven fighters, random player fighter, ladder of three random opponents.
 - Punches connect: aimed clips, recoil, hit-stop, flash, sound, camera shake.
 - Smooth transitions between clips, with momentum carried over.

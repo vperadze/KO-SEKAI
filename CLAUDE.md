@@ -130,6 +130,9 @@ New music: edit and run `python3 art/tools/music.py` (the fight loop; numpy only
 `python3 art/tools/music_arenas.py` (the ten arena loops, planned in `docs/ARENAS.md`), then `art/tools/import_voice_faces.py`
 headless; no rebuild needed.
 
+The film's own sound (`M_Cine`, under the opening film beside the music): `~/ielts-listening/.venv/bin/python art/cinematic/prep_cine_sound.py`
+(levels per shot are in its `SHOTS` table), then `art/tools/import_voice_faces.py` headless; no rebuild.
+
 New spectators or crowd sounds: `art/tracker-model/venv/bin/python art/arena/gen_crowd_real.py quote|run <ceiling> [name]`
 (the realistic eight-pose sheets, 2 credits each; `gen_crowd.py` made the old pixel ones) and `gen_crowd_sound.py` (Dreamina, credits), then
 `art/tracker-model/venv/bin/python art/arena/slice_crowd.py` (rewrites `KSCrowdData.h`: rebuild) and
