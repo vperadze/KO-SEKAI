@@ -28,7 +28,7 @@ struct FKSArenaDef
 };
 
 static const FKSArenaDef KSArenas[] = {
-	{ TEXT(""), TEXT("K O - S E K A I   1 9 8 7   U N R E L E A S E D"), TEXT("Fight"),
+	{ TEXT(""), TEXT("K O - S E K A I   1 9 8 5   U N R E L E A S E D"), TEXT("Fight"),
 	  FLinearColor(0.02f, 0.80f, 1.0f), FLinearColor(1.0f, 0.06f, 0.45f), FLinearColor(1.0f, 0.76f, 0.08f),
 	  FLinearColor(0.012f, 0.004f, 0.03f), FLinearColor(0.5f, 0.3f, 0.9f), FLinearColor(0.035f, 0.005f, 0.075f), 0.010f,
 	  FLinearColor(1.f, 1.f, 1.f), EKSMote::None, 0, FLinearColor::White, 0.f, EKSPulse::None, -1, TEXT("") },
